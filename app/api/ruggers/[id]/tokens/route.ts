@@ -94,61 +94,33 @@ export async function POST(
     return NextResponse.json({ error: 'No tokens provided' }, { status: 400 });
   }
 
-  const cleaned: Token[] = payload
-    .filter((item): item is Token => {
-      if (typeof item !== 'object' || item === null) return false;
-      const candidate = item as Token;
-      return (
-        typeof candidate.name === 'string' &&
-        typeof candidate.entryPrice === 'number' &&
-        typeof candidate.high === 'number' &&
-        typeof candidate.low === 'number' &&
-        typeof candidate.targetExitPercent === 'number'
-      );
-    })
-    .map((token) => ({
-      ...token,
-      id: token.id ?? crypto.randomUUID(),
-    }));
+  const cleaned = payload.filter((item): item is Token => {
+    if (typeof item !== 'object' || item === null) return false;
+    const candidate = item as Token;
+    return (
+      typeof candidate.name === 'string' &&
+      typeof candidate.entryPrice === 'number' &&
+      typeof candidate.high === 'number' &&
+      typeof candidate.low === 'number' &&
+      typeof candidate.targetExitPercent === 'number'
+    );
+  });
 
   if (cleaned.length === 0) {
     return NextResponse.json({ error: 'No valid tokens' }, { status: 400 });
   }
 
-  // For simplicity: replace existing tokens for this rugger.
-  await query<DbToken>('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
+  await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
 
-  const values: (string | number)[] = [];
-  const valuePlaceholders: string[] = [];
-
-  cleaned.forEach((token, index) => {
-    const base = index * 6;
-    valuePlaceholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`
-    );
-    values.push(
-      token.id,
-      ruggerId,
-      token.name,
-      token.entryPrice,
-      token.high,
-      token.low,
-      // target_exit_percent is added separately, see below
-    );
-  });
-
-  // Adjust values: easier to push in a simple loop with all 7 fields.
   const rowsToInsert: (string | number)[] = [];
   const placeholders: string[] = [];
   cleaned.forEach((token, index) => {
     const base = index * 7;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${
-        base + 7
-      })`
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
     );
     rowsToInsert.push(
-      token.id,
+      crypto.randomUUID(),
       ruggerId,
       token.name,
       token.entryPrice,
