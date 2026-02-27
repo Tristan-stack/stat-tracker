@@ -30,16 +30,17 @@ export default function RuggerPage() {
   }, []);
 
   useEffect(() => {
-    void loadRuggers();
+    queueMicrotask(() => void loadRuggers());
   }, [loadRuggers]);
 
   useEffect(() => {
-    if (editingRugger) {
+    if (!editingRugger) return;
+    queueMicrotask(() => {
       setEditName(editingRugger.name ?? '');
       setEditDescription(editingRugger.description ?? '');
       setEditWalletAddress(editingRugger.walletAddress);
       setEditWalletType(editingRugger.walletType);
-    }
+    });
   }, [editingRugger]);
 
   const handleCreateRugger = useCallback(
