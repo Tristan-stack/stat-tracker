@@ -20,6 +20,8 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
   const [description, setDescription] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
   const [walletType, setWalletType] = useState<WalletType>('simple');
+  const [volumeMin, setVolumeMin] = useState('');
+  const [volumeMax, setVolumeMax] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -28,6 +30,8 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
     setDescription('');
     setWalletAddress('');
     setWalletType('simple');
+    setVolumeMin('');
+    setVolumeMax('');
     setError('');
   }, []);
 
@@ -39,15 +43,29 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
       setError('');
 
       try {
+        const toNum = (s: string) =>
+          s.trim() === '' ? null : (Number.isFinite(Number(s)) ? Number(s) : null);
+        const payload: {
+          name: string | null;
+          description: string | null;
+          walletAddress: string;
+          walletType: WalletType;
+          volumeMin?: number | null;
+          volumeMax?: number | null;
+        } = {
+          name: name.trim() || null,
+          description: description.trim() || null,
+          walletAddress: walletAddress.trim(),
+          walletType,
+        };
+        if (walletType === 'exchange' || walletType === 'mother') {
+          payload.volumeMin = toNum(volumeMin) ?? null;
+          payload.volumeMax = toNum(volumeMax) ?? null;
+        }
         const ruggerRes = await fetch('/api/ruggers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: name.trim() || null,
-            description: description.trim() || null,
-            walletAddress: walletAddress.trim(),
-            walletType,
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (!ruggerRes.ok) {
@@ -78,7 +96,7 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
         setIsSubmitting(false);
       }
     },
-    [name, description, walletAddress, walletType, tokens, resetForm, router]
+    [name, description, walletAddress, walletType, volumeMin, volumeMax, tokens, resetForm, router]
   );
 
   if (tokens.length === 0) return null;
@@ -142,17 +160,6 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="create-rugger-wallet">Adresse du wallet</Label>
-                  <Input
-                    id="create-rugger-wallet"
-                    value={walletAddress}
-                    onChange={(e) => setWalletAddress(e.target.value)}
-                    placeholder="0x..."
-                    required
-                    disabled={isSubmitting}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="create-rugger-type">Type de wallet</Label>
                   <select
                     id="create-rugger-type"
@@ -165,6 +172,44 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
                   </select>
+                </div>
+                {(walletType === 'exchange' || walletType === 'mother') && (
+                  <div className="space-y-2">
+                    <Label>Intervalle volume</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="create-rugger-volume-min"
+                        type="number"
+                        step="any"
+                        value={volumeMin}
+                        onChange={(e) => setVolumeMin(e.target.value)}
+                        placeholder="Premier"
+                        className="max-w-28"
+                        disabled={isSubmitting}
+                      />
+                      <Input
+                        id="create-rugger-volume-max"
+                        type="number"
+                        step="any"
+                        value={volumeMax}
+                        onChange={(e) => setVolumeMax(e.target.value)}
+                        placeholder="Deuxième"
+                        className="max-w-28"
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="create-rugger-wallet">Adresse du wallet</Label>
+                  <Input
+                    id="create-rugger-wallet"
+                    value={walletAddress}
+                    onChange={(e) => setWalletAddress(e.target.value)}
+                    placeholder="0x..."
+                    required
+                    disabled={isSubmitting}
+                  />
                 </div>
 
                 {error !== '' && (
