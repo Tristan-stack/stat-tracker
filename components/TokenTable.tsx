@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics } from '@/types/token';
 import { Trash2 } from 'lucide-react';
 
@@ -18,9 +19,10 @@ function formatPercent(value: number): string {
 export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onRemove: (id: string) => void;
+  onChangeTarget: (id: string, nextPercent: number) => void;
 }
 
-export function TokenTable({ tokens, onRemove }: TokenTableProps) {
+export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps) {
   return (
     <div className="overflow-x-auto rounded-xl border">
       <table className="w-full text-sm">
@@ -31,7 +33,6 @@ export function TokenTable({ tokens, onRemove }: TokenTableProps) {
             <th className="px-5 py-4 text-right font-medium">Plus haut</th>
             <th className="px-5 py-4 text-right font-medium">Plus bas</th>
             <th className="px-5 py-4 text-right font-medium">Objectif %</th>
-            <th className="px-5 py-4 text-right font-medium">Prix cible</th>
             <th className="px-5 py-4 text-right font-medium">Gain actuel</th>
             <th className="px-5 py-4 text-right font-medium">Gain max</th>
             <th className="px-5 py-4 text-right font-medium">Perte max</th>
@@ -46,8 +47,23 @@ export function TokenTable({ tokens, onRemove }: TokenTableProps) {
               <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.entryPrice)}</td>
               <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.high)}</td>
               <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.low)}</td>
-              <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.targetExitPercent)} %</td>
-              <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.targetExitPrice)}</td>
+              <td className="px-5 py-4 text-right tabular-nums">
+                <div className="flex items-center justify-end gap-2">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    className="h-8 w-20 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums"
+                    value={t.targetExitPercent.toString()}
+                    onChange={(e) => {
+                      const normalized = e.target.value.replace(',', '.');
+                      const n = Number(normalized);
+                      if (!Number.isFinite(n) || n < 0) return;
+                      onChangeTarget(t.id, n);
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">%</span>
+                </div>
+              </td>
               <td className="px-5 py-4 text-right tabular-nums text-green-600 dark:text-green-400">
                 {formatPercent(t.targetExitPercent)}
               </td>

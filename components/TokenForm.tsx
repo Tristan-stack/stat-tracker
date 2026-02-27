@@ -97,14 +97,30 @@ export function TokenForm({ onAdd }: TokenFormProps) {
         </div>
         <div className="space-y-2">
           <Label htmlFor="target">Objectif sortie %</Label>
-          <Input
-            id="target"
-            inputMode="decimal"
-            placeholder="100"
-            value={targetExitPercent}
-            onChange={(e) => setTargetExitPercent(e.target.value)}
-            required
-          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              id="target"
+              inputMode="decimal"
+              placeholder="100"
+              value={targetExitPercent}
+              onChange={(e) => setTargetExitPercent(e.target.value)}
+              required
+              className="sm:max-w-[120px]"
+            />
+            <div className="flex flex-wrap gap-2">
+              {['100', '110', '120', '150'].map((value) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTargetExitPercent(value)}
+                >
+                  {value} %
+                </Button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="flex items-end">
           <Button type="submit" className="w-full sm:w-auto">

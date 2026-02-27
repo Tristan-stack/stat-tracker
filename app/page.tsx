@@ -34,6 +34,14 @@ export default function Home() {
     setTokens((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const handleChangeTarget = useCallback((id: string, nextPercent: number) => {
+    setTokens((prev) =>
+      prev.map((token) =>
+        token.id === id ? { ...token, targetExitPercent: nextPercent } : token
+      )
+    );
+  }, []);
+
   const tokensWithMetrics = tokens.map(getTokenWithMetrics);
 
   return (
@@ -59,7 +67,11 @@ export default function Home() {
               Aucun token. Ajoute-en un avec le formulaire ci-dessus.
             </p>
           ) : (
-            <TokenTable tokens={tokensWithMetrics} onRemove={handleRemove} />
+            <TokenTable
+              tokens={tokensWithMetrics}
+              onRemove={handleRemove}
+              onChangeTarget={handleChangeTarget}
+            />
           )}
         </section>
       </div>
