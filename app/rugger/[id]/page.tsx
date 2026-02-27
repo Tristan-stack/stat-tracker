@@ -244,7 +244,7 @@ export default function RuggerDetailPage() {
   }
 
   return (
-    <div className="space-y-8 p-6 sm:p-8">
+    <div className="space-y-10 p-6 sm:p-8">
       <header className="space-y-4">
         <Link
           href="/rugger"
@@ -287,6 +287,11 @@ export default function RuggerDetailPage() {
                 <p className="text-sm text-muted-foreground">{rugger.description}</p>
               )
             ) : null}
+            {(rugger.volumeMin != null || rugger.volumeMax != null) && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+              </p>
+            )}
             <p className="font-mono text-sm text-muted-foreground">
               {rugger.walletAddress}
             </p>
@@ -397,11 +402,12 @@ export default function RuggerDetailPage() {
         </div>
       )}
 
-      <StatsSummary tokens={allTokensForStats} />
+      <div className="space-y-8">
+        <StatsSummary tokens={allTokensForStats} />
 
-      <TokenImportExport tokens={allTokensForStats} onImport={handleImportTokens} />
+        <TokenImportExport tokens={allTokensForStats} onImport={handleImportTokens} />
 
-      <section className="space-y-4">
+        <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold">Tokens</h2>
@@ -488,6 +494,7 @@ export default function RuggerDetailPage() {
           </>
         )}
       </section>
+      </div>
     </div>
   );
 }
