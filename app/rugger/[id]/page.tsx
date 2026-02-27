@@ -260,7 +260,7 @@ export default function RuggerDetailPage() {
   }
 
   return (
-    <div className="space-y-10 p-6 sm:p-8">
+    <div className="min-w-0 overflow-x-hidden space-y-10 p-6 sm:p-8">
       <header className="space-y-4">
         <Link
           href="/rugger"
@@ -269,10 +269,10 @@ export default function RuggerDetailPage() {
           <IconArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight sm:text-3xl">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-3">
+              <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
                 {rugger.name ?? `${rugger.walletAddress.slice(0, 10)}…`}
               </h1>
               <span
@@ -291,8 +291,8 @@ export default function RuggerDetailPage() {
             </div>
             <div
               className={cn(
-                'min-w-0 wrap-break-word',
-                !isHeaderExpanded && 'max-h-24 overflow-hidden sm:max-h-none sm:overflow-visible',
+                'min-w-0 overflow-x-hidden',
+                !isHeaderExpanded && 'max-h-24 overflow-y-hidden sm:max-h-none sm:overflow-visible',
                 isHeaderExpanded && 'max-h-[50vh] overflow-y-auto'
               )}
             >
@@ -302,7 +302,7 @@ export default function RuggerDetailPage() {
                     href={rugger.description.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="break-all text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+                    className="block truncate text-sm text-primary underline underline-offset-2 hover:text-primary/80"
                   >
                     {rugger.description}
                   </a>
@@ -311,21 +311,21 @@ export default function RuggerDetailPage() {
                 )
               ) : null}
               {(rugger.volumeMin != null || rugger.volumeMax != null) && (
-                <p className="mt-3 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm text-muted-foreground">
                   Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
                 </p>
               )}
               {(rugger.startHour != null || rugger.endHour != null) && (
-                <p className="mt-3 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm text-muted-foreground">
                   Intervalle horaire : {rugger.startHour ?? '?'}h – {rugger.endHour ?? '?'}h
                 </p>
               )}
               {rugger.notes?.trim() ? (
-                <p className="mt-3 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">
+                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
                   {rugger.notes}
                 </p>
               ) : null}
-              <p className="mt-3 break-all font-mono text-sm text-muted-foreground">
+              <p className="mt-2 truncate font-mono text-sm text-muted-foreground">
                 {rugger.walletAddress}
               </p>
             </div>

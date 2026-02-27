@@ -177,7 +177,7 @@ export default function RuggerPage() {
   };
 
   return (
-    <div className="space-y-10 p-6 sm:p-8">
+    <div className="min-w-0 overflow-x-hidden space-y-10 p-6 sm:p-8">
       <header className="space-y-2">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Ruggers</h1>
         <p className="text-muted-foreground">
@@ -312,15 +312,15 @@ export default function RuggerPage() {
             Aucun rugger enregistré. Ajoute-en un avec le formulaire ci-dessus.
           </p>
         ) : (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {ruggers.map((rugger) => (
-              <li key={rugger.id} className="min-w-0">
-                <Card className="h-full min-w-0 overflow-hidden transition-colors hover:border-primary hover:bg-muted/50">
+              <li key={rugger.id} className="min-w-0 w-full">
+                <Card className="h-full w-full min-w-0 overflow-hidden transition-colors hover:border-primary hover:bg-muted/50">
                   <Link
                     href={`/rugger/${rugger.id}`}
-                    className="block min-w-0 overflow-hidden no-underline [&_.rugger-desc]:no-underline [&_.rugger-desc]:text-muted-foreground [&_.rugger-desc]:cursor-default"
+                    className="block min-w-0 w-full overflow-hidden no-underline [&_.rugger-desc]:no-underline [&_.rugger-desc]:text-muted-foreground [&_.rugger-desc]:cursor-default"
                   >
-                    <CardHeader className="min-w-0 overflow-hidden pb-2">
+                    <CardHeader className="min-w-0 w-full overflow-hidden pb-2">
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <span className="min-w-0 truncate font-medium">
                           {rugger.name ?? rugger.walletAddress.slice(0, 10)}
