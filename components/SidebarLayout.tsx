@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -16,15 +17,38 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from '@/components/ui/sidebar';
-import { IconChartBar, IconWallet } from '@tabler/icons-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { IconChartBar, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
+import { useSession, signOut } from '@/lib/auth-client';
 
 const links = [
   { href: '/', label: 'Stat tracking', icon: IconChartBar },
   { href: '/rugger', label: 'Ruggers', icon: IconWallet },
 ];
 
+function getInitials(name: string | null | undefined, email: string | undefined): string {
+  if (name?.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+  return (email ?? '??').split('@')[0].slice(0, 2).toUpperCase();
+}
+
 function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { data: session } = useSession();
+
+  const user = session?.user;
 
   return (
     <Sidebar>
@@ -64,6 +88,58 @@ function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {user && (
+        <SidebarFooter className="border-t border-sidebar-border p-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              >
+                <Avatar size="default">
+                  {user.image && <AvatarImage src={user.image} alt={user.name ?? ''} />}
+                  <AvatarFallback>{getInitials(user.name, user.email)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {user.name ?? user.email}
+                  </p>
+                  {user.name && (
+                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                  )}
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <p className="truncate text-sm font-medium">{user.name ?? user.email}</p>
+                {user.name && (
+                  <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                )}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push('/profile')}>
+                <IconUser className="mr-2 size-4" />
+                Profil
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={async () => {
+                  await signOut({
+                    fetchOptions: { onSuccess: () => router.push('/sign-in') },
+                  });
+                  router.refresh();
+                }}
+              >
+                <IconLogout className="mr-2 size-4" />
+                Déconnexion
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarFooter>
+      )}
     </Sidebar>
   );
 }
