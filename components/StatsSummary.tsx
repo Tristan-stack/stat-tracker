@@ -37,23 +37,22 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
 
   const tokensWithMetrics = tokens.map(getTokenWithMetrics);
 
-  const totals = hasAmount
-    ? tokensWithMetrics.reduce(
-        (acc, t) => {
-          const gainTarget = (amount * t.targetExitPercent) / 100;
-          const gainMax = (amount * t.maxGainPercent) / 100;
-          const gainLow = (amount * t.maxLossPercent) / 100;
-          return {
-            target: acc.target + gainTarget,
-            max: acc.max + gainMax,
-            low: acc.low + gainLow,
-          };
-        },
-        { target: 0, max: 0, low: 0 }
-      )
-    : { target: 0, max: 0, low: 0 };
+  const reachedCount = tokensWithMetrics.filter((t) => t.targetReached).length;
+  const missedCount = tokensWithMetrics.length - reachedCount;
+
+  const realisticPercentSum = tokensWithMetrics.reduce(
+    (sum, t) => sum + (t.targetReached ? t.targetExitPercent : t.maxLossPercent),
+    0
+  );
+  const maxGainPercentSum = tokensWithMetrics.reduce((sum, t) => sum + t.maxGainPercent, 0);
+  const maxLossPercentSum = tokensWithMetrics.reduce((sum, t) => sum + t.maxLossPercent, 0);
+
+  const averageRealisticPercent = tokens.length > 0 ? realisticPercentSum / tokens.length : 0;
 
   const investedTotal = hasAmount ? amount * tokens.length : 0;
+  const gainRealistic = hasAmount ? (amount * realisticPercentSum) / 100 : 0;
+  const gainMax = hasAmount ? (amount * maxGainPercentSum) / 100 : 0;
+  const gainLow = hasAmount ? (amount * maxLossPercentSum) / 100 : 0;
 
   return (
     <Card>
@@ -63,16 +62,21 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
       <CardContent className="space-y-6">
         <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
           <div className="sm:col-span-2 lg:col-span-1">
-            <p className="text-sm font-medium text-muted-foreground">Ma rentabilité actuelle</p>
+            <p className="text-sm font-medium text-muted-foreground">Ma rentabilité réaliste</p>
             <p
               className={`mt-2 text-3xl font-bold tabular-nums sm:text-4xl ${
-                metrics.averageOptimalTargetPercent >= 0
+                averageRealisticPercent >= 0
                   ? 'text-green-600 dark:text-green-400'
                   : 'text-red-600 dark:text-red-400'
               }`}
             >
-              {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageOptimalTargetPercent)}
+              {metrics.tokenCount === 0 ? '—' : formatPercent(averageRealisticPercent)}
             </p>
+            {metrics.tokenCount > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {reachedCount}/{metrics.tokenCount} objectifs atteints
+              </p>
+            )}
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Tokens</p>
@@ -149,7 +153,13 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  À ton objectif actuel
+                  Résultat réaliste
+                </p>
+                <p className="text-sm">
+                  % combiné :{' '}
+                  <span className={`font-semibold ${realisticPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatPercent(realisticPercentSum)}
+                  </span>
                 </p>
                 <p className="text-sm">
                   Investi total:{' '}
@@ -157,15 +167,19 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
                 </p>
                 <p className="text-sm">
                   Montant final:{' '}
-                  <span className="font-semibold">
-                    {formatNum(investedTotal + totals.target, 2)}
+                  <span className={`font-semibold ${gainRealistic >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatNum(investedTotal + gainRealistic, 2)}
                   </span>
                 </p>
                 <p className="text-sm">
-                  Bénéfice total:{' '}
-                  <span className="font-semibold">
-                    {formatNum(totals.target, 2)}
+                  Bénéfice / Perte:{' '}
+                  <span className={`font-semibold ${gainRealistic >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {gainRealistic >= 0 ? '+' : ''}{formatNum(gainRealistic, 2)}
                   </span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {reachedCount} token{reachedCount !== 1 ? 's' : ''} à l&apos;objectif ({formatPercent(tokensWithMetrics.filter((t) => t.targetReached).reduce((s, t) => s + t.targetExitPercent, 0))}),{' '}
+                  {missedCount} en perte ({formatPercent(tokensWithMetrics.filter((t) => !t.targetReached).reduce((s, t) => s + t.maxLossPercent, 0))})
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -173,12 +187,20 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
                   Au gain max théorique
                 </p>
                 <p className="text-sm">
+                  % combiné :{' '}
+                  <span className="font-semibold text-green-600 dark:text-green-400">
+                    {formatPercent(maxGainPercentSum)}
+                  </span>
+                </p>
+                <p className="text-sm">
                   Investi total:{' '}
                   <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
                 </p>
                 <p className="text-sm">
                   Gain total:{' '}
-                  <span className="font-semibold">{formatNum(totals.max, 2)}</span>
+                  <span className="font-semibold text-green-600 dark:text-green-400">
+                    +{formatNum(gainMax, 2)}
+                  </span>
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -186,12 +208,20 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
                   Au plus bas atteint
                 </p>
                 <p className="text-sm">
+                  % combiné :{' '}
+                  <span className={`font-semibold ${maxLossPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatPercent(maxLossPercentSum)}
+                  </span>
+                </p>
+                <p className="text-sm">
                   Investi total:{' '}
                   <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
                 </p>
                 <p className="text-sm">
-                  Résultat total (gain / perte):{' '}
-                  <span className="font-semibold">{formatNum(totals.low, 2)}</span>
+                  Résultat (gain / perte):{' '}
+                  <span className={`font-semibold ${gainLow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {gainLow >= 0 ? '+' : ''}{formatNum(gainLow, 2)}
+                  </span>
                 </p>
               </div>
             </div>

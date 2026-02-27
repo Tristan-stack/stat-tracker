@@ -5,6 +5,7 @@ import { TokenForm } from '@/components/TokenForm';
 import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
 import { TokenImportExport } from '@/components/TokenImportExport';
+import { CreateRuggerFromTokens } from '@/components/CreateRuggerFromTokens';
 import { Button } from '@/components/ui/button';
 import { getStoredTokens, saveTokens } from '@/lib/storage';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
@@ -59,6 +60,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <CreateRuggerFromTokens tokens={tokens} />
             <Button
               type="button"
               variant="outline"

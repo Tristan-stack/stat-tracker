@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Rugger {
+  id            String        @id @default(dbgenerated("gen_random_uuid()"))
+  name          String?
+  description   String?       @map("description")
+  walletAddress String        @unique @map("wallet_address")
+  walletType    String        @map("wallet_type")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  tokens        RuggerToken[]
+
+  @@map("ruggers")
+}
+
+model RuggerToken {
+  id                String   @id @default(dbgenerated("gen_random_uuid()"))
+  rugger            Rugger   @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
+  ruggerId          String   @map("rugger_id")
+  name              String
+  entryPrice        Float    @map("entry_price")
+  high              Float
+  low               Float
+  targetExitPercent Float    @map("target_exit_percent")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([ruggerId, createdAt])
+  @@map("rugger_tokens")
+}
