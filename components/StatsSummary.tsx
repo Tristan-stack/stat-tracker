@@ -156,8 +156,16 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
                   <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
                 </p>
                 <p className="text-sm">
-                  Gain total:{' '}
-                  <span className="font-semibold">{formatNum(totals.target, 2)}</span>
+                  Montant final:{' '}
+                  <span className="font-semibold">
+                    {formatNum(investedTotal + totals.target, 2)}
+                  </span>
+                </p>
+                <p className="text-sm">
+                  Bénéfice total:{' '}
+                  <span className="font-semibold">
+                    {formatNum(totals.target, 2)}
+                  </span>
                 </p>
               </div>
               <div className="space-y-1.5">

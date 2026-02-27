@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { TokenForm } from '@/components/TokenForm';
 import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
+import { TokenImportExport } from '@/components/TokenImportExport';
+import { Button } from '@/components/ui/button';
 import { getStoredTokens, saveTokens } from '@/lib/storage';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
 import type { Token } from '@/types/token';
@@ -47,18 +49,33 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-6xl space-y-12 p-6 py-10 sm:p-8 lg:py-14">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Suivi rentabilité tokens
-          </h1>
-          <p className="text-muted-foreground">
-            Saisis ton entrée, le plus haut, le plus bas et ton objectif de sortie en %.
-          </p>
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+              Suivi rentabilité tokens
+            </h1>
+            <p className="text-muted-foreground">
+              Saisis ton entrée, le plus haut, le plus bas et ton objectif de sortie en %.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setTokens([])}
+              disabled={tokens.length === 0}
+            >
+              Reset les tokens
+            </Button>
+          </div>
         </header>
 
         <TokenForm onAdd={handleAdd} />
 
         <StatsSummary tokens={tokens} />
+
+        <TokenImportExport tokens={tokens} onImport={setTokens} />
 
         <section className="space-y-6">
           <h2 className="text-lg font-semibold">Tokens ({tokens.length})</h2>
