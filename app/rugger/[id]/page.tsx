@@ -51,6 +51,7 @@ export default function RuggerDetailPage() {
   const [editNotes, setEditNotes] = useState('');
   const [globalTargetPercent, setGlobalTargetPercent] = useState('');
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
+  const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
 
   const loadRugger = useCallback(async (ruggerId: string) => {
     setIsLoadingRugger(true);
@@ -268,15 +269,15 @@ export default function RuggerDetailPage() {
           <IconArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight sm:text-3xl">
                 {rugger.name ?? `${rugger.walletAddress.slice(0, 10)}…`}
               </h1>
               <span
                 className={cn(
-                  'rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide',
+                  'shrink-0 rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide',
                   rugger.walletType === 'exchange' &&
                     'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
                   rugger.walletType === 'mother' &&
@@ -288,38 +289,57 @@ export default function RuggerDetailPage() {
                 {walletTypeLabel[rugger.walletType]}
               </span>
             </div>
-            {rugger.description ? (
-              /^https?:\/\//i.test(rugger.description.trim()) ? (
-                <a
-                  href={rugger.description.trim()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary underline underline-offset-2 hover:text-primary/80"
-                >
-                  {rugger.description}
-                </a>
-              ) : (
-                <p className="text-sm text-muted-foreground">{rugger.description}</p>
-              )
-            ) : null}
-            {(rugger.volumeMin != null || rugger.volumeMax != null) && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+            <div
+              className={cn(
+                'min-w-0 wrap-break-word',
+                !isHeaderExpanded && 'max-h-24 overflow-hidden sm:max-h-none sm:overflow-visible',
+                isHeaderExpanded && 'max-h-[50vh] overflow-y-auto'
+              )}
+            >
+              {rugger.description ? (
+                /^https?:\/\//i.test(rugger.description.trim()) ? (
+                  <a
+                    href={rugger.description.trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-all text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+                  >
+                    {rugger.description}
+                  </a>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{rugger.description}</p>
+                )
+              ) : null}
+              {(rugger.volumeMin != null || rugger.volumeMax != null) && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+                </p>
+              )}
+              {(rugger.startHour != null || rugger.endHour != null) && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Intervalle horaire : {rugger.startHour ?? '?'}h – {rugger.endHour ?? '?'}h
+                </p>
+              )}
+              {rugger.notes?.trim() ? (
+                <p className="mt-3 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">
+                  {rugger.notes}
+                </p>
+              ) : null}
+              <p className="mt-3 break-all font-mono text-sm text-muted-foreground">
+                {rugger.walletAddress}
               </p>
-            )}
-            {(rugger.startHour != null || rugger.endHour != null) && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Intervalle horaire : {rugger.startHour ?? '?'}h – {rugger.endHour ?? '?'}h
-              </p>
-            )}
-            {rugger.notes?.trim() ? (
-              <p className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{rugger.notes}</p>
-            ) : null}
-            <p className="font-mono text-sm text-muted-foreground">
-              {rugger.walletAddress}
-            </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-1 sm:hidden"
+              onClick={() => setIsHeaderExpanded((v) => !v)}
+            >
+              {isHeaderExpanded ? 'Voir moins' : 'Voir plus'}
+            </Button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <Button
               type="button"
               variant="outline"

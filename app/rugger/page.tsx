@@ -314,15 +314,15 @@ export default function RuggerPage() {
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {ruggers.map((rugger) => (
-              <li key={rugger.id}>
-                <Card className="h-full transition-colors hover:border-primary hover:bg-muted/50">
+              <li key={rugger.id} className="min-w-0">
+                <Card className="h-full min-w-0 overflow-hidden transition-colors hover:border-primary hover:bg-muted/50">
                   <Link
                     href={`/rugger/${rugger.id}`}
-                    className="block no-underline [&_.rugger-desc]:no-underline [&_.rugger-desc]:text-muted-foreground [&_.rugger-desc]:cursor-default"
+                    className="block min-w-0 overflow-hidden no-underline [&_.rugger-desc]:no-underline [&_.rugger-desc]:text-muted-foreground [&_.rugger-desc]:cursor-default"
                   >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-medium truncate">
+                    <CardHeader className="min-w-0 overflow-hidden pb-2">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <span className="min-w-0 truncate font-medium">
                           {rugger.name ?? rugger.walletAddress.slice(0, 10)}
                         </span>
                         <span
@@ -337,17 +337,17 @@ export default function RuggerPage() {
                         </span>
                       </div>
                       {rugger.description ? (
-                        <p className="rugger-desc text-xs text-muted-foreground line-clamp-2">
+                        <p className="rugger-desc line-clamp-2 wrap-break-word text-xs text-muted-foreground">
                           {rugger.description}
                         </p>
                       ) : null}
                       {(rugger.walletType === 'exchange' || rugger.walletType === 'mother') &&
                         (rugger.volumeMin != null || rugger.volumeMax != null) && (
-                          <p className="rugger-desc text-xs text-muted-foreground">
+                          <p className="rugger-desc truncate text-xs text-muted-foreground">
                             Volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
                           </p>
                         )}
-                      <p className="rugger-desc text-xs text-muted-foreground font-mono truncate">
+                      <p className="rugger-desc truncate break-all text-xs text-muted-foreground font-mono">
                         {rugger.walletAddress}
                       </p>
                     </CardHeader>
