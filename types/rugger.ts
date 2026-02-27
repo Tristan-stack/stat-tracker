@@ -6,6 +6,8 @@ export interface Rugger {
   description: string | null;
   walletAddress: string;
   walletType: WalletType;
+  volumeMin: number | null;
+  volumeMax: number | null;
   createdAt: string;
   tokenCount: number;
   avgMaxGainPercent: number;

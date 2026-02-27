@@ -16,11 +16,15 @@ export default function RuggerPage() {
   const [description, setDescription] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
   const [walletType, setWalletType] = useState<WalletType>('simple');
+  const [volumeMin, setVolumeMin] = useState<string>('');
+  const [volumeMax, setVolumeMax] = useState<string>('');
   const [editingRugger, setEditingRugger] = useState<Rugger | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editWalletAddress, setEditWalletAddress] = useState('');
   const [editWalletType, setEditWalletType] = useState<WalletType>('simple');
+  const [editVolumeMin, setEditVolumeMin] = useState<string>('');
+  const [editVolumeMax, setEditVolumeMax] = useState<string>('');
 
   const loadRuggers = useCallback(async () => {
     const response = await fetch('/api/ruggers');
@@ -40,6 +44,8 @@ export default function RuggerPage() {
       setEditDescription(editingRugger.description ?? '');
       setEditWalletAddress(editingRugger.walletAddress);
       setEditWalletType(editingRugger.walletType);
+      setEditVolumeMin(editingRugger.volumeMin != null ? String(editingRugger.volumeMin) : '');
+      setEditVolumeMax(editingRugger.volumeMax != null ? String(editingRugger.volumeMax) : '');
     });
   }, [editingRugger]);
 
@@ -47,44 +53,83 @@ export default function RuggerPage() {
     async (event: React.FormEvent) => {
       event.preventDefault();
       if (walletAddress.trim() === '') return;
+      const toNum = (s: string) =>
+        s.trim() === '' ? null : (Number(s) !== Number(s) ? null : Number(s));
+      const payload: {
+        name: string | null;
+        description: string | null;
+        walletAddress: string;
+        walletType: WalletType;
+        volumeMin?: number | null;
+        volumeMax?: number | null;
+      } = {
+        name: name.trim() || null,
+        description: description.trim() || null,
+        walletAddress: walletAddress.trim(),
+        walletType,
+      };
+      if (walletType === 'exchange' || walletType === 'mother') {
+        payload.volumeMin = toNum(volumeMin) ?? null;
+        payload.volumeMax = toNum(volumeMax) ?? null;
+      }
       const response = await fetch('/api/ruggers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim() || null,
-          description: description.trim() || null,
-          walletAddress: walletAddress.trim(),
-          walletType,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) return;
       setName('');
       setDescription('');
       setWalletAddress('');
+      setVolumeMin('');
+      setVolumeMax('');
       await loadRuggers();
     },
-    [loadRuggers, name, description, walletAddress, walletType]
+    [loadRuggers, name, description, walletAddress, walletType, volumeMin, volumeMax]
   );
 
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
       if (!editingRugger || editWalletAddress.trim() === '') return;
+      const toNum = (s: string) =>
+        s.trim() === '' ? null : (Number(s) !== Number(s) ? null : Number(s));
+      const payload: {
+        name: string | null;
+        description: string | null;
+        walletAddress: string;
+        walletType: WalletType;
+        volumeMin?: number | null;
+        volumeMax?: number | null;
+      } = {
+        name: editName.trim() || null,
+        description: editDescription.trim() || null,
+        walletAddress: editWalletAddress.trim(),
+        walletType: editWalletType,
+      };
+      if (editWalletType === 'exchange' || editWalletType === 'mother') {
+        payload.volumeMin = toNum(editVolumeMin) ?? null;
+        payload.volumeMax = toNum(editVolumeMax) ?? null;
+      }
       const response = await fetch(`/api/ruggers/${editingRugger.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editName.trim() || null,
-          description: editDescription.trim() || null,
-          walletAddress: editWalletAddress.trim(),
-          walletType: editWalletType,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) return;
       setEditingRugger(null);
       await loadRuggers();
     },
-    [editingRugger, editName, editDescription, editWalletAddress, editWalletType, loadRuggers]
+    [
+      editingRugger,
+      editName,
+      editDescription,
+      editWalletAddress,
+      editWalletType,
+      editVolumeMin,
+      editVolumeMax,
+      loadRuggers,
+    ]
   );
 
   const handleDeleteRugger = useCallback(
@@ -140,16 +185,6 @@ export default function RuggerPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rugger-wallet">Adresse du wallet</Label>
-              <Input
-                id="rugger-wallet"
-                value={walletAddress}
-                onChange={(e) => setWalletAddress(e.target.value)}
-                placeholder="0x..."
-                required
-              />
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="rugger-type">Type de wallet</Label>
               <select
                 id="rugger-type"
@@ -162,6 +197,41 @@ export default function RuggerPage() {
                 <option value="simple">Simple</option>
               </select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="rugger-wallet">Adresse du wallet</Label>
+              <Input
+                id="rugger-wallet"
+                value={walletAddress}
+                onChange={(e) => setWalletAddress(e.target.value)}
+                placeholder="0x..."
+                required
+              />
+            </div>
+            {(walletType === 'exchange' || walletType === 'mother') && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Intervalle volume</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="rugger-volume-min"
+                    type="number"
+                    step="any"
+                    value={volumeMin}
+                    onChange={(e) => setVolumeMin(e.target.value)}
+                    placeholder="Premier"
+                    className="max-w-28"
+                  />
+                  <Input
+                    id="rugger-volume-max"
+                    type="number"
+                    step="any"
+                    value={volumeMax}
+                    onChange={(e) => setVolumeMax(e.target.value)}
+                    placeholder="Deuxième"
+                    className="max-w-28"
+                  />
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <Button type="submit" size="sm">
@@ -207,6 +277,12 @@ export default function RuggerPage() {
                           {rugger.description}
                         </p>
                       ) : null}
+                      {(rugger.walletType === 'exchange' || rugger.walletType === 'mother') &&
+                        (rugger.volumeMin != null || rugger.volumeMax != null) && (
+                          <p className="rugger-desc text-xs text-muted-foreground">
+                            Volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+                          </p>
+                        )}
                       <p className="rugger-desc text-xs text-muted-foreground font-mono truncate">
                         {rugger.walletAddress}
                       </p>
@@ -303,6 +379,36 @@ export default function RuggerPage() {
                     placeholder="ex. Wallet principal CEX"
                   />
                 </div>
+                {(editWalletType === 'exchange' || editWalletType === 'mother') && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-rugger-volume-min">Intervalle volume – Premier</Label>
+                      <Input
+                        id="edit-rugger-volume-min"
+                        type="number"
+                        min={0}
+                        step="any"
+                        inputMode="decimal"
+                        placeholder="ex. 1000"
+                        value={editVolumeMin}
+                        onChange={(e) => setEditVolumeMin(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-rugger-volume-max">Intervalle volume – Deuxième</Label>
+                      <Input
+                        id="edit-rugger-volume-max"
+                        type="number"
+                        min={0}
+                        step="any"
+                        inputMode="decimal"
+                        placeholder="ex. 50000"
+                        value={editVolumeMax}
+                        onChange={(e) => setEditVolumeMax(e.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="edit-rugger-wallet">Adresse du wallet</Label>
                   <Input

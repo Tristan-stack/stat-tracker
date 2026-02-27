@@ -13,6 +13,8 @@ model Rugger {
   description   String?       @map("description")
   walletAddress String        @map("wallet_address")
   walletType    String        @map("wallet_type")
+  volumeMin     Float?        @map("volume_min")
+  volumeMax     Float?        @map("volume_max")
   createdAt     DateTime      @default(now()) @map("created_at")
   tokens        RuggerToken[]
 
