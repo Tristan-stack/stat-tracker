@@ -18,6 +18,9 @@ export default function RuggerPage() {
   const [walletType, setWalletType] = useState<WalletType>('simple');
   const [volumeMin, setVolumeMin] = useState<string>('');
   const [volumeMax, setVolumeMax] = useState<string>('');
+  const [startHour, setStartHour] = useState<string>('');
+  const [endHour, setEndHour] = useState<string>('');
+  const [notes, setNotes] = useState('');
   const [editingRugger, setEditingRugger] = useState<Rugger | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -25,6 +28,9 @@ export default function RuggerPage() {
   const [editWalletType, setEditWalletType] = useState<WalletType>('simple');
   const [editVolumeMin, setEditVolumeMin] = useState<string>('');
   const [editVolumeMax, setEditVolumeMax] = useState<string>('');
+  const [editStartHour, setEditStartHour] = useState<string>('');
+  const [editEndHour, setEditEndHour] = useState<string>('');
+  const [editNotes, setEditNotes] = useState('');
 
   const loadRuggers = useCallback(async () => {
     const response = await fetch('/api/ruggers');
@@ -46,6 +52,9 @@ export default function RuggerPage() {
       setEditWalletType(editingRugger.walletType);
       setEditVolumeMin(editingRugger.volumeMin != null ? String(editingRugger.volumeMin) : '');
       setEditVolumeMax(editingRugger.volumeMax != null ? String(editingRugger.volumeMax) : '');
+      setEditStartHour(editingRugger.startHour != null ? String(editingRugger.startHour) : '');
+      setEditEndHour(editingRugger.endHour != null ? String(editingRugger.endHour) : '');
+      setEditNotes(editingRugger.notes ?? '');
     });
   }, [editingRugger]);
 
@@ -55,6 +64,10 @@ export default function RuggerPage() {
       if (walletAddress.trim() === '') return;
       const toNum = (s: string) =>
         s.trim() === '' ? null : (Number(s) !== Number(s) ? null : Number(s));
+      const toHour = (s: string): number | null => {
+        const n = toNum(s);
+        return n != null && n >= 0 && n <= 23 ? n : null;
+      };
       const payload: {
         name: string | null;
         description: string | null;
@@ -62,11 +75,17 @@ export default function RuggerPage() {
         walletType: WalletType;
         volumeMin?: number | null;
         volumeMax?: number | null;
+        startHour?: number | null;
+        endHour?: number | null;
+        notes?: string | null;
       } = {
         name: name.trim() || null,
         description: description.trim() || null,
         walletAddress: walletAddress.trim(),
         walletType,
+        startHour: toHour(startHour) ?? null,
+        endHour: toHour(endHour) ?? null,
+        notes: notes.trim() || null,
       };
       if (walletType === 'exchange' || walletType === 'mother') {
         payload.volumeMin = toNum(volumeMin) ?? null;
@@ -83,9 +102,12 @@ export default function RuggerPage() {
       setWalletAddress('');
       setVolumeMin('');
       setVolumeMax('');
+      setStartHour('');
+      setEndHour('');
+      setNotes('');
       await loadRuggers();
     },
-    [loadRuggers, name, description, walletAddress, walletType, volumeMin, volumeMax]
+    [loadRuggers, name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
   );
 
   const handleUpdateRugger = useCallback(
@@ -120,6 +142,7 @@ export default function RuggerPage() {
       setEditingRugger(null);
       await loadRuggers();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- editStartHour, editEndHour, editNotes used in payload
     [
       editingRugger,
       editName,
@@ -128,6 +151,9 @@ export default function RuggerPage() {
       editWalletType,
       editVolumeMin,
       editVolumeMax,
+      editStartHour,
+      editEndHour,
+      editNotes,
       loadRuggers,
     ]
   );
@@ -232,6 +258,44 @@ export default function RuggerPage() {
                 </div>
               </div>
             )}
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Intervalle horaire (optionnel)</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Rug de</span>
+                <Input
+                  id="rugger-start-hour"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={startHour}
+                  onChange={(e) => setStartHour(e.target.value)}
+                  placeholder="9"
+                  className="w-16"
+                />
+                <span className="text-xs text-muted-foreground">h à</span>
+                <Input
+                  id="rugger-end-hour"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={endHour}
+                  onChange={(e) => setEndHour(e.target.value)}
+                  placeholder="18"
+                  className="w-16"
+                />
+                <span className="text-xs text-muted-foreground">h</span>
+              </div>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="rugger-notes">Notes (optionnel)</Label>
+              <textarea
+                id="rugger-notes"
+                className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Notes sur ce rugger…"
+              />
+            </div>
           </div>
           <div>
             <Button type="submit" size="sm">
@@ -324,7 +388,7 @@ export default function RuggerPage() {
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="size-8 text-destructive hover:text-destructive"
+                      className="min-h-[44px] min-w-[44px] text-destructive hover:text-destructive sm:size-8"
                       onClick={(e) => handleDeleteRugger(rugger, e)}
                       aria-label="Supprimer"
                     >
@@ -345,7 +409,7 @@ export default function RuggerPage() {
           aria-modal="true"
           aria-labelledby="edit-rugger-title"
         >
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <CardHeader className="flex flex-row items-center justify-between">
               <h2 id="edit-rugger-title" className="text-lg font-semibold">
                 Modifier le rugger
@@ -431,6 +495,44 @@ export default function RuggerPage() {
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Intervalle horaire (optionnel)</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rug de</span>
+                    <Input
+                      id="edit-rugger-start-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={editStartHour}
+                      onChange={(e) => setEditStartHour(e.target.value)}
+                      placeholder="9"
+                      className="w-16"
+                    />
+                    <span className="text-xs text-muted-foreground">h à</span>
+                    <Input
+                      id="edit-rugger-end-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={editEndHour}
+                      onChange={(e) => setEditEndHour(e.target.value)}
+                      placeholder="18"
+                      className="w-16"
+                    />
+                    <span className="text-xs text-muted-foreground">h</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-rugger-notes">Notes (optionnel)</Label>
+                  <textarea
+                    id="edit-rugger-notes"
+                    className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    placeholder="Notes sur ce rugger…"
+                  />
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button

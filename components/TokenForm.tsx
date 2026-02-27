@@ -50,9 +50,9 @@ export function TokenForm({ onAdd }: TokenFormProps) {
   );
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6 rounded-xl border bg-card p-6 shadow sm:p-8">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow sm:gap-6 sm:p-6 lg:p-8">
       <h2 className="text-lg font-semibold">Nouveau token</h2>
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-6">
         <div className="space-y-2.5">
           <Label htmlFor="name">Nom (optionnel)</Label>
           <Input

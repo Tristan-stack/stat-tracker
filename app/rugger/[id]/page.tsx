@@ -46,6 +46,9 @@ export default function RuggerDetailPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editWalletAddress, setEditWalletAddress] = useState('');
   const [editWalletType, setEditWalletType] = useState<WalletType>('simple');
+  const [editStartHour, setEditStartHour] = useState('');
+  const [editEndHour, setEditEndHour] = useState('');
+  const [editNotes, setEditNotes] = useState('');
   const [globalTargetPercent, setGlobalTargetPercent] = useState('');
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
 
@@ -113,6 +116,9 @@ export default function RuggerDetailPage() {
       setEditDescription(rugger.description ?? '');
       setEditWalletAddress(rugger.walletAddress);
       setEditWalletType(rugger.walletType);
+      setEditStartHour(rugger.startHour != null ? String(rugger.startHour) : '');
+      setEditEndHour(rugger.endHour != null ? String(rugger.endHour) : '');
+      setEditNotes(rugger.notes ?? '');
     }
   }, [rugger, isEditing]);
 
@@ -143,6 +149,12 @@ export default function RuggerDetailPage() {
     async (event: React.FormEvent) => {
       event.preventDefault();
       if (!id || editWalletAddress.trim() === '') return;
+      const parseHour = (s: string): number | null => {
+        const t = s.trim();
+        if (t === '') return null;
+        const n = Number(t);
+        return Number.isFinite(n) && n >= 0 && n <= 23 ? n : null;
+      };
       const response = await fetch(`/api/ruggers/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -151,13 +163,16 @@ export default function RuggerDetailPage() {
           description: editDescription.trim() || null,
           walletAddress: editWalletAddress.trim(),
           walletType: editWalletType,
+          startHour: parseHour(editStartHour),
+          endHour: parseHour(editEndHour),
+          notes: editNotes.trim() || null,
         }),
       });
       if (!response.ok) return;
       setIsEditing(false);
       await loadRugger(id);
     },
-    [id, editName, editDescription, editWalletAddress, editWalletType, loadRugger]
+    [id, editName, editDescription, editWalletAddress, editWalletType, editStartHour, editEndHour, editNotes, loadRugger]
   );
 
   const handleApplyGlobalTarget = useCallback(async () => {
@@ -289,9 +304,17 @@ export default function RuggerDetailPage() {
             ) : null}
             {(rugger.volumeMin != null || rugger.volumeMax != null) && (
               <p className="mt-3 text-sm text-muted-foreground">
-                Volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+                Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
               </p>
             )}
+            {(rugger.startHour != null || rugger.endHour != null) && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Intervalle horaire : {rugger.startHour ?? '?'}h – {rugger.endHour ?? '?'}h
+              </p>
+            )}
+            {rugger.notes?.trim() ? (
+              <p className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{rugger.notes}</p>
+            ) : null}
             <p className="font-mono text-sm text-muted-foreground">
               {rugger.walletAddress}
             </p>
@@ -327,7 +350,7 @@ export default function RuggerDetailPage() {
           aria-modal="true"
           aria-labelledby="edit-rugger-detail-title"
         >
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <CardHeader className="flex flex-row items-center justify-between">
               <h2 id="edit-rugger-detail-title" className="text-lg font-semibold">
                 Modifier le rugger
@@ -383,6 +406,44 @@ export default function RuggerDetailPage() {
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Intervalle horaire (optionnel)</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rug de</span>
+                    <Input
+                      id="edit-detail-start-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={editStartHour}
+                      onChange={(e) => setEditStartHour(e.target.value)}
+                      placeholder="9"
+                      className="w-16"
+                    />
+                    <span className="text-xs text-muted-foreground">h à</span>
+                    <Input
+                      id="edit-detail-end-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={editEndHour}
+                      onChange={(e) => setEditEndHour(e.target.value)}
+                      placeholder="18"
+                      className="w-16"
+                    />
+                    <span className="text-xs text-muted-foreground">h</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-detail-notes">Notes (optionnel)</Label>
+                  <textarea
+                    id="edit-detail-notes"
+                    className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    placeholder="Notes sur ce rugger…"
+                  />
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button

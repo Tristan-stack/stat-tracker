@@ -16,6 +16,9 @@ export async function GET(
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;
+    start_hour: number | null;
+    end_hour: number | null;
+    notes: string | null;
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
@@ -29,6 +32,9 @@ export async function GET(
         r.wallet_type,
         r.volume_min,
         r.volume_max,
+        r.start_hour,
+        r.end_hour,
+        r.notes,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
@@ -51,6 +57,9 @@ export async function GET(
     walletType: row.wallet_type,
     volumeMin: row.volume_min ?? null,
     volumeMax: row.volume_max ?? null,
+    startHour: row.start_hour ?? null,
+    endHour: row.end_hour ?? null,
+    notes: row.notes ?? null,
     createdAt: row.created_at,
     tokenCount: row.token_count,
     avgMaxGainPercent: Number(row.avg_max_gain_percent),
@@ -71,6 +80,9 @@ export async function PATCH(
     walletType?: WalletType;
     volumeMin?: number | null;
     volumeMax?: number | null;
+    startHour?: number | null;
+    endHour?: number | null;
+    notes?: string | null;
   };
 
   const walletType = body.walletType;
@@ -117,6 +129,22 @@ export async function PATCH(
     updates.push(`volume_max = $${paramIndex++}`);
     values.push(toNum(body.volumeMax));
   }
+  const toHour = (v: unknown): number | null => {
+    const n = toNum(v);
+    return n != null && n >= 0 && n <= 23 ? n : null;
+  };
+  if (body.startHour !== undefined) {
+    updates.push(`start_hour = $${paramIndex++}`);
+    values.push(toHour(body.startHour));
+  }
+  if (body.endHour !== undefined) {
+    updates.push(`end_hour = $${paramIndex++}`);
+    values.push(toHour(body.endHour));
+  }
+  if (body.notes !== undefined) {
+    updates.push(`notes = $${paramIndex++}`);
+    values.push(typeof body.notes === 'string' ? (body.notes.trim() || null) : null);
+  }
 
   if (updates.length === 0) {
     const row = await query<{
@@ -127,11 +155,14 @@ export async function PATCH(
       wallet_type: WalletType;
       volume_min: number | null;
       volume_max: number | null;
+      start_hour: number | null;
+      end_hour: number | null;
+      notes: string | null;
       created_at: string;
       token_count: number;
       avg_max_gain_percent: number;
     }>(
-      `select r.id, r.name, r.description, r.wallet_address, r.wallet_type, r.volume_min, r.volume_max, r.created_at,
+      `select r.id, r.name, r.description, r.wallet_address, r.wallet_type, r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
        from ruggers r where r.id = $1`,
@@ -147,6 +178,9 @@ export async function PATCH(
       walletType: r.wallet_type,
       volumeMin: r.volume_min ?? null,
       volumeMax: r.volume_max ?? null,
+      startHour: r.start_hour ?? null,
+      endHour: r.end_hour ?? null,
+      notes: r.notes ?? null,
       createdAt: r.created_at,
       tokenCount: r.token_count,
       avgMaxGainPercent: Number(r.avg_max_gain_percent),
@@ -163,12 +197,15 @@ export async function PATCH(
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;
+    start_hour: number | null;
+    end_hour: number | null;
+    notes: string | null;
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
   }>(
     `update ruggers set ${setClause} where id = $${paramIndex}
-     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, created_at,
+     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, created_at,
        (select count(*)::int from rugger_tokens t where t.rugger_id = ruggers.id) as token_count,
        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = ruggers.id) as avg_max_gain_percent`,
     values
@@ -185,6 +222,9 @@ export async function PATCH(
     walletType: row.wallet_type,
     volumeMin: row.volume_min ?? null,
     volumeMax: row.volume_max ?? null,
+    startHour: row.start_hour ?? null,
+    endHour: row.end_hour ?? null,
+    notes: row.notes ?? null,
     createdAt: row.created_at,
     tokenCount: row.token_count,
     avgMaxGainPercent: Number(row.avg_max_gain_percent),

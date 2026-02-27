@@ -22,6 +22,9 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
   const [walletType, setWalletType] = useState<WalletType>('simple');
   const [volumeMin, setVolumeMin] = useState('');
   const [volumeMax, setVolumeMax] = useState('');
+  const [startHour, setStartHour] = useState('');
+  const [endHour, setEndHour] = useState('');
+  const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -32,6 +35,9 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
     setWalletType('simple');
     setVolumeMin('');
     setVolumeMax('');
+    setStartHour('');
+    setEndHour('');
+    setNotes('');
     setError('');
   }, []);
 
@@ -96,7 +102,8 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
         setIsSubmitting(false);
       }
     },
-    [name, description, walletAddress, walletType, volumeMin, volumeMax, tokens, resetForm, router]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- startHour, endHour, notes used in payload
+    [name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes, tokens, resetForm, router]
   );
 
   if (tokens.length === 0) return null;
@@ -119,7 +126,7 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
           aria-modal="true"
           aria-labelledby="create-rugger-title"
         >
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md max-h-[90dvh] overflow-y-auto">
             <CardHeader className="flex flex-row items-center justify-between">
               <h2 id="create-rugger-title" className="text-lg font-semibold">
                 Créer un rugger avec {tokens.length} token{tokens.length !== 1 ? 's' : ''}
@@ -200,6 +207,47 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                     </div>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label>Intervalle horaire (optionnel)</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rug de</span>
+                    <Input
+                      id="create-rugger-start-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={startHour}
+                      onChange={(e) => setStartHour(e.target.value)}
+                      placeholder="9"
+                      className="w-16"
+                      disabled={isSubmitting}
+                    />
+                    <span className="text-xs text-muted-foreground">h à</span>
+                    <Input
+                      id="create-rugger-end-hour"
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={endHour}
+                      onChange={(e) => setEndHour(e.target.value)}
+                      placeholder="18"
+                      className="w-16"
+                      disabled={isSubmitting}
+                    />
+                    <span className="text-xs text-muted-foreground">h</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="create-rugger-notes">Notes (optionnel)</Label>
+                  <textarea
+                    id="create-rugger-notes"
+                    className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Notes sur ce rugger…"
+                    disabled={isSubmitting}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="create-rugger-wallet">Adresse du wallet</Label>
                   <Input

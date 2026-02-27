@@ -15,6 +15,9 @@ model Rugger {
   walletType    String        @map("wallet_type")
   volumeMin     Float?        @map("volume_min")
   volumeMax     Float?        @map("volume_max")
+  startHour     Int?          @map("start_hour")
+  endHour       Int?          @map("end_hour")
+  notes         String?       @map("notes")
   createdAt     DateTime      @default(now()) @map("created_at")
   tokens        RuggerToken[]
 

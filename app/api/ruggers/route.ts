@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;
+    start_hour: number | null;
+    end_hour: number | null;
+    notes: string | null;
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
@@ -31,6 +34,9 @@ export async function GET(req: NextRequest) {
         r.wallet_type,
         r.volume_min,
         r.volume_max,
+        r.start_hour,
+        r.end_hour,
+        r.notes,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
@@ -52,6 +58,9 @@ export async function GET(req: NextRequest) {
     walletType: row.wallet_type,
     volumeMin: row.volume_min ?? null,
     volumeMax: row.volume_max ?? null,
+    startHour: row.start_hour ?? null,
+    endHour: row.end_hour ?? null,
+    notes: row.notes ?? null,
     createdAt: row.created_at,
     tokenCount: row.token_count,
     avgMaxGainPercent: Number(row.avg_max_gain_percent),
@@ -68,6 +77,9 @@ export async function POST(req: NextRequest) {
     walletType?: WalletType;
     volumeMin?: number | null;
     volumeMax?: number | null;
+    startHour?: number | null;
+    endHour?: number | null;
+    notes?: string | null;
   };
 
   const walletAddress = body.walletAddress?.trim() ?? '';
@@ -78,6 +90,13 @@ export async function POST(req: NextRequest) {
     v != null && Number.isFinite(Number(v)) ? Number(v) : null;
   const volumeMin = toNum(body.volumeMin);
   const volumeMax = toNum(body.volumeMax);
+  const toHour = (v: unknown): number | null => {
+    const n = toNum(v);
+    return n != null && n >= 0 && n <= 23 ? n : null;
+  };
+  const startHour = toHour(body.startHour);
+  const endHour = toHour(body.endHour);
+  const notes = typeof body.notes === 'string' ? (body.notes.trim() || null) : null;
 
   if (walletAddress === '' || !walletType || !['exchange', 'mother', 'simple'].includes(walletType)) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
@@ -97,14 +116,17 @@ export async function POST(req: NextRequest) {
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;
+    start_hour: number | null;
+    end_hour: number | null;
+    notes: string | null;
     created_at: string;
   }>(
     `
-      insert into ruggers (name, description, wallet_address, wallet_type, volume_min, volume_max)
-      values ($1, $2, $3, $4, $5, $6)
-      returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, created_at
+      insert into ruggers (name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, created_at
     `,
-    [name, description, walletAddress, walletType, volumeMin, volumeMax]
+    [name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
   );
 
   const row = rows[0];
@@ -117,6 +139,9 @@ export async function POST(req: NextRequest) {
     walletType: row.wallet_type,
     volumeMin: row.volume_min ?? null,
     volumeMax: row.volume_max ?? null,
+    startHour: row.start_hour ?? null,
+    endHour: row.end_hour ?? null,
+    notes: row.notes ?? null,
     createdAt: row.created_at,
     tokenCount: 0,
     avgMaxGainPercent: 0,

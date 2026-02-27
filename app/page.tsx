@@ -75,7 +75,7 @@ export default function Home() {
 
         <TokenForm onAdd={handleAdd} />
 
-        <StatsSummary tokens={tokens} />
+        <StatsSummary tokens={tokens} showSimulation={false} />
 
         <TokenImportExport tokens={tokens} onImport={setTokens} />
 

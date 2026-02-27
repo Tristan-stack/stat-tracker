@@ -26,9 +26,10 @@ function parseDecimal(value: string): number {
 
 export interface StatsSummaryProps {
   tokens: Token[];
+  showSimulation?: boolean;
 }
 
-export function StatsSummary({ tokens }: StatsSummaryProps) {
+export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProps) {
   const metrics = getAggregateMetrics(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
 
@@ -44,15 +45,11 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
     (sum, t) => sum + (t.targetReached ? t.targetExitPercent : t.maxLossPercent),
     0
   );
-  const maxGainPercentSum = tokensWithMetrics.reduce((sum, t) => sum + t.maxGainPercent, 0);
-  const maxLossPercentSum = tokensWithMetrics.reduce((sum, t) => sum + t.maxLossPercent, 0);
 
   const averageRealisticPercent = tokens.length > 0 ? realisticPercentSum / tokens.length : 0;
 
   const investedTotal = hasAmount ? amount * tokens.length : 0;
   const gainRealistic = hasAmount ? (amount * realisticPercentSum) / 100 : 0;
-  const gainMax = hasAmount ? (amount * maxGainPercentSum) / 100 : 0;
-  const gainLow = hasAmount ? (amount * maxLossPercentSum) / 100 : 0;
 
   return (
     <Card>
@@ -60,9 +57,9 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
         <CardTitle className="text-xl">Résumé</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="sm:col-span-2 lg:col-span-1">
-            <p className="text-sm font-medium text-muted-foreground">Ma rentabilité réaliste</p>
+        <div className="grid gap-6 sm:gap-8 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+            <p className="truncate text-sm font-medium text-muted-foreground">Ma rentabilité réaliste</p>
             <p
               className={`mt-2 text-3xl font-bold tabular-nums sm:text-4xl ${
                 averageRealisticPercent >= 0
@@ -95,7 +92,7 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
             </p>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Objectif sortie moyen (ce que tu vises)</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">Objectif sortie moyen (ce que tu vises)</p>
             <p
               className={`mt-2 text-2xl font-semibold ${
                 metrics.averageOptimalTargetPercent >= 0
@@ -131,26 +128,26 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
           </div>
         </div>
 
-        <div className="mt-2 space-y-4 rounded-lg border bg-muted/30 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="w-full max-w-xs space-y-2">
-              <Label htmlFor="simulated-amount">Montant investi par token (à l&apos;entrée)</Label>
-              <Input
-                id="simulated-amount"
-                inputMode="decimal"
-                placeholder="Ex. 1 000"
-                value={simulatedAmount}
-                onChange={(e) => setSimulatedAmount(e.target.value)}
-              />
+        {showSimulation && (
+          <div className="mt-2 space-y-4 rounded-lg border bg-muted/30 p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="w-full max-w-xs space-y-2">
+                <Label htmlFor="simulated-amount">Montant investi par token (à l&apos;entrée)</Label>
+                <Input
+                  id="simulated-amount"
+                  inputMode="decimal"
+                  placeholder="Ex. 1 000"
+                  value={simulatedAmount}
+                  onChange={(e) => setSimulatedAmount(e.target.value)}
+                />
+              </div>
+              {hasAmount && (
+                <p className="text-xs text-muted-foreground sm:text-sm">
+                  Simule le résultat global en investissant ce montant sur chaque token.
+                </p>
+              )}
             </div>
             {hasAmount && (
-              <p className="text-xs text-muted-foreground sm:text-sm">
-                Simule le résultat global en investissant ce montant sur chaque token.
-              </p>
-            )}
-          </div>
-          {hasAmount && (
-            <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Résultat réaliste
@@ -182,51 +179,9 @@ export function StatsSummary({ tokens }: StatsSummaryProps) {
                   {missedCount} en perte ({formatPercent(tokensWithMetrics.filter((t) => !t.targetReached).reduce((s, t) => s + t.maxLossPercent, 0))})
                 </p>
               </div>
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Au gain max théorique
-                </p>
-                <p className="text-sm">
-                  % combiné :{' '}
-                  <span className="font-semibold text-green-600 dark:text-green-400">
-                    {formatPercent(maxGainPercentSum)}
-                  </span>
-                </p>
-                <p className="text-sm">
-                  Investi total:{' '}
-                  <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
-                </p>
-                <p className="text-sm">
-                  Gain total:{' '}
-                  <span className="font-semibold text-green-600 dark:text-green-400">
-                    +{formatNum(gainMax, 2)}
-                  </span>
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Au plus bas atteint
-                </p>
-                <p className="text-sm">
-                  % combiné :{' '}
-                  <span className={`font-semibold ${maxLossPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatPercent(maxLossPercentSum)}
-                  </span>
-                </p>
-                <p className="text-sm">
-                  Investi total:{' '}
-                  <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
-                </p>
-                <p className="text-sm">
-                  Résultat (gain / perte):{' '}
-                  <span className={`font-semibold ${gainLow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {gainLow >= 0 ? '+' : ''}{formatNum(gainLow, 2)}
-                  </span>
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

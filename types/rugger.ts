@@ -8,6 +8,9 @@ export interface Rugger {
   walletType: WalletType;
   volumeMin: number | null;
   volumeMax: number | null;
+  startHour: number | null;
+  endHour: number | null;
+  notes: string | null;
   createdAt: string;
   tokenCount: number;
   avgMaxGainPercent: number;

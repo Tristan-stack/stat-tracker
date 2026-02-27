@@ -24,11 +24,11 @@ export interface TokenTableProps {
 
 export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps) {
   return (
-    <div className="overflow-x-auto rounded-xl border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
+      <table className="w-full min-w-[640px] text-xs sm:text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
-            <th className="px-5 py-4 text-left font-medium">Nom</th>
+            <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
             <th className="px-5 py-4 text-right font-medium">Entrée</th>
             <th className="px-5 py-4 text-right font-medium">Plus haut</th>
             <th className="px-5 py-4 text-right font-medium">Plus bas</th>
@@ -43,10 +43,10 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
         <tbody>
           {tokens.map((t) => (
             <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
-              <td className="px-5 py-4 font-medium">{t.name}</td>
-              <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.entryPrice)}</td>
-              <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.high)}</td>
-              <td className="px-5 py-4 text-right tabular-nums">{formatNum(t.low)}</td>
+              <td className="max-w-[100px] truncate px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>{t.name}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.entryPrice)}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
               <td className="px-5 py-4 text-right tabular-nums">
                 <div className="flex items-center justify-end gap-2">
                   <Input
@@ -64,32 +64,30 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
                   <span className="text-xs text-muted-foreground">%</span>
                 </div>
               </td>
-              <td className="px-5 py-4 text-right tabular-nums text-green-600 dark:text-green-400">
-                {formatPercent(t.targetExitPercent)}
-              </td>
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>
               <td
-                className={`px-5 py-4 text-right tabular-nums ${
+                className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
                   t.maxGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : ''
                 }`}
               >
                 {formatPercent(t.maxGainPercent)}
               </td>
               <td
-                className={`px-5 py-4 text-right tabular-nums ${
+                className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
                   t.maxLossPercent <= 0 ? 'text-red-600 dark:text-red-400' : ''
                 }`}
               >
                 {formatPercent(t.maxLossPercent)}
               </td>
-              <td className="px-5 py-4 text-center">{t.targetReached ? 'Oui' : 'Non'}</td>
-              <td className="px-3 py-4">
+              <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
+              <td className="px-2 py-3 sm:px-3 sm:py-4">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   aria-label="Supprimer"
                   onClick={() => onRemove(t.id)}
-                  className="border border-red-500 bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500"
+                  className="min-h-[44px] min-w-[44px] border border-red-500 bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
