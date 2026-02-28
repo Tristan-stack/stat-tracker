@@ -108,7 +108,7 @@ export function TokenForm({ onAdd }: TokenFormProps) {
               className="sm:max-w-[120px]"
             />
             <div className="flex flex-wrap gap-2">
-              {['100', '110', '120', '150'].map((value) => (
+              {['70', '80', '100'].map((value) => (
                 <Button
                   key={value}
                   type="button"

@@ -16,6 +16,7 @@ export interface TokenWithMetrics extends Token {
 
 export interface AggregateMetrics {
   averageMaxGainPercent: number;
+  averageMaxLossPercent: number;
   averageOptimalTargetPercent: number;
   targetReachedRate: number;
   tokenCount: number;

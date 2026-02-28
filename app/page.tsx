@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TokenForm } from '@/components/TokenForm';
 import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
 import { TokenImportExport } from '@/components/TokenImportExport';
 import { CreateRuggerFromTokens } from '@/components/CreateRuggerFromTokens';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { getStoredTokens, saveTokens } from '@/lib/storage';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
 import type { Token } from '@/types/token';
@@ -45,6 +47,23 @@ export default function Home() {
     );
   }, []);
 
+  const allSameTargetPercent = useMemo(() => {
+    if (tokens.length === 0) return null;
+    const first = tokens[0].targetExitPercent;
+    return tokens.every((t) => t.targetExitPercent === first) ? first : null;
+  }, [tokens]);
+
+  const [globalTargetPercent, setGlobalTargetPercent] = useState('');
+  const derivedGlobalTarget = allSameTargetPercent != null && globalTargetPercent === ''
+    ? String(allSameTargetPercent)
+    : globalTargetPercent;
+
+  const handleApplyGlobalTarget = useCallback(() => {
+    const value = Number(derivedGlobalTarget.replace(',', '.'));
+    if (!Number.isFinite(value)) return;
+    setTokens((prev) => prev.map((t) => ({ ...t, targetExitPercent: value })));
+  }, [derivedGlobalTarget]);
+
   const tokensWithMetrics = tokens.map(getTokenWithMetrics);
 
   return (
@@ -75,7 +94,7 @@ export default function Home() {
 
         <TokenForm onAdd={handleAdd} />
 
-        <StatsSummary tokens={tokens} showSimulation={false} />
+        <StatsSummary tokens={tokens} />
 
         <TokenImportExport tokens={tokens} onImport={setTokens} />
 
@@ -86,11 +105,40 @@ export default function Home() {
               Aucun token. Ajoute-en un avec le formulaire ci-dessus.
             </p>
           ) : (
-            <TokenTable
-              tokens={tokensWithMetrics}
-              onRemove={handleRemove}
-              onChangeTarget={handleChangeTarget}
-            />
+            <>
+              {allSameTargetPercent != null && (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                  <Label htmlFor="global-target-percent" className="text-sm font-medium">
+                    Objectif commun (%)
+                  </Label>
+                  <Input
+                    id="global-target-percent"
+                    type="text"
+                    inputMode="decimal"
+                    className="w-24"
+                    value={derivedGlobalTarget}
+                    onChange={(e) => setGlobalTargetPercent(e.target.value)}
+                    placeholder="0"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!Number.isFinite(Number(derivedGlobalTarget.replace(',', '.')))}
+                    onClick={handleApplyGlobalTarget}
+                  >
+                    Appliquer à tous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Tous les tokens ont le même objectif. Modifie et applique pour les mettre à jour.
+                  </span>
+                </div>
+              )}
+              <TokenTable
+                tokens={tokensWithMetrics}
+                onRemove={handleRemove}
+                onChangeTarget={handleChangeTarget}
+              />
+            </>
           )}
         </section>
       </div>

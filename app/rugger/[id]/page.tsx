@@ -299,8 +299,8 @@ export default function RuggerDetailPage() {
           <IconArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between overflow-hidden">
+          <div className="min-w-0 flex-1 space-y-1">
             <div className="flex items-center gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
                 {rugger.name ?? `${rugger.walletAddress.slice(0, 10)}…`}
@@ -321,7 +321,7 @@ export default function RuggerDetailPage() {
             </div>
             <div
               className={cn(
-                'min-w-0 overflow-x-hidden',
+                'min-w-0 overflow-x-hidden wrap-break-word',
                 !isHeaderExpanded && 'max-h-24 overflow-y-hidden sm:max-h-none sm:overflow-visible',
                 isHeaderExpanded && 'max-h-[50vh] overflow-y-auto'
               )}
@@ -332,12 +332,12 @@ export default function RuggerDetailPage() {
                     href={rugger.description.trim()}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block truncate text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+                    className="block break-all text-sm text-primary underline underline-offset-2 hover:text-primary/80"
                   >
                     {rugger.description}
                   </a>
                 ) : (
-                  <p className="text-sm text-muted-foreground">{rugger.description}</p>
+                  <p className="text-sm text-muted-foreground wrap-break-word">{rugger.description}</p>
                 )
               ) : null}
               {(rugger.volumeMin != null || rugger.volumeMax != null) && (
@@ -351,11 +351,11 @@ export default function RuggerDetailPage() {
                 </p>
               )}
               {rugger.notes?.trim() ? (
-                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+                <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">
                   {rugger.notes}
                 </p>
               ) : null}
-              <p className="mt-2 truncate font-mono text-sm text-muted-foreground">
+              <p className="mt-2 break-all font-mono text-sm text-muted-foreground">
                 {rugger.walletAddress}
               </p>
             </div>
@@ -369,7 +369,7 @@ export default function RuggerDetailPage() {
               {isHeaderExpanded ? 'Voir moins' : 'Voir plus'}
             </Button>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2 sm:flex-nowrap">
             <Button
               type="button"
               variant="outline"

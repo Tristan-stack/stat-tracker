@@ -57,7 +57,7 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
         <CardTitle className="text-xl">Résumé</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-6 sm:gap-8 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-6 sm:gap-8 sm:grid-cols-2 lg:grid-cols-6">
           <div className="min-w-0 sm:col-span-2 lg:col-span-1">
             <p className="truncate text-sm font-medium text-muted-foreground">Ma rentabilité réaliste</p>
             <p
@@ -90,6 +90,17 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             >
               {formatPercent(metrics.averageMaxGainPercent)}
             </p>
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-muted-foreground">Stop loss min conseillé</p>
+            <p className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-400">
+              {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent)}
+            </p>
+            {metrics.tokenCount > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Basé sur la moyenne des pertes max
+              </p>
+            )}
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">Objectif sortie moyen (ce que tu vises)</p>
