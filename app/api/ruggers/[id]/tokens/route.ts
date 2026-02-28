@@ -87,8 +87,9 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: ruggerId } = await context.params;
-  const body = (await req.json()) as { tokens?: Token[] };
+  const body = (await req.json()) as { tokens?: Token[]; replace?: boolean };
   const payload = body.tokens ?? [];
+  const replace = body.replace !== false;
 
   if (!Array.isArray(payload) || payload.length === 0) {
     return NextResponse.json({ error: 'No tokens provided' }, { status: 400 });
@@ -110,7 +111,9 @@ export async function POST(
     return NextResponse.json({ error: 'No valid tokens' }, { status: 400 });
   }
 
-  await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
+  if (replace) {
+    await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
+  }
 
   const rowsToInsert: (string | number)[] = [];
   const placeholders: string[] = [];

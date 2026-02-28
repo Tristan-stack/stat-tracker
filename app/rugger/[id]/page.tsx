@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { TokenTable } from '@/components/TokenTable';
+import { TokenForm } from '@/components/TokenForm';
 import { StatsSummary } from '@/components/StatsSummary';
 import { TokenImportExport } from '@/components/TokenImportExport';
 import { Button } from '@/components/ui/button';
@@ -144,6 +145,35 @@ export default function RuggerDetailPage() {
       await loadRugger(id);
     },
     [id, loadTokens, loadAllTokensForStats, loadRugger]
+  );
+
+  const handleAddToken = useCallback(
+    async (token: Token) => {
+      if (!id) return;
+      const response = await fetch(`/api/ruggers/${id}/tokens`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokens: [token], replace: false }),
+      });
+      if (!response.ok) return;
+      setPage(1);
+      await loadTokens(id, 1);
+      await loadAllTokensForStats(id);
+    },
+    [id, loadTokens, loadAllTokensForStats]
+  );
+
+  const handleRemoveToken = useCallback(
+    async (tokenId: string) => {
+      if (!id) return;
+      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) return;
+      await loadTokens(id, page);
+      await loadAllTokensForStats(id);
+    },
+    [id, page, loadTokens, loadAllTokensForStats]
   );
 
   const handleUpdateRugger = useCallback(
@@ -488,6 +518,8 @@ export default function RuggerDetailPage() {
 
         <TokenImportExport tokens={allTokensForStats} onImport={handleImportTokens} />
 
+        <TokenForm onAdd={handleAddToken} />
+
         <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -549,7 +581,7 @@ export default function RuggerDetailPage() {
             )}
             <TokenTable
               tokens={tokensWithMetrics}
-              onRemove={() => {}}
+              onRemove={handleRemoveToken}
               onChangeTarget={() => {}}
             />
             <div className="flex justify-end gap-2">
