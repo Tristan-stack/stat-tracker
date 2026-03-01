@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics } from '@/types/token';
@@ -25,6 +26,14 @@ export interface TokenTableProps {
 }
 
 export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyName = useCallback(async (token: TokenWithMetrics) => {
+    await navigator.clipboard.writeText(token.name);
+    setCopiedId(token.id);
+    setTimeout(() => setCopiedId((prev) => (prev === token.id ? null : prev)), 1500);
+  }, []);
+
   return (
     <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
       <table className="w-full min-w-[640px] text-xs sm:text-sm">
@@ -54,7 +63,14 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
                     )}
                     aria-hidden
                   />
-                  <span className="truncate">{t.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyName(t)}
+                    className="truncate cursor-pointer hover:text-primary transition-colors"
+                    title="Cliquer pour copier"
+                  >
+                    {copiedId === t.id ? '✓ Copié' : t.name}
+                  </button>
                 </div>
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.entryPrice)}</td>
