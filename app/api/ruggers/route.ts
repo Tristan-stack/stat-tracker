@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import type { Rugger, WalletType } from '@/types/rugger';
+import type { Rugger, WalletType, StatusId } from '@/types/rugger';
+
+const VALID_STATUS_IDS: StatusId[] = ['verification', 'en_test', 'actif'];
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '20');
+  const statusParam = searchParams.get('status');
+  const statusFilter: StatusId | null =
+    statusParam && VALID_STATUS_IDS.includes(statusParam as StatusId) ? (statusParam as StatusId) : null;
+
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 && pageSize <= 100 ? pageSize : 20;
   const offset = (safePage - 1) * safePageSize;
+
+  const whereClause = statusFilter ? ' where r.status_id = $3' : '';
+  const mainParams = statusFilter ? [safePageSize, offset, statusFilter] : [safePageSize, offset];
 
   const rows = await query<{
     id: string;
@@ -21,6 +30,7 @@ export async function GET(req: NextRequest) {
     start_hour: number | null;
     end_hour: number | null;
     notes: string | null;
+    status_id: StatusId;
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
@@ -37,17 +47,25 @@ export async function GET(req: NextRequest) {
         r.start_hour,
         r.end_hour,
         r.notes,
+        r.status_id,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
       from ruggers r
+      ${whereClause}
       order by r.created_at desc
       limit $1 offset $2
     `,
-    [safePageSize, offset]
+    mainParams
   );
 
-  const countRows = await query<{ count: string }>(`select count(*)::text as count from ruggers`, []);
+  const countParams = statusFilter ? [statusFilter] : [];
+  const countRows = await query<{ count: string }>(
+    statusFilter
+      ? `select count(*)::text as count from ruggers where status_id = $1`
+      : `select count(*)::text as count from ruggers`,
+    countParams
+  );
   const total = Number(countRows[0]?.count ?? '0');
 
   const ruggers: Rugger[] = rows.map((row) => ({
@@ -61,6 +79,7 @@ export async function GET(req: NextRequest) {
     startHour: row.start_hour ?? null,
     endHour: row.end_hour ?? null,
     notes: row.notes ?? null,
+    statusId: row.status_id,
     createdAt: row.created_at,
     tokenCount: row.token_count,
     avgMaxGainPercent: Number(row.avg_max_gain_percent),
@@ -119,12 +138,13 @@ export async function POST(req: NextRequest) {
     start_hour: number | null;
     end_hour: number | null;
     notes: string | null;
+    status_id: StatusId;
     created_at: string;
   }>(
     `
       insert into ruggers (name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes)
       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, created_at
+      returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, created_at
     `,
     [name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
   );
@@ -142,6 +162,7 @@ export async function POST(req: NextRequest) {
     startHour: row.start_hour ?? null,
     endHour: row.end_hour ?? null,
     notes: row.notes ?? null,
+    statusId: row.status_id,
     createdAt: row.created_at,
     tokenCount: 0,
     avgMaxGainPercent: 0,

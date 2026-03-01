@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import type { Token } from '@/types/token';
+import type { StatusId } from '@/types/rugger';
 
 interface DbToken {
   id: string;
@@ -10,6 +11,7 @@ interface DbToken {
   high: number;
   low: number;
   target_exit_percent: number;
+  status_id: StatusId;
   created_at: string;
 }
 
@@ -20,44 +22,40 @@ export async function GET(
   const { id: ruggerId } = await context.params;
   const { searchParams } = new URL(req.url);
   const fetchAll = searchParams.get('all') === 'true';
+  const statusFilter = searchParams.get('status') as StatusId | null;
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 && pageSize <= 100 ? pageSize : 10;
   const offset = (safePage - 1) * safePageSize;
 
+  const whereClause = statusFilter
+    ? 'where rugger_id = $1 and status_id = $2'
+    : 'where rugger_id = $1';
+  const baseParams: (string | number)[] = statusFilter ? [ruggerId, statusFilter] : [ruggerId];
+
   const countRows = await query<{ count: string }>(
-    'select count(*)::text as count from rugger_tokens where rugger_id = $1',
-    [ruggerId]
+    `select count(*)::text as count from rugger_tokens ${whereClause}`,
+    baseParams
   );
   const total = Number(countRows[0]?.count ?? '0');
 
+  const selectCols = 'id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, created_at';
   const rows = fetchAll
     ? await query<DbToken>(
-        `
-          select id, rugger_id, name, entry_price, high, low, target_exit_percent, created_at
-          from rugger_tokens
-          where rugger_id = $1
-          order by created_at desc
-        `,
-        [ruggerId]
+        `select ${selectCols} from rugger_tokens ${whereClause} order by created_at desc`,
+        baseParams
       )
     : await query<DbToken>(
-        `
-          select id, rugger_id, name, entry_price, high, low, target_exit_percent, created_at
-          from rugger_tokens
-          where rugger_id = $1
-          order by created_at desc
-          limit $2 offset $3
-        `,
-        [ruggerId, safePageSize, offset]
+        `select ${selectCols} from rugger_tokens ${whereClause} order by created_at desc limit $${baseParams.length + 1} offset $${baseParams.length + 2}`,
+        [...baseParams, safePageSize, offset]
       );
 
   let allSameTargetPercent: number | null = null;
   if (total > 0) {
     const distinctRows = await query<{ target_exit_percent: number }>(
-      'select distinct target_exit_percent from rugger_tokens where rugger_id = $1',
-      [ruggerId]
+      `select distinct target_exit_percent from rugger_tokens ${whereClause}`,
+      baseParams
     );
     if (distinctRows.length === 1) {
       allSameTargetPercent = distinctRows[0].target_exit_percent;
@@ -71,6 +69,7 @@ export async function GET(
     high: row.high,
     low: row.low,
     targetExitPercent: row.target_exit_percent,
+    statusId: row.status_id,
   }));
 
   return NextResponse.json({
@@ -111,6 +110,9 @@ export async function POST(
     return NextResponse.json({ error: 'No valid tokens' }, { status: 400 });
   }
 
+  const ruggerRows = await query<{ status_id: StatusId }>('select status_id from ruggers where id = $1', [ruggerId]);
+  const ruggerStatusId = ruggerRows[0]?.status_id ?? 'verification';
+
   if (replace) {
     await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
   }
@@ -118,9 +120,9 @@ export async function POST(
   const rowsToInsert: (string | number)[] = [];
   const placeholders: string[] = [];
   cleaned.forEach((token, index) => {
-    const base = index * 7;
+    const base = index * 8;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
     );
     rowsToInsert.push(
       crypto.randomUUID(),
@@ -129,14 +131,15 @@ export async function POST(
       token.entryPrice,
       token.high,
       token.low,
-      token.targetExitPercent
+      token.targetExitPercent,
+      ruggerStatusId
     );
   });
 
   await query<DbToken>(
     `
       insert into rugger_tokens
-        (id, rugger_id, name, entry_price, high, low, target_exit_percent)
+        (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id)
       values ${placeholders.join(', ')}
     `,
     rowsToInsert

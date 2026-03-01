@@ -1,4 +1,4 @@
-import type { Token, TokenWithMetrics, AggregateMetrics } from '@/types/token';
+import type { Token, TokenWithMetrics, AggregateMetrics, AcceptanceCriteria } from '@/types/token';
 
 export function getTargetExitPrice(entryPrice: number, targetExitPercent: number): number {
   return entryPrice * (1 + targetExitPercent / 100);
@@ -53,5 +53,45 @@ export function getAggregateMetrics(tokens: Token[]): AggregateMetrics {
     averageOptimalTargetPercent: totalTargetPercent / tokens.length,
     targetReachedRate: reachedCount / tokens.length,
     tokenCount: tokens.length,
+  };
+}
+
+export function getMaxConsecutiveLosses(tokens: Token[]): number {
+  const withMetrics = tokens.map(getTokenWithMetrics);
+  let max = 0;
+  let current = 0;
+  for (const t of withMetrics) {
+    if (!t.targetReached) {
+      current++;
+      if (current > max) max = current;
+    } else {
+      current = 0;
+    }
+  }
+  return max;
+}
+
+export function getAcceptanceCriteria(tokens: Token[]): AcceptanceCriteria {
+  if (tokens.length === 0) {
+    return {
+      winRate: 0,
+      maxConsecutiveLosses: 0,
+      meetsWinRateCriteria: false,
+      meetsLossStreakCriteria: true,
+      meetsAllCriteria: false,
+    };
+  }
+  const withMetrics = tokens.map(getTokenWithMetrics);
+  const reachedCount = withMetrics.filter((t) => t.targetReached).length;
+  const winRate = (reachedCount / tokens.length) * 100;
+  const maxConsecutiveLosses = getMaxConsecutiveLosses(tokens);
+  const meetsWinRateCriteria = winRate >= 45;
+  const meetsLossStreakCriteria = maxConsecutiveLosses <= 6;
+  return {
+    winRate,
+    maxConsecutiveLosses,
+    meetsWinRateCriteria,
+    meetsLossStreakCriteria,
+    meetsAllCriteria: meetsWinRateCriteria && meetsLossStreakCriteria,
   };
 }

@@ -1,3 +1,5 @@
+import type { StatusId } from './rugger';
+
 export interface Token {
   id: string;
   name: string;
@@ -5,6 +7,7 @@ export interface Token {
   high: number;
   low: number;
   targetExitPercent: number;
+  statusId?: StatusId;
 }
 
 export interface TokenWithMetrics extends Token {
@@ -20,4 +23,12 @@ export interface AggregateMetrics {
   averageOptimalTargetPercent: number;
   targetReachedRate: number;
   tokenCount: number;
+}
+
+export interface AcceptanceCriteria {
+  winRate: number;
+  maxConsecutiveLosses: number;
+  meetsWinRateCriteria: boolean;
+  meetsLossStreakCriteria: boolean;
+  meetsAllCriteria: boolean;
 }

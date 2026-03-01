@@ -2,13 +2,22 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { Rugger, WalletType } from '@/types/rugger';
+import type { Rugger, WalletType, StatusId } from '@/types/rugger';
+import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { IconPencil, IconTrash } from '@tabler/icons-react';
+
+function StatusBadge({ statusId }: { statusId: StatusId }) {
+  return (
+    <span className={cn('rounded px-2 py-0.5 text-[11px] font-medium tracking-wide', STATUS_BADGE_STYLES[statusId])}>
+      {STATUS_LABELS[statusId]}
+    </span>
+  );
+}
 
 export default function RuggerPage() {
   const [ruggers, setRuggers] = useState<Rugger[]>([]);
@@ -31,13 +40,18 @@ export default function RuggerPage() {
   const [editStartHour, setEditStartHour] = useState<string>('');
   const [editEndHour, setEditEndHour] = useState<string>('');
   const [editNotes, setEditNotes] = useState('');
+  const [ruggerStatusFilter, setRuggerStatusFilter] = useState<StatusId | 'all'>('all');
 
   const loadRuggers = useCallback(async () => {
-    const response = await fetch('/api/ruggers');
+    const params = new URLSearchParams();
+    if (ruggerStatusFilter !== 'all') {
+      params.set('status', ruggerStatusFilter);
+    }
+    const response = await fetch(`/api/ruggers?${params.toString()}`);
     if (!response.ok) return;
     const data = (await response.json()) as { ruggers: Rugger[] };
     setRuggers(data.ruggers);
-  }, []);
+  }, [ruggerStatusFilter]);
 
   useEffect(() => {
     queueMicrotask(() => void loadRuggers());
@@ -306,10 +320,32 @@ export default function RuggerPage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold">Mes ruggers</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Mes ruggers</h2>
+          <div className="flex gap-1">
+            {(['all', ...STATUS_ORDER] as const).map((s) => {
+              const styles = STATUS_FILTER_BUTTON_STYLES[s];
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setRuggerStatusFilter(s)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                    ruggerStatusFilter === s ? styles.selected : styles.unselected
+                  )}
+                >
+                  {s === 'all' ? 'Tous' : STATUS_LABELS[s]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {ruggers.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
-            Aucun rugger enregistré. Ajoute-en un avec le formulaire ci-dessus.
+            {ruggerStatusFilter === 'all'
+              ? 'Aucun rugger enregistré. Ajoute-en un avec le formulaire ci-dessus.'
+              : `Aucun rugger avec le statut « ${STATUS_LABELS[ruggerStatusFilter]} ». Change le filtre ou ajoute-en un.`}
           </p>
         ) : (
           <ul className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -325,16 +361,19 @@ export default function RuggerPage() {
                         <span className="min-w-0 truncate font-medium">
                           {rugger.name ?? rugger.walletAddress.slice(0, 10)}
                         </span>
-                        <span
-                          className={cn(
-                            'shrink-0 rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide',
-                            rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                            rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                            rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200'
-                          )}
-                        >
-                          {walletTypeLabel[rugger.walletType]}
-                        </span>
+                        <div className="flex shrink-0 gap-1.5">
+                          <StatusBadge statusId={rugger.statusId} />
+                          <span
+                            className={cn(
+                              'rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide',
+                              rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                              rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+                              rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200'
+                            )}
+                          >
+                            {walletTypeLabel[rugger.walletType]}
+                          </span>
+                        </div>
                       </div>
                       {rugger.description ? (
                         <p className="rugger-desc line-clamp-2 wrap-break-word text-xs text-muted-foreground">

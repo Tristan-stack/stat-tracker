@@ -1,6 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import type { Rugger, WalletType } from '@/types/rugger';
+import type { Rugger, WalletType, StatusId } from '@/types/rugger';
+import { STATUS_ORDER } from '@/types/rugger';
+
+interface RuggerRow {
+  id: string;
+  name: string | null;
+  description: string | null;
+  wallet_address: string;
+  wallet_type: WalletType;
+  volume_min: number | null;
+  volume_max: number | null;
+  start_hour: number | null;
+  end_hour: number | null;
+  notes: string | null;
+  status_id: StatusId;
+  created_at: string;
+  token_count: number;
+  avg_max_gain_percent: number;
+}
+
+function toRugger(r: RuggerRow): Rugger {
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    walletAddress: r.wallet_address,
+    walletType: r.wallet_type,
+    volumeMin: r.volume_min ?? null,
+    volumeMax: r.volume_max ?? null,
+    startHour: r.start_hour ?? null,
+    endHour: r.end_hour ?? null,
+    notes: r.notes ?? null,
+    statusId: r.status_id,
+    createdAt: r.created_at,
+    tokenCount: r.token_count,
+    avgMaxGainPercent: Number(r.avg_max_gain_percent),
+  };
+}
+
+const RUGGER_SELECT = `
+  select r.id, r.name, r.description, r.wallet_address, r.wallet_type,
+    r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.status_id, r.created_at,
+    (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
+    (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
+  from ruggers r`;
 
 export async function GET(
   _req: NextRequest,
@@ -8,21 +52,7 @@ export async function GET(
 ) {
   const { id: ruggerId } = await context.params;
 
-  const rows = await query<{
-    id: string;
-    name: string | null;
-    description: string | null;
-    wallet_address: string;
-    wallet_type: WalletType;
-    volume_min: number | null;
-    volume_max: number | null;
-    start_hour: number | null;
-    end_hour: number | null;
-    notes: string | null;
-    created_at: string;
-    token_count: number;
-    avg_max_gain_percent: number;
-  }>(
+  const rows = await query<RuggerRow>(
     `
       select
         r.id,
@@ -35,6 +65,7 @@ export async function GET(
         r.start_hour,
         r.end_hour,
         r.notes,
+        r.status_id,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
@@ -49,23 +80,7 @@ export async function GET(
     return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
   }
 
-  const rugger: Rugger = {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    walletAddress: row.wallet_address,
-    walletType: row.wallet_type,
-    volumeMin: row.volume_min ?? null,
-    volumeMax: row.volume_max ?? null,
-    startHour: row.start_hour ?? null,
-    endHour: row.end_hour ?? null,
-    notes: row.notes ?? null,
-    createdAt: row.created_at,
-    tokenCount: row.token_count,
-    avgMaxGainPercent: Number(row.avg_max_gain_percent),
-  };
-
-  return NextResponse.json(rugger);
+  return NextResponse.json(toRugger(row));
 }
 
 export async function PATCH(
@@ -83,6 +98,7 @@ export async function PATCH(
     startHour?: number | null;
     endHour?: number | null;
     notes?: string | null;
+    statusId?: StatusId;
   };
 
   const walletType = body.walletType;
@@ -90,9 +106,17 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid walletType' }, { status: 400 });
   }
 
-  const existing = await query<{ id: string }>('select id from ruggers where id = $1', [ruggerId]);
+  const existing = await query<{ id: string; status_id: StatusId }>('select id, status_id from ruggers where id = $1', [ruggerId]);
   if (existing.length === 0) {
     return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
+  if (body.statusId !== undefined) {
+    const currentOrder = STATUS_ORDER.indexOf(existing[0].status_id);
+    const nextOrder = STATUS_ORDER.indexOf(body.statusId);
+    if (nextOrder < 0 || nextOrder <= currentOrder) {
+      return NextResponse.json({ error: 'Invalid status transition' }, { status: 400 });
+    }
   }
 
   const updates: string[] = [];
@@ -145,67 +169,23 @@ export async function PATCH(
     updates.push(`notes = $${paramIndex++}`);
     values.push(typeof body.notes === 'string' ? (body.notes.trim() || null) : null);
   }
+  if (body.statusId !== undefined) {
+    updates.push(`status_id = $${paramIndex++}`);
+    values.push(body.statusId);
+  }
 
   if (updates.length === 0) {
-    const row = await query<{
-      id: string;
-      name: string | null;
-      description: string | null;
-      wallet_address: string;
-      wallet_type: WalletType;
-      volume_min: number | null;
-      volume_max: number | null;
-      start_hour: number | null;
-      end_hour: number | null;
-      notes: string | null;
-      created_at: string;
-      token_count: number;
-      avg_max_gain_percent: number;
-    }>(
-      `select r.id, r.name, r.description, r.wallet_address, r.wallet_type, r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.created_at,
-        (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
-        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
-       from ruggers r where r.id = $1`,
-      [ruggerId]
-    );
+    const row = await query<RuggerRow>(`${RUGGER_SELECT} where r.id = $1`, [ruggerId]);
     const r = row[0];
     if (!r) return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-    return NextResponse.json({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      walletAddress: r.wallet_address,
-      walletType: r.wallet_type,
-      volumeMin: r.volume_min ?? null,
-      volumeMax: r.volume_max ?? null,
-      startHour: r.start_hour ?? null,
-      endHour: r.end_hour ?? null,
-      notes: r.notes ?? null,
-      createdAt: r.created_at,
-      tokenCount: r.token_count,
-      avgMaxGainPercent: Number(r.avg_max_gain_percent),
-    });
+    return NextResponse.json(toRugger(r));
   }
 
   values.push(ruggerId);
   const setClause = updates.join(', ');
-  const rows = await query<{
-    id: string;
-    name: string | null;
-    description: string | null;
-    wallet_address: string;
-    wallet_type: WalletType;
-    volume_min: number | null;
-    volume_max: number | null;
-    start_hour: number | null;
-    end_hour: number | null;
-    notes: string | null;
-    created_at: string;
-    token_count: number;
-    avg_max_gain_percent: number;
-  }>(
+  const rows = await query<RuggerRow>(
     `update ruggers set ${setClause} where id = $${paramIndex}
-     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, created_at,
+     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, created_at,
        (select count(*)::int from rugger_tokens t where t.rugger_id = ruggers.id) as token_count,
        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = ruggers.id) as avg_max_gain_percent`,
     values
@@ -213,23 +193,7 @@ export async function PATCH(
 
   const row = rows[0];
   if (!row) return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-
-  const updated: Rugger = {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    walletAddress: row.wallet_address,
-    walletType: row.wallet_type,
-    volumeMin: row.volume_min ?? null,
-    volumeMax: row.volume_max ?? null,
-    startHour: row.start_hour ?? null,
-    endHour: row.end_hour ?? null,
-    notes: row.notes ?? null,
-    createdAt: row.created_at,
-    tokenCount: row.token_count,
-    avgMaxGainPercent: Number(row.avg_max_gain_percent),
-  };
-  return NextResponse.json(updated);
+  return NextResponse.json(toRugger(row));
 }
 
 export async function DELETE(

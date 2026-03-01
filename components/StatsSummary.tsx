@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getAggregateMetrics, getTokenWithMetrics } from '@/lib/token-calculations';
+import { getAggregateMetrics, getTokenWithMetrics, getAcceptanceCriteria } from '@/lib/token-calculations';
 import type { Token } from '@/types/token';
 
 function formatNum(value: number, decimals = 2): string {
@@ -31,6 +31,7 @@ export interface StatsSummaryProps {
 
 export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProps) {
   const metrics = getAggregateMetrics(tokens);
+  const acceptance = getAcceptanceCriteria(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
 
   const amount = parseDecimal(simulatedAmount);
@@ -138,6 +139,38 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             </p>
           </div>
         </div>
+
+        {metrics.tokenCount > 0 && (
+          <div
+            className={`flex flex-wrap items-center gap-4 rounded-lg border px-4 py-3 ${
+              acceptance.meetsAllCriteria
+                ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30'
+                : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30'
+            }`}
+          >
+            <p className="text-sm font-medium">
+              {acceptance.meetsAllCriteria ? 'Critères d\'acceptation remplis' : 'Critères d\'acceptation non remplis'}
+            </p>
+            <span
+              className={`text-sm ${
+                acceptance.meetsWinRateCriteria
+                  ? 'text-green-700 dark:text-green-400'
+                  : 'text-red-700 dark:text-red-400'
+              }`}
+            >
+              Win rate : {formatNum(acceptance.winRate, 1)} % {acceptance.meetsWinRateCriteria ? '≥' : '<'} 45 %
+            </span>
+            <span
+              className={`text-sm ${
+                acceptance.meetsLossStreakCriteria
+                  ? 'text-green-700 dark:text-green-400'
+                  : 'text-red-700 dark:text-red-400'
+              }`}
+            >
+              Pertes consécutives max : {acceptance.maxConsecutiveLosses} {acceptance.meetsLossStreakCriteria ? '≤' : '>'} 6
+            </span>
+          </div>
+        )}
 
         {showSimulation && (
           <div className="mt-2 space-y-4 rounded-lg border bg-muted/30 p-4 sm:p-5">

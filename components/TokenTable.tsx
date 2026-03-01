@@ -3,7 +3,9 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics } from '@/types/token';
+import { STATUS_DOT_CLASSES } from '@/types/rugger';
 import { Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -43,7 +45,18 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
         <tbody>
           {tokens.map((t) => (
             <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
-              <td className="max-w-[100px] truncate px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>{t.name}</td>
+              <td className="max-w-[100px] px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={cn(
+                      'size-2 shrink-0 rounded-full',
+                      t.statusId ? STATUS_DOT_CLASSES[t.statusId] : 'bg-muted-foreground/40'
+                    )}
+                    aria-hidden
+                  />
+                  <span className="truncate">{t.name}</span>
+                </div>
+              </td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.entryPrice)}</td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>

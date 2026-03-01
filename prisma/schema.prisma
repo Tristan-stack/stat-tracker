@@ -6,6 +6,16 @@ datasource db {
   provider = "postgresql"
 }
 
+model Status {
+  id      String        @id
+  label   String
+  order   Int           @unique
+  ruggers Rugger[]
+  tokens  RuggerToken[]
+
+  @@map("statuses")
+}
+
 model Rugger {
   id            String        @id @default(dbgenerated("gen_random_uuid()"))
   userId        String?       @map("user_id")
@@ -18,6 +28,8 @@ model Rugger {
   startHour     Int?          @map("start_hour")
   endHour       Int?          @map("end_hour")
   notes         String?       @map("notes")
+  statusId      String        @default("verification") @map("status_id")
+  status        Status        @relation(fields: [statusId], references: [id])
   createdAt     DateTime      @default(now()) @map("created_at")
   tokens        RuggerToken[]
 
@@ -34,6 +46,8 @@ model RuggerToken {
   high              Float
   low               Float
   targetExitPercent Float    @map("target_exit_percent")
+  statusId          String   @default("verification") @map("status_id")
+  status            Status   @relation(fields: [statusId], references: [id])
   createdAt         DateTime @default(now()) @map("created_at")
 
   @@index([ruggerId, createdAt])
