@@ -87,18 +87,6 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             </p>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Moyenne rentabilité (gain max %)</p>
-            <p
-              className={`mt-2 text-2xl font-semibold ${
-                metrics.averageMaxGainPercent >= 0
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
-              }`}
-            >
-              {formatPercent(metrics.averageMaxGainPercent)}
-            </p>
-          </div>
-          <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">Perte max moyenne</p>
             <p className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-400">
               {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent)}
@@ -126,19 +114,6 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             >
               {metrics.tokenCount === 0 ? '-' : `${formatPercent(metrics.averageOptimalTargetPercent)}`}
             </p>
-            {metrics.tokenCount > 0 && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {metrics.averageOptimalTargetPercent < metrics.averageMaxGainPercent
-                  ? `Tu peux viser plus haut en moyenne. Sortie optimisée recommandée : ${formatPercent(
-                      metrics.averageMaxGainPercent
-                    )}`
-                  : metrics.averageOptimalTargetPercent > metrics.averageMaxGainPercent
-                    ? `Tu vises au-dessus du potentiel moyen. Sortie optimisée recommandée : ${formatPercent(
-                        metrics.averageMaxGainPercent
-                      )}`
-                    : 'Aligné avec le potentiel moyen.'}
-              </p>
-            )}
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Objectifs atteints</p>
