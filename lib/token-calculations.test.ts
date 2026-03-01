@@ -136,6 +136,7 @@ describe('getAggregateMetrics', () => {
   it('returns zeros for empty array', () => {
     const metrics = getAggregateMetrics([]);
     expect(metrics).toEqual({
+      averageEntryPrice: 0,
       averageMaxGainPercent: 0,
       averageMaxLossPercent: 0,
       averageOptimalTargetPercent: 0,
@@ -149,6 +150,7 @@ describe('getAggregateMetrics', () => {
     const metrics = getAggregateMetrics(tokens);
 
     expect(metrics.tokenCount).toBe(1);
+    expect(metrics.averageEntryPrice).toBe(100);
     expect(metrics.averageMaxGainPercent).toBe(100);
     expect(metrics.averageMaxLossPercent).toBe(-20);
     expect(metrics.averageOptimalTargetPercent).toBe(80);
@@ -163,6 +165,7 @@ describe('getAggregateMetrics', () => {
     const metrics = getAggregateMetrics(tokens);
 
     expect(metrics.tokenCount).toBe(2);
+    expect(metrics.averageEntryPrice).toBe(100);
     expect(metrics.averageMaxGainPercent).toBe((100 + 20) / 2);
     expect(metrics.averageMaxLossPercent).toBe((-20 + -50) / 2);
     expect(metrics.averageOptimalTargetPercent).toBe(50);

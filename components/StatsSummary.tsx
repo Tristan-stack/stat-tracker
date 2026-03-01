@@ -81,6 +81,12 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             <p className="mt-2 text-2xl font-semibold">{metrics.tokenCount}</p>
           </div>
           <div className="min-w-0">
+            <p className="text-sm font-medium text-muted-foreground">Moyenne de l&apos;entrée</p>
+            <p className="mt-2 text-2xl font-semibold tabular-nums">
+              {metrics.tokenCount === 0 ? '—' : formatNum(metrics.averageEntryPrice)}
+            </p>
+          </div>
+          <div className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">Moyenne rentabilité (gain max %)</p>
             <p
               className={`mt-2 text-2xl font-semibold ${
@@ -93,13 +99,19 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             </p>
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-muted-foreground">Stop loss min conseillé</p>
+            <p className="truncate text-sm font-medium text-muted-foreground">Perte max moyenne</p>
             <p className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-400">
               {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent)}
             </p>
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-muted-foreground">Stop loss conseillé</p>
+            <p className="mt-2 text-2xl font-semibold text-orange-600 dark:text-orange-400">
+              {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent * 0.65)}
+            </p>
             {metrics.tokenCount > 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Basé sur la moyenne des pertes max
+                65 % de la perte max moyenne
               </p>
             )}
           </div>

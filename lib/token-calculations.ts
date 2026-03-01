@@ -35,6 +35,7 @@ export function getTokenWithMetrics(token: Token): TokenWithMetrics {
 export function getAggregateMetrics(tokens: Token[]): AggregateMetrics {
   if (tokens.length === 0) {
     return {
+      averageEntryPrice: 0,
       averageMaxGainPercent: 0,
       averageMaxLossPercent: 0,
       averageOptimalTargetPercent: 0,
@@ -43,11 +44,13 @@ export function getAggregateMetrics(tokens: Token[]): AggregateMetrics {
     };
   }
   const withMetrics = tokens.map(getTokenWithMetrics);
+  const totalEntry = tokens.reduce((sum, t) => sum + t.entryPrice, 0);
   const totalMaxGain = withMetrics.reduce((sum, t) => sum + t.maxGainPercent, 0);
   const totalMaxLoss = withMetrics.reduce((sum, t) => sum + t.maxLossPercent, 0);
   const totalTargetPercent = tokens.reduce((sum, t) => sum + t.targetExitPercent, 0);
   const reachedCount = withMetrics.filter((t) => t.targetReached).length;
   return {
+    averageEntryPrice: totalEntry / tokens.length,
     averageMaxGainPercent: totalMaxGain / tokens.length,
     averageMaxLossPercent: totalMaxLoss / tokens.length,
     averageOptimalTargetPercent: totalTargetPercent / tokens.length,
