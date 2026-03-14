@@ -15,7 +15,7 @@ import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
 import type { Token } from '@/types/token';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
-import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight } from '@tabler/icons-react';
+import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 
 interface TokensResponse {
@@ -63,6 +63,7 @@ export default function RuggerDetailPage() {
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
+  const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<string>('all');
 
   const loadRugger = useCallback(async (ruggerId: string) => {
     setIsLoadingRugger(true);
@@ -76,43 +77,55 @@ export default function RuggerDetailPage() {
     }
   }, []);
 
-  const loadTokens = useCallback(async (ruggerId: string, nextPage: number, status?: StatusId | 'all') => {
-    setIsLoadingTokens(true);
-    try {
-      const searchParams = new URLSearchParams({
-        page: String(nextPage),
-        pageSize: '10',
-      });
-      if (status && status !== 'all') {
-        searchParams.set('status', status);
+  const loadTokens = useCallback(
+    async (ruggerId: string, nextPage: number, status?: StatusId | 'all', createdSince?: string) => {
+      setIsLoadingTokens(true);
+      try {
+        const searchParams = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: '10',
+        });
+        if (status && status !== 'all') {
+          searchParams.set('status', status);
+        }
+        if (createdSince && createdSince !== 'all') {
+          searchParams.set('createdSince', createdSince);
+        }
+        const response = await fetch(
+          `/api/ruggers/${ruggerId}/tokens?${searchParams.toString()}`
+        );
+        if (!response.ok) return;
+        const data = (await response.json()) as TokensResponse;
+        setTokensPage(data);
+      } finally {
+        setIsLoadingTokens(false);
       }
-      const response = await fetch(
-        `/api/ruggers/${ruggerId}/tokens?${searchParams.toString()}`
-      );
-      if (!response.ok) return;
-      const data = (await response.json()) as TokensResponse;
-      setTokensPage(data);
-    } finally {
-      setIsLoadingTokens(false);
-    }
-  }, []);
+    },
+    []
+  );
 
-  const loadAllTokensForStats = useCallback(async (ruggerId: string, status?: StatusId | 'all') => {
-    try {
-      const params = new URLSearchParams({ all: 'true' });
-      if (status && status !== 'all') {
-        params.set('status', status);
+  const loadAllTokensForStats = useCallback(
+    async (ruggerId: string, status?: StatusId | 'all', createdSince?: string) => {
+      try {
+        const params = new URLSearchParams({ all: 'true' });
+        if (status && status !== 'all') {
+          params.set('status', status);
+        }
+        if (createdSince && createdSince !== 'all') {
+          params.set('createdSince', createdSince);
+        }
+        const response = await fetch(
+          `/api/ruggers/${ruggerId}/tokens?${params.toString()}`
+        );
+        if (!response.ok) return;
+        const data = (await response.json()) as TokensResponse;
+        setAllTokensForStats(data.tokens);
+      } catch {
+        setAllTokensForStats([]);
       }
-      const response = await fetch(
-        `/api/ruggers/${ruggerId}/tokens?${params.toString()}`
-      );
-      if (!response.ok) return;
-      const data = (await response.json()) as TokensResponse;
-      setAllTokensForStats(data.tokens);
-    } catch {
-      setAllTokensForStats([]);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -125,9 +138,9 @@ export default function RuggerDetailPage() {
       setAllTokensForStats([]);
       return;
     }
-    void loadTokens(id, page, tokenStatusFilter);
-    void loadAllTokensForStats(id, tokenStatusFilter);
-  }, [id, page, tokenStatusFilter, loadTokens, loadAllTokensForStats]);
+    void loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+    void loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+  }, [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
 
   useEffect(() => {
     if (rugger && isEditing) {
@@ -157,11 +170,11 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter);
-      await loadAllTokensForStats(id, tokenStatusFilter);
+      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
       await loadRugger(id);
     },
-    [id, tokenStatusFilter, loadTokens, loadAllTokensForStats, loadRugger]
+    [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats, loadRugger]
   );
 
   const handleAddToken = useCallback(
@@ -174,10 +187,10 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter);
-      await loadAllTokensForStats(id, tokenStatusFilter);
+      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, tokenStatusFilter, loadTokens, loadAllTokensForStats]
+    [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
   );
 
   const handleRemoveToken = useCallback(
@@ -187,10 +200,10 @@ export default function RuggerDetailPage() {
         method: 'DELETE',
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter);
-      await loadAllTokensForStats(id, tokenStatusFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, page, tokenStatusFilter, loadTokens, loadAllTokensForStats]
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
   );
 
   const handleUpdateRugger = useCallback(
@@ -236,12 +249,12 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setGlobalTargetPercent(String(value));
-      await loadTokens(id, page, tokenStatusFilter);
-      await loadAllTokensForStats(id, tokenStatusFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     } finally {
       setIsApplyingGlobalTarget(false);
     }
-  }, [id, globalTargetPercent, page, tokenStatusFilter, loadTokens, loadAllTokensForStats]);
+  }, [id, globalTargetPercent, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
 
   const handleResetTokens = useCallback(async () => {
     if (!id) return;
@@ -249,10 +262,10 @@ export default function RuggerDetailPage() {
     const response = await fetch(`/api/ruggers/${id}/tokens`, { method: 'DELETE' });
     if (!response.ok) return;
     setPage(1);
-    await loadTokens(id, 1, tokenStatusFilter);
-    await loadAllTokensForStats(id, tokenStatusFilter);
+    await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+    await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     await loadRugger(id);
-  }, [id, tokenStatusFilter, loadTokens, loadAllTokensForStats, loadRugger]);
+  }, [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats, loadRugger]);
 
   const handleAdvanceStatus = useCallback(async () => {
     if (!id || !rugger) return;
@@ -263,6 +276,20 @@ export default function RuggerDetailPage() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statusId: nextStatus }),
+    });
+    if (!response.ok) return;
+    await loadRugger(id);
+  }, [id, rugger, loadRugger]);
+
+  const handleRetrogradeStatus = useCallback(async () => {
+    if (!id || !rugger) return;
+    const currentIndex = STATUS_ORDER.indexOf(rugger.statusId);
+    if (currentIndex <= 0) return;
+    const prevStatus = STATUS_ORDER[currentIndex - 1];
+    const response = await fetch(`/api/ruggers/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statusId: prevStatus }),
     });
     if (!response.ok) return;
     await loadRugger(id);
@@ -352,18 +379,32 @@ export default function RuggerDetailPage() {
                   {walletTypeLabel[rugger.walletType]}
                 </span>
               </div>
-              {STATUS_ORDER.indexOf(rugger.statusId) < STATUS_ORDER.length - 1 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAdvanceStatus}
-                  className="gap-1"
-                >
-                  Passer à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) + 1]]}
-                  <IconChevronRight className="size-4" />
-                </Button>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {STATUS_ORDER.indexOf(rugger.statusId) > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRetrogradeStatus}
+                    className="gap-1"
+                  >
+                    <IconChevronLeft className="size-4" />
+                    Revenir à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) - 1]]}
+                  </Button>
+                )}
+                {STATUS_ORDER.indexOf(rugger.statusId) < STATUS_ORDER.length - 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAdvanceStatus}
+                    className="gap-1"
+                  >
+                    Passer à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) + 1]]}
+                    <IconChevronRight className="size-4" />
+                  </Button>
+                )}
+              </div>
             </div>
             <div
               className={cn(
@@ -643,6 +684,27 @@ export default function RuggerDetailPage() {
                 </span>
               </div>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Ajoutés :</span>
+              {(['all', '24h', '3d', '7d', '1mo'] as const).map((period) => (
+                <button
+                  key={period}
+                  type="button"
+                  onClick={() => {
+                    setTokenCreatedSinceFilter(period);
+                    setPage(1);
+                  }}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                    tokenCreatedSinceFilter === period
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  )}
+                >
+                  {period === 'all' ? 'Tous' : period === '1mo' ? '1 mo' : period}
+                </button>
+              ))}
+            </div>
             <TokenTable
               tokens={tokensWithMetrics}
               onRemove={handleRemoveToken}

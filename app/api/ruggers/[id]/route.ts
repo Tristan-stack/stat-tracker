@@ -112,10 +112,9 @@ export async function PATCH(
   }
 
   if (body.statusId !== undefined) {
-    const currentOrder = STATUS_ORDER.indexOf(existing[0].status_id);
     const nextOrder = STATUS_ORDER.indexOf(body.statusId);
-    if (nextOrder < 0 || nextOrder <= currentOrder) {
-      return NextResponse.json({ error: 'Invalid status transition' }, { status: 400 });
+    if (nextOrder < 0) {
+      return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
     }
   }
 

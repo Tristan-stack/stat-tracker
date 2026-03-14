@@ -3,6 +3,19 @@ import { query } from '@/lib/db';
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 
+const CREATED_SINCE_MS: Record<string, number> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '1mo': 30 * 24 * 60 * 60 * 1000,
+};
+
+function getCreatedSinceCutoff(createdSince: string | null): string | null {
+  if (!createdSince || !(createdSince in CREATED_SINCE_MS)) return null;
+  const date = new Date(Date.now() - CREATED_SINCE_MS[createdSince]);
+  return date.toISOString();
+}
+
 interface DbToken {
   id: string;
   rugger_id: string;
@@ -23,16 +36,25 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const fetchAll = searchParams.get('all') === 'true';
   const statusFilter = searchParams.get('status') as StatusId | null;
+  const createdSinceParam = searchParams.get('createdSince');
+  const createdSinceCutoff = getCreatedSinceCutoff(createdSinceParam);
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 && pageSize <= 100 ? pageSize : 10;
   const offset = (safePage - 1) * safePageSize;
 
-  const whereClause = statusFilter
-    ? 'where rugger_id = $1 and status_id = $2'
-    : 'where rugger_id = $1';
-  const baseParams: (string | number)[] = statusFilter ? [ruggerId, statusFilter] : [ruggerId];
+  const conditions: string[] = ['rugger_id = $1'];
+  const baseParams: (string | number)[] = [ruggerId];
+  if (statusFilter) {
+    conditions.push('status_id = $' + (baseParams.length + 1));
+    baseParams.push(statusFilter);
+  }
+  if (createdSinceCutoff) {
+    conditions.push('created_at >= $' + (baseParams.length + 1));
+    baseParams.push(createdSinceCutoff);
+  }
+  const whereClause = 'where ' + conditions.join(' and ');
 
   const countRows = await query<{ count: string }>(
     `select count(*)::text as count from rugger_tokens ${whereClause}`,
