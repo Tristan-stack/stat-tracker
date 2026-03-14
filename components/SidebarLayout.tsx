@@ -1,8 +1,8 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Sidebar,
   SidebarContent,
@@ -15,7 +15,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -43,6 +45,21 @@ function getInitials(name: string | null | undefined, email: string | undefined)
   return (email ?? '??').split('@')[0].slice(0, 2).toUpperCase();
 }
 
+function CloseMobileOnNav() {
+  const pathname = usePathname();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const prevPathRef = useRef(pathname);
+
+  useEffect(() => {
+    if (isMobile && pathname !== prevPathRef.current) {
+      setOpenMobile(false);
+    }
+    prevPathRef.current = pathname;
+  }, [pathname, isMobile, setOpenMobile]);
+
+  return null;
+}
+
 function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -51,17 +68,20 @@ function AppSidebar() {
   const user = session?.user;
 
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
-        <Link
-          href="/"
-          className="flex items-center gap-2 rounded-md px-2 py-2 font-semibold"
-        >
-          <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm">
-            S
-          </span>
-          <span>StatTracker</span>
-        </Link>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild size="lg" tooltip="StatTracker">
+              <Link href="/">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-semibold">
+                  S
+                </span>
+                <span className="truncate font-semibold">StatTracker</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -75,7 +95,7 @@ function AppSidebar() {
                 const Icon = link.icon;
                 return (
                   <SidebarMenuItem key={link.href}>
-                    <SidebarMenuButton asChild isActive={isActive}>
+                    <SidebarMenuButton asChild isActive={isActive} tooltip={link.label}>
                       <Link href={link.href}>
                         <Icon className="size-4 shrink-0" />
                         <span>{link.label}</span>
@@ -90,27 +110,26 @@ function AppSidebar() {
       </SidebarContent>
 
       {user && (
-        <SidebarFooter className="border-t border-sidebar-border p-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-              >
-                <Avatar size="default">
-                  {user.image && <AvatarImage src={user.image} alt={user.name ?? ''} />}
-                  <AvatarFallback>{getInitials(user.name, user.email)}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {user.name ?? user.email}
-                  </p>
-                  {user.name && (
-                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-                  )}
-                </div>
-              </button>
-            </DropdownMenuTrigger>
+        <SidebarFooter className="border-t border-sidebar-border">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuButton size="lg" tooltip={user.name ?? user.email ?? ''}>
+                    <Avatar size="default" className="shrink-0">
+                      {user.image && <AvatarImage src={user.image} alt={user.name ?? ''} />}
+                      <AvatarFallback>{getInitials(user.name, user.email)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {user.name ?? user.email}
+                      </p>
+                      {user.name && (
+                        <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                      )}
+                    </div>
+                  </SidebarMenuButton>
+                </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" className="w-56">
               <DropdownMenuLabel className="font-normal">
                 <p className="truncate text-sm font-medium">{user.name ?? user.email}</p>
@@ -137,9 +156,12 @@ function AppSidebar() {
                 Déconnexion
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarFooter>
       )}
+      <SidebarRail />
     </Sidebar>
   );
 }
@@ -149,21 +171,15 @@ export default function SidebarLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const isMobile = useIsMobile();
-  const isDesktop = !isMobile;
-
   return (
-    <SidebarProvider
-      defaultOpen={true}
-      open={isDesktop ? true : undefined}
-      onOpenChange={isDesktop ? () => {} : undefined}
-    >
+    <SidebarProvider defaultOpen={true}>
+      <CloseMobileOnNav />
       <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 md:hidden">
+      <SidebarInset className="overflow-x-hidden">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
         </header>
-        <div className="flex-1 overflow-auto">{children}</div>
+        <div className="min-w-0 flex-1 overflow-auto">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   );
