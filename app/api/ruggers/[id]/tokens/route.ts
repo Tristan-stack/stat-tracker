@@ -3,17 +3,31 @@ import { query } from '@/lib/db';
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 
-const CREATED_SINCE_MS: Record<string, number> = {
-  '24h': 24 * 60 * 60 * 1000,
-  '3d': 3 * 24 * 60 * 60 * 1000,
-  '7d': 7 * 24 * 60 * 60 * 1000,
-  '1mo': 30 * 24 * 60 * 60 * 1000,
+const CREATED_SINCE_DAYS: Record<string, number> = {
+  '24h': 1,
+  '3d': 3,
+  '7d': 7,
+  '1mo': 30,
 };
 
-function getCreatedSinceCutoff(createdSince: string | null): string | null {
-  if (!createdSince || !(createdSince in CREATED_SINCE_MS)) return null;
-  const date = new Date(Date.now() - CREATED_SINCE_MS[createdSince]);
-  return date.toISOString();
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function getCreatedSinceBounds(createdSince: string | null): { from: string; to?: string } | null {
+  if (!createdSince || !(createdSince in CREATED_SINCE_DAYS)) return null;
+
+  const days = CREATED_SINCE_DAYS[createdSince];
+  const todayStart = startOfLocalDay(new Date());
+  const from = new Date(todayStart);
+  from.setDate(from.getDate() - days);
+
+  const bounds: { from: string; to?: string } = { from: from.toISOString() };
+
+  // Calendar-day filters: exclude "today" to match "yesterday/last N days".
+  bounds.to = todayStart.toISOString();
+
+  return bounds;
 }
 
 interface DbToken {
@@ -37,7 +51,7 @@ export async function GET(
   const fetchAll = searchParams.get('all') === 'true';
   const statusFilter = searchParams.get('status') as StatusId | null;
   const createdSinceParam = searchParams.get('createdSince');
-  const createdSinceCutoff = getCreatedSinceCutoff(createdSinceParam);
+  const createdSinceBounds = getCreatedSinceBounds(createdSinceParam);
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
@@ -50,9 +64,13 @@ export async function GET(
     conditions.push('status_id = $' + (baseParams.length + 1));
     baseParams.push(statusFilter);
   }
-  if (createdSinceCutoff) {
+  if (createdSinceBounds) {
     conditions.push('created_at >= $' + (baseParams.length + 1));
-    baseParams.push(createdSinceCutoff);
+    baseParams.push(createdSinceBounds.from);
+    if (createdSinceBounds.to) {
+      conditions.push('created_at < $' + (baseParams.length + 1));
+      baseParams.push(createdSinceBounds.to);
+    }
   }
   const whereClause = 'where ' + conditions.join(' and ');
 

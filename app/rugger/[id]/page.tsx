@@ -26,11 +26,21 @@ interface TokensResponse {
   allSameTargetPercent: number | null;
 }
 
+type TokenCreatedSinceFilter = 'all' | '24h' | '3d' | '7d' | '1mo';
+
 const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
   mother: 'Mère',
   simple: 'Simple',
 };
+
+function getCreatedSinceLabel(period: TokenCreatedSinceFilter): string {
+  if (period === 'all') return 'Tous';
+  if (period === '24h') return 'Yesterday';
+  if (period === '3d') return 'Last 3 days';
+  if (period === '7d') return 'Last 7 days';
+  return 'Last month';
+}
 
 function StatusBadge({ statusId }: { statusId: StatusId }) {
   return (
@@ -63,7 +73,7 @@ export default function RuggerDetailPage() {
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
-  const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<string>('all');
+  const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<TokenCreatedSinceFilter>('all');
 
   const loadRugger = useCallback(async (ruggerId: string) => {
     setIsLoadingRugger(true);
@@ -78,7 +88,7 @@ export default function RuggerDetailPage() {
   }, []);
 
   const loadTokens = useCallback(
-    async (ruggerId: string, nextPage: number, status?: StatusId | 'all', createdSince?: string) => {
+    async (ruggerId: string, nextPage: number, status?: StatusId | 'all', createdSince?: TokenCreatedSinceFilter) => {
       setIsLoadingTokens(true);
       try {
         const searchParams = new URLSearchParams({
@@ -105,7 +115,7 @@ export default function RuggerDetailPage() {
   );
 
   const loadAllTokensForStats = useCallback(
-    async (ruggerId: string, status?: StatusId | 'all', createdSince?: string) => {
+    async (ruggerId: string, status?: StatusId | 'all', createdSince?: TokenCreatedSinceFilter) => {
       try {
         const params = new URLSearchParams({ all: 'true' });
         if (status && status !== 'all') {
@@ -686,7 +696,7 @@ export default function RuggerDetailPage() {
             )}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-muted-foreground">Ajoutés :</span>
-              {(['all', '24h', '3d', '7d', '1mo'] as const).map((period) => (
+              {(['all', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
                 <button
                   key={period}
                   type="button"
@@ -701,7 +711,7 @@ export default function RuggerDetailPage() {
                       : 'bg-muted text-muted-foreground hover:bg-muted/80'
                   )}
                 >
-                  {period === 'all' ? 'Tous' : period === '1mo' ? '1 mo' : period}
+                  {getCreatedSinceLabel(period)}
                 </button>
               ))}
             </div>
