@@ -35,9 +35,9 @@ const walletTypeLabel: Record<WalletType, string> = {
 };
 
 function getCreatedSinceLabel(period: TokenCreatedSinceFilter): string {
-  if (period === 'all') return 'Tous';
+  if (period === 'all') return 'All';
   if (period === 'today') return 'Today';
-  if (period === '24h') return 'Yesterday';
+  if (period === '24h') return 'Last 24 hours';
   if (period === '3d') return 'Last 3 days';
   if (period === '7d') return 'Last 7 days';
   return 'Last month';
