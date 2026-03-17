@@ -26,7 +26,7 @@ interface TokensResponse {
   allSameTargetPercent: number | null;
 }
 
-type TokenCreatedSinceFilter = 'all' | '24h' | '3d' | '7d' | '1mo';
+type TokenCreatedSinceFilter = 'all' | 'today' | '24h' | '3d' | '7d' | '1mo';
 
 const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
@@ -36,6 +36,7 @@ const walletTypeLabel: Record<WalletType, string> = {
 
 function getCreatedSinceLabel(period: TokenCreatedSinceFilter): string {
   if (period === 'all') return 'Tous';
+  if (period === 'today') return 'Today';
   if (period === '24h') return 'Yesterday';
   if (period === '3d') return 'Last 3 days';
   if (period === '7d') return 'Last 7 days';
@@ -696,7 +697,7 @@ export default function RuggerDetailPage() {
             )}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-muted-foreground">Ajoutés :</span>
-              {(['all', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
+              {(['all', 'today', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
                 <button
                   key={period}
                   type="button"

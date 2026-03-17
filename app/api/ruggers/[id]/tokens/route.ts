@@ -4,6 +4,7 @@ import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 
 const CREATED_SINCE_DAYS: Record<string, number> = {
+  today: 0,
   '24h': 1,
   '3d': 3,
   '7d': 7,
@@ -23,6 +24,13 @@ function getCreatedSinceBounds(createdSince: string | null): { from: string; to?
   from.setDate(from.getDate() - days);
 
   const bounds: { from: string; to?: string } = { from: from.toISOString() };
+
+  if (createdSince === 'today') {
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    bounds.to = tomorrowStart.toISOString();
+    return bounds;
+  }
 
   // Calendar-day filters: exclude "today" to match "yesterday/last N days".
   bounds.to = todayStart.toISOString();
