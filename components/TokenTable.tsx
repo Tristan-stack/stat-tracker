@@ -19,7 +19,19 @@ function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatNum(value, 2)} %`;
 }
 
-function TargetInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+function InlineNumericInput({
+  value,
+  onChange,
+  suffix,
+  min,
+  className: inputClassName,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  suffix?: string;
+  min?: number;
+  className?: string;
+}) {
   const [localValue, setLocalValue] = useState(String(value));
 
   useEffect(() => {
@@ -29,7 +41,8 @@ function TargetInput({ value, onChange }: { value: number; onChange: (n: number)
   const commit = () => {
     const normalized = localValue.trim().replace(',', '.');
     const n = Number(normalized);
-    if (Number.isFinite(n) && n >= 0 && n !== value) {
+    const floor = min ?? 0;
+    if (Number.isFinite(n) && n >= floor && n !== value) {
       onChange(n);
     } else {
       setLocalValue(String(value));
@@ -41,13 +54,16 @@ function TargetInput({ value, onChange }: { value: number; onChange: (n: number)
       <Input
         type="text"
         inputMode="decimal"
-        className="h-8 w-20 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums"
+        className={cn(
+          'h-8 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums',
+          inputClassName ?? 'w-20'
+        )}
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
       />
-      <span className="text-xs text-muted-foreground">%</span>
+      {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
     </div>
   );
 }
@@ -56,9 +72,10 @@ export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onRemove: (id: string) => void;
   onChangeTarget: (id: string, nextPercent: number) => void;
+  onChangeEntryPrice: (id: string, nextPrice: number) => void;
 }
 
-export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps) {
+export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPrice }: TokenTableProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handleCopyName = useCallback(async (token: TokenWithMetrics) => {
@@ -106,13 +123,21 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
                   </button>
                 </div>
               </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.entryPrice)}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                <InlineNumericInput
+                  value={t.entryPrice}
+                  onChange={(n) => onChangeEntryPrice(t.id, n)}
+                  min={0}
+                  className="w-24"
+                />
+              </td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
               <td className="px-5 py-4 text-right tabular-nums">
-                <TargetInput
+                <InlineNumericInput
                   value={t.targetExitPercent}
                   onChange={(n) => onChangeTarget(t.id, n)}
+                  suffix="%"
                 />
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>

@@ -232,6 +232,21 @@ export default function RuggerDetailPage() {
     [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
   );
 
+  const handleChangeEntryPrice = useCallback(
+    async (tokenId: string, nextPrice: number) => {
+      if (!id) return;
+      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryPrice: nextPrice }),
+      });
+      if (!response.ok) return;
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+    },
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+  );
+
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
@@ -735,6 +750,7 @@ export default function RuggerDetailPage() {
               tokens={tokensWithMetrics}
               onRemove={handleRemoveToken}
               onChangeTarget={handleChangeTarget}
+              onChangeEntryPrice={handleChangeEntryPrice}
             />
             <div className="flex justify-end gap-2">
               <Button

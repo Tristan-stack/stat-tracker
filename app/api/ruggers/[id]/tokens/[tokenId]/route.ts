@@ -6,15 +6,36 @@ export async function PATCH(
   context: { params: Promise<{ id: string; tokenId: string }> }
 ) {
   const { id: ruggerId, tokenId } = await context.params;
-  const body = (await req.json()) as { targetExitPercent?: number };
+  const body = (await req.json()) as { targetExitPercent?: number; entryPrice?: number };
 
-  if (typeof body.targetExitPercent !== 'number' || !Number.isFinite(body.targetExitPercent)) {
-    return NextResponse.json({ error: 'targetExitPercent must be a number' }, { status: 400 });
+  const setClauses: string[] = [];
+  const values: (number | string)[] = [];
+  let paramIndex = 1;
+
+  if (body.targetExitPercent !== undefined) {
+    if (typeof body.targetExitPercent !== 'number' || !Number.isFinite(body.targetExitPercent)) {
+      return NextResponse.json({ error: 'targetExitPercent must be a number' }, { status: 400 });
+    }
+    setClauses.push(`target_exit_percent = $${paramIndex++}`);
+    values.push(body.targetExitPercent);
   }
 
+  if (body.entryPrice !== undefined) {
+    if (typeof body.entryPrice !== 'number' || !Number.isFinite(body.entryPrice) || body.entryPrice < 0) {
+      return NextResponse.json({ error: 'entryPrice must be a non-negative number' }, { status: 400 });
+    }
+    setClauses.push(`entry_price = $${paramIndex++}`);
+    values.push(body.entryPrice);
+  }
+
+  if (setClauses.length === 0) {
+    return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+  }
+
+  values.push(tokenId, ruggerId);
   const rows = await query<{ id: string }>(
-    'update rugger_tokens set target_exit_percent = $1 where id = $2 and rugger_id = $3 returning id',
-    [body.targetExitPercent, tokenId, ruggerId]
+    `update rugger_tokens set ${setClauses.join(', ')} where id = $${paramIndex++} and rugger_id = $${paramIndex} returning id`,
+    values
   );
 
   if (rows.length === 0) {

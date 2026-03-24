@@ -47,6 +47,14 @@ export default function Home() {
     );
   }, []);
 
+  const handleChangeEntryPrice = useCallback((id: string, nextPrice: number) => {
+    setTokens((prev) =>
+      prev.map((token) =>
+        token.id === id ? { ...token, entryPrice: nextPrice } : token
+      )
+    );
+  }, []);
+
   const allSameTargetPercent = useMemo(() => {
     if (tokens.length === 0) return null;
     const first = tokens[0].targetExitPercent;
@@ -137,6 +145,7 @@ export default function Home() {
                 tokens={tokensWithMetrics}
                 onRemove={handleRemove}
                 onChangeTarget={handleChangeTarget}
+                onChangeEntryPrice={handleChangeEntryPrice}
               />
             </>
           )}
