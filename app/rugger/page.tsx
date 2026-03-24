@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { IconPencil, IconTrash } from '@tabler/icons-react';
+import { IconPencil, IconTrash, IconArchive, IconArchiveOff } from '@tabler/icons-react';
 
 function StatusBadge({ statusId }: { statusId: StatusId }) {
   return (
@@ -41,17 +41,21 @@ export default function RuggerPage() {
   const [editEndHour, setEditEndHour] = useState<string>('');
   const [editNotes, setEditNotes] = useState('');
   const [ruggerStatusFilter, setRuggerStatusFilter] = useState<StatusId | 'all'>('all');
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadRuggers = useCallback(async () => {
     const params = new URLSearchParams();
     if (ruggerStatusFilter !== 'all') {
       params.set('status', ruggerStatusFilter);
     }
+    if (showArchived) {
+      params.set('archived', 'true');
+    }
     const response = await fetch(`/api/ruggers?${params.toString()}`);
     if (!response.ok) return;
     const data = (await response.json()) as { ruggers: Rugger[] };
     setRuggers(data.ruggers);
-  }, [ruggerStatusFilter]);
+  }, [ruggerStatusFilter, showArchived]);
 
   useEffect(() => {
     queueMicrotask(() => void loadRuggers());
@@ -178,6 +182,21 @@ export default function RuggerPage() {
       e.stopPropagation();
       if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress}" ?`)) return;
       const response = await fetch(`/api/ruggers/${rugger.id}`, { method: 'DELETE' });
+      if (!response.ok) return;
+      await loadRuggers();
+    },
+    [loadRuggers]
+  );
+
+  const handleToggleArchive = useCallback(
+    async (rugger: Rugger, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const response = await fetch(`/api/ruggers/${rugger.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived: !rugger.archived }),
+      });
       if (!response.ok) return;
       await loadRuggers();
     },
@@ -321,24 +340,39 @@ export default function RuggerPage() {
 
       <section>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Mes ruggers</h2>
-          <div className="flex gap-1">
-            {(['all', ...STATUS_ORDER] as const).map((s) => {
-              const styles = STATUS_FILTER_BUTTON_STYLES[s];
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setRuggerStatusFilter(s)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                    ruggerStatusFilter === s ? styles.selected : styles.unselected
-                  )}
-                >
-                  {s === 'all' ? 'Tous' : STATUS_LABELS[s]}
-                </button>
-              );
-            })}
+          <h2 className="text-lg font-semibold">{showArchived ? 'Ruggers archivés' : 'Mes ruggers'}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1">
+              {(['all', ...STATUS_ORDER] as const).map((s) => {
+                const styles = STATUS_FILTER_BUTTON_STYLES[s];
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setRuggerStatusFilter(s)}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                      ruggerStatusFilter === s ? styles.selected : styles.unselected
+                    )}
+                  >
+                    {s === 'all' ? 'Tous' : STATUS_LABELS[s]}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowArchived((prev) => !prev)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                showArchived
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              <IconArchive className="size-3.5" />
+              Archivés
+            </button>
           </div>
         </div>
         {ruggers.length === 0 ? (
@@ -422,6 +456,22 @@ export default function RuggerPage() {
                       aria-label="Modifier"
                     >
                       <IconPencil className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        'size-8',
+                        rugger.archived
+                          ? 'text-amber-600 hover:text-amber-700'
+                          : 'text-muted-foreground hover:text-amber-600'
+                      )}
+                      onClick={(e) => handleToggleArchive(rugger, e)}
+                      aria-label={rugger.archived ? 'Désarchiver' : 'Archiver'}
+                      title={rugger.archived ? 'Désarchiver' : 'Archiver'}
+                    >
+                      {rugger.archived ? <IconArchiveOff className="size-4" /> : <IconArchive className="size-4" />}
                     </Button>
                     <Button
                       type="button"

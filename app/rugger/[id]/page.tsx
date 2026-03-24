@@ -217,6 +217,21 @@ export default function RuggerDetailPage() {
     [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
   );
 
+  const handleChangeTarget = useCallback(
+    async (tokenId: string, nextPercent: number) => {
+      if (!id) return;
+      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetExitPercent: nextPercent }),
+      });
+      if (!response.ok) return;
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+    },
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+  );
+
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
@@ -719,7 +734,7 @@ export default function RuggerDetailPage() {
             <TokenTable
               tokens={tokensWithMetrics}
               onRemove={handleRemoveToken}
-              onChangeTarget={() => {}}
+              onChangeTarget={handleChangeTarget}
             />
             <div className="flex justify-end gap-2">
               <Button

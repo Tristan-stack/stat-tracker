@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics } from '@/types/token';
@@ -17,6 +17,39 @@ function formatNum(value: number, decimals = 2): string {
 
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatNum(value, 2)} %`;
+}
+
+function TargetInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [localValue, setLocalValue] = useState(String(value));
+
+  useEffect(() => {
+    setLocalValue(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const normalized = localValue.trim().replace(',', '.');
+    const n = Number(normalized);
+    if (Number.isFinite(n) && n >= 0 && n !== value) {
+      onChange(n);
+    } else {
+      setLocalValue(String(value));
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <Input
+        type="text"
+        inputMode="decimal"
+        className="h-8 w-20 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums"
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
+      />
+      <span className="text-xs text-muted-foreground">%</span>
+    </div>
+  );
 }
 
 export interface TokenTableProps {
@@ -77,21 +110,10 @@ export function TokenTable({ tokens, onRemove, onChangeTarget }: TokenTableProps
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
               <td className="px-5 py-4 text-right tabular-nums">
-                <div className="flex items-center justify-end gap-2">
-                  <Input
-                    type="number"
-                    inputMode="decimal"
-                    className="h-8 w-20 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums"
-                    value={t.targetExitPercent.toString()}
-                    onChange={(e) => {
-                      const normalized = e.target.value.replace(',', '.');
-                      const n = Number(normalized);
-                      if (!Number.isFinite(n) || n < 0) return;
-                      onChangeTarget(t.id, n);
-                    }}
-                  />
-                  <span className="text-xs text-muted-foreground">%</span>
-                </div>
+                <TargetInput
+                  value={t.targetExitPercent}
+                  onChange={(n) => onChangeTarget(t.id, n)}
+                />
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>
               <td

@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getAggregateMetrics, getTokenWithMetrics, getAcceptanceCriteria } from '@/lib/token-calculations';
-import type { Token } from '@/types/token';
+import type { Token, TokenWithMetrics } from '@/types/token';
+import { Plus, X } from 'lucide-react';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -24,6 +26,79 @@ function parseDecimal(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+const MAX_TPS = 5;
+
+interface TakeProfitInput {
+  targetPercent: string;
+  withdrawPercent: string;
+}
+
+interface TakeProfitParsed {
+  targetPercent: number;
+  withdrawPercent: number;
+}
+
+function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
+  return inputs
+    .map((tp) => ({
+      targetPercent: parseDecimal(tp.targetPercent),
+      withdrawPercent: parseDecimal(tp.withdrawPercent),
+    }))
+    .filter((tp) => tp.targetPercent > 0 && tp.withdrawPercent > 0)
+    .sort((a, b) => a.targetPercent - b.targetPercent);
+}
+
+function simulateTokenMultiTp(
+  amount: number,
+  token: TokenWithMetrics,
+  takeProfits: TakeProfitParsed[]
+): number {
+  let remainingFraction = 1;
+  let totalReceived = 0;
+
+  for (const tp of takeProfits) {
+    if (remainingFraction <= 0) break;
+    if (token.maxGainPercent >= tp.targetPercent) {
+      const soldFraction = remainingFraction * Math.min(tp.withdrawPercent, 100) / 100;
+      totalReceived += amount * soldFraction * (1 + tp.targetPercent / 100);
+      remainingFraction -= soldFraction;
+    } else {
+      break;
+    }
+  }
+
+  if (remainingFraction > 0) {
+    totalReceived += amount * remainingFraction * (1 + token.maxLossPercent / 100);
+  }
+
+  return totalReceived;
+}
+
+function getMultiTpSimulation(
+  amount: number,
+  tokensWithMetrics: TokenWithMetrics[],
+  takeProfits: TakeProfitParsed[]
+) {
+  const investedTotal = amount * tokensWithMetrics.length;
+  let totalReceived = 0;
+  let tokensWithAtLeastOneTp = 0;
+
+  const firstTpTarget = takeProfits.length > 0 ? takeProfits[0].targetPercent : Infinity;
+
+  for (const token of tokensWithMetrics) {
+    totalReceived += simulateTokenMultiTp(amount, token, takeProfits);
+    if (token.maxGainPercent >= firstTpTarget) tokensWithAtLeastOneTp++;
+  }
+
+  const profit = totalReceived - investedTotal;
+  const profitPercent = investedTotal > 0 ? (profit / investedTotal) * 100 : 0;
+  const tokensFullLoss = tokensWithMetrics.length - tokensWithAtLeastOneTp;
+
+  return { investedTotal, totalReceived, profit, profitPercent, tokensWithAtLeastOneTp, tokensFullLoss };
+}
+
+const DEFAULT_TP: TakeProfitInput = { targetPercent: '', withdrawPercent: '' };
+
 export interface StatsSummaryProps {
   tokens: Token[];
   showSimulation?: boolean;
@@ -33,6 +108,7 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const metrics = getAggregateMetrics(tokens);
   const acceptance = getAcceptanceCriteria(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
+  const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
 
   const amount = parseDecimal(simulatedAmount);
   const hasAmount = amount > 0 && tokens.length > 0;
@@ -51,6 +127,30 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   const investedTotal = hasAmount ? amount * tokens.length : 0;
   const gainRealistic = hasAmount ? (amount * realisticPercentSum) / 100 : 0;
+
+  const parsedTps = useMemo(() => parseTakeProfits(takeProfits), [takeProfits]);
+  const hasValidTps = parsedTps.length > 0;
+
+  const multiTpResult = useMemo(() => {
+    if (!hasAmount || !hasValidTps) return null;
+    return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps);
+  }, [hasAmount, hasValidTps, amount, tokensWithMetrics, parsedTps]);
+
+  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string) => {
+    setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
+  };
+
+  const addTp = () => {
+    if (takeProfits.length >= MAX_TPS) return;
+    setTakeProfits((prev) => [...prev, { ...DEFAULT_TP }]);
+  };
+
+  const removeTp = (index: number) => {
+    setTakeProfits((prev) => {
+      if (prev.length <= 1) return [{ ...DEFAULT_TP }];
+      return prev.filter((_, i) => i !== index);
+    });
+  };
 
   return (
     <Card>
@@ -178,10 +278,11 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                 </p>
               )}
             </div>
+
             {hasAmount && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Résultat réaliste
+                  Résultat réaliste (simple)
                 </p>
                 <p className="text-sm">
                   % combiné :{' '}
@@ -211,6 +312,91 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                 </p>
               </div>
             )}
+
+            <div className="space-y-3 rounded-lg border bg-background/60 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Take Profits (simulation multi-TP)
+                </p>
+                {takeProfits.length < MAX_TPS && (
+                  <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={addTp}>
+                    <Plus className="h-3.5 w-3.5" />
+                    Ajouter TP
+                  </Button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {takeProfits.map((tp, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-medium text-muted-foreground w-8">
+                      TP{index + 1}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        className="h-8 w-20 text-xs tabular-nums"
+                        placeholder="Gain %"
+                        value={tp.targetPercent}
+                        onChange={(e) => handleTpChange(index, 'targetPercent', e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">→ retirer</span>
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        className="h-8 w-16 text-xs tabular-nums"
+                        placeholder="Retrait"
+                        value={tp.withdrawPercent}
+                        onChange={(e) => handleTpChange(index, 'withdrawPercent', e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeTp(index)}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {hasAmount && multiTpResult && (
+                <div className="mt-3 space-y-1.5 border-t pt-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Résultat multi-TP
+                  </p>
+                  <p className="text-sm">
+                    Investi total:{' '}
+                    <span className="font-semibold">{formatNum(multiTpResult.investedTotal, 2)}</span>
+                  </p>
+                  <p className="text-sm">
+                    Montant final:{' '}
+                    <span className={`font-semibold ${multiTpResult.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {formatNum(multiTpResult.totalReceived, 2)}
+                    </span>
+                  </p>
+                  <p className="text-sm">
+                    Bénéfice / Perte:{' '}
+                    <span className={`font-semibold ${multiTpResult.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {multiTpResult.profit >= 0 ? '+' : ''}{formatNum(multiTpResult.profit, 2)}{' '}
+                      ({multiTpResult.profitPercent >= 0 ? '+' : ''}{formatNum(multiTpResult.profitPercent, 2)} %)
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    <span className="text-green-600 dark:text-green-400">{multiTpResult.tokensWithAtLeastOneTp}</span> token{multiTpResult.tokensWithAtLeastOneTp !== 1 ? 's' : ''} avec au moins 1 TP atteint,{' '}
+                    <span className="text-red-600 dark:text-red-400">{multiTpResult.tokensFullLoss}</span> en perte totale (aucun TP atteint)
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

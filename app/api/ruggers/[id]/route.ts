@@ -15,6 +15,7 @@ interface RuggerRow {
   end_hour: number | null;
   notes: string | null;
   status_id: StatusId;
+  archived: boolean;
   created_at: string;
   token_count: number;
   avg_max_gain_percent: number;
@@ -33,6 +34,7 @@ function toRugger(r: RuggerRow): Rugger {
     endHour: r.end_hour ?? null,
     notes: r.notes ?? null,
     statusId: r.status_id,
+    archived: r.archived,
     createdAt: r.created_at,
     tokenCount: r.token_count,
     avgMaxGainPercent: Number(r.avg_max_gain_percent),
@@ -41,7 +43,7 @@ function toRugger(r: RuggerRow): Rugger {
 
 const RUGGER_SELECT = `
   select r.id, r.name, r.description, r.wallet_address, r.wallet_type,
-    r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.status_id, r.created_at,
+    r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.status_id, r.archived, r.created_at,
     (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
     (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
   from ruggers r`;
@@ -66,6 +68,7 @@ export async function GET(
         r.end_hour,
         r.notes,
         r.status_id,
+        r.archived,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
@@ -99,6 +102,7 @@ export async function PATCH(
     endHour?: number | null;
     notes?: string | null;
     statusId?: StatusId;
+    archived?: boolean;
   };
 
   const walletType = body.walletType;
@@ -119,7 +123,7 @@ export async function PATCH(
   }
 
   const updates: string[] = [];
-  const values: (string | number | null)[] = [];
+  const values: (string | number | boolean | null)[] = [];
   let paramIndex = 1;
 
   if (body.name !== undefined) {
@@ -172,6 +176,10 @@ export async function PATCH(
     updates.push(`status_id = $${paramIndex++}`);
     values.push(body.statusId);
   }
+  if (body.archived !== undefined) {
+    updates.push(`archived = $${paramIndex++}`);
+    values.push(body.archived);
+  }
 
   if (updates.length === 0) {
     const row = await query<RuggerRow>(`${RUGGER_SELECT} where r.id = $1`, [ruggerId]);
@@ -184,7 +192,7 @@ export async function PATCH(
   const setClause = updates.join(', ');
   const rows = await query<RuggerRow>(
     `update ruggers set ${setClause} where id = $${paramIndex}
-     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, created_at,
+     returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, archived, created_at,
        (select count(*)::int from rugger_tokens t where t.rugger_id = ruggers.id) as token_count,
        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = ruggers.id) as avg_max_gain_percent`,
     values

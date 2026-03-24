@@ -11,13 +11,20 @@ export async function GET(req: NextRequest) {
   const statusParam = searchParams.get('status');
   const statusFilter: StatusId | null =
     statusParam && VALID_STATUS_IDS.includes(statusParam as StatusId) ? (statusParam as StatusId) : null;
+  const archivedParam = searchParams.get('archived');
+  const showArchived = archivedParam === 'true';
 
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 && pageSize <= 100 ? pageSize : 20;
   const offset = (safePage - 1) * safePageSize;
 
-  const whereClause = statusFilter ? ' where r.status_id = $3' : '';
-  const mainParams = statusFilter ? [safePageSize, offset, statusFilter] : [safePageSize, offset];
+  const conditions: string[] = [`r.archived = $3`];
+  const mainParams: (string | number | boolean)[] = [safePageSize, offset, showArchived];
+  if (statusFilter) {
+    conditions.push(`r.status_id = $${mainParams.length + 1}`);
+    mainParams.push(statusFilter);
+  }
+  const whereClause = ' where ' + conditions.join(' and ');
 
   const rows = await query<{
     id: string;
@@ -31,6 +38,7 @@ export async function GET(req: NextRequest) {
     end_hour: number | null;
     notes: string | null;
     status_id: StatusId;
+    archived: boolean;
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
@@ -48,6 +56,7 @@ export async function GET(req: NextRequest) {
         r.end_hour,
         r.notes,
         r.status_id,
+        r.archived,
         r.created_at,
         (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
         (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
@@ -59,11 +68,14 @@ export async function GET(req: NextRequest) {
     mainParams
   );
 
-  const countParams = statusFilter ? [statusFilter] : [];
+  const countConditions: string[] = ['archived = $1'];
+  const countParams: (string | boolean)[] = [showArchived];
+  if (statusFilter) {
+    countConditions.push(`status_id = $${countParams.length + 1}`);
+    countParams.push(statusFilter);
+  }
   const countRows = await query<{ count: string }>(
-    statusFilter
-      ? `select count(*)::text as count from ruggers where status_id = $1`
-      : `select count(*)::text as count from ruggers`,
+    `select count(*)::text as count from ruggers where ${countConditions.join(' and ')}`,
     countParams
   );
   const total = Number(countRows[0]?.count ?? '0');
@@ -80,6 +92,7 @@ export async function GET(req: NextRequest) {
     endHour: row.end_hour ?? null,
     notes: row.notes ?? null,
     statusId: row.status_id,
+    archived: row.archived,
     createdAt: row.created_at,
     tokenCount: row.token_count,
     avgMaxGainPercent: Number(row.avg_max_gain_percent),
@@ -163,6 +176,7 @@ export async function POST(req: NextRequest) {
     endHour: row.end_hour ?? null,
     notes: row.notes ?? null,
     statusId: row.status_id,
+    archived: false,
     createdAt: row.created_at,
     tokenCount: 0,
     avgMaxGainPercent: 0,

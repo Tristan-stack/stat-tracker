@@ -59,6 +59,7 @@ export interface Rugger {
   endHour: number | null;
   notes: string | null;
   statusId: StatusId;
+  archived: boolean;
   createdAt: string;
   tokenCount: number;
   avgMaxGainPercent: number;
