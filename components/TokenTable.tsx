@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { TokenWithMetrics } from '@/types/token';
+import type { TokenWithMetrics, ExitMode } from '@/types/token';
 import { STATUS_DOT_CLASSES } from '@/types/rugger';
 import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,14 @@ function formatNum(value: number, decimals = 2): string {
 
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatNum(value, 2)} %`;
+}
+
+function percentToMcap(entryPrice: number, targetPercent: number): number {
+  return entryPrice * (1 + targetPercent / 100);
+}
+
+function mcapToPercent(entryPrice: number, targetMcap: number): number {
+  return ((targetMcap / entryPrice) - 1) * 100;
 }
 
 function InlineNumericInput({
@@ -68,6 +76,49 @@ function InlineNumericInput({
   );
 }
 
+function McapTargetInput({
+  entryPrice,
+  targetPercent,
+  onChangeTarget,
+}: {
+  entryPrice: number;
+  targetPercent: number;
+  onChangeTarget: (nextPercent: number) => void;
+}) {
+  const derivedMcap = percentToMcap(entryPrice, targetPercent);
+  const [localValue, setLocalValue] = useState(String(Math.round(derivedMcap)));
+
+  useEffect(() => {
+    setLocalValue(String(Math.round(percentToMcap(entryPrice, targetPercent))));
+  }, [entryPrice, targetPercent]);
+
+  const commit = () => {
+    const normalized = localValue.trim().replace(',', '.');
+    const n = Number(normalized);
+    if (Number.isFinite(n) && n > 0 && entryPrice > 0) {
+      const newPercent = mcapToPercent(entryPrice, n);
+      const rounded = Math.round(newPercent * 100) / 100;
+      if (rounded !== targetPercent) {
+        onChangeTarget(rounded);
+        return;
+      }
+    }
+    setLocalValue(String(Math.round(derivedMcap)));
+  };
+
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums"
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); } }}
+    />
+  );
+}
+
 export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onRemove: (id: string) => void;
@@ -77,6 +128,7 @@ export interface TokenTableProps {
 
 export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPrice }: TokenTableProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [exitMode, setExitMode] = useState<ExitMode>('percent');
 
   const handleCopyName = useCallback(async (token: TokenWithMetrics) => {
     await navigator.clipboard.writeText(token.name);
@@ -85,93 +137,131 @@ export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPric
   }, []);
 
   return (
-    <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
-      <table className="w-full min-w-[640px] text-xs sm:text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
-            <th className="px-5 py-4 text-right font-medium">Entrée</th>
-            <th className="px-5 py-4 text-right font-medium">Plus haut</th>
-            <th className="px-5 py-4 text-right font-medium">Plus bas</th>
-            <th className="px-5 py-4 text-right font-medium">Objectif %</th>
-            <th className="px-5 py-4 text-right font-medium">Gain actuel</th>
-            <th className="px-5 py-4 text-right font-medium">Gain max</th>
-            <th className="px-5 py-4 text-right font-medium">Perte max</th>
-            <th className="px-5 py-4 text-center font-medium">Objectif atteint</th>
-            <th className="w-14 px-3 py-4" aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody>
-          {tokens.map((t) => (
-            <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
-              <td className="max-w-[100px] px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className={cn(
-                      'size-2 shrink-0 rounded-full',
-                      t.statusId ? STATUS_DOT_CLASSES[t.statusId] : 'bg-muted-foreground/40'
-                    )}
-                    aria-hidden
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleCopyName(t)}
-                    className="truncate cursor-pointer hover:text-primary transition-colors"
-                    title="Cliquer pour copier"
-                  >
-                    {copiedId === t.id ? '✓ Copié' : t.name}
-                  </button>
-                </div>
-              </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
-                <InlineNumericInput
-                  value={t.entryPrice}
-                  onChange={(n) => onChangeEntryPrice(t.id, n)}
-                  min={0}
-                  className="w-24"
-                />
-              </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
-              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
-              <td className="px-5 py-4 text-right tabular-nums">
-                <InlineNumericInput
-                  value={t.targetExitPercent}
-                  onChange={(n) => onChangeTarget(t.id, n)}
-                  suffix="%"
-                />
-              </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>
-              <td
-                className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
-                  t.maxGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : ''
-                }`}
-              >
-                {formatPercent(t.maxGainPercent)}
-              </td>
-              <td
-                className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
-                  t.maxLossPercent <= 0 ? 'text-red-600 dark:text-red-400' : ''
-                }`}
-              >
-                {formatPercent(t.maxLossPercent)}
-              </td>
-              <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
-              <td className="px-2 py-3 sm:px-3 sm:py-4">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Supprimer"
-                  onClick={() => onRemove(t.id)}
-                  className="min-h-[44px] min-w-[44px] border border-red-500 bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </td>
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium text-muted-foreground">Objectif de sortie :</span>
+        <div className="flex rounded-md border text-xs">
+          <button
+            type="button"
+            onClick={() => setExitMode('percent')}
+            className={cn(
+              'px-3 py-1 rounded-l-md transition-colors font-medium',
+              exitMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+            )}
+          >
+            % de gain
+          </button>
+          <button
+            type="button"
+            onClick={() => setExitMode('mcap')}
+            className={cn(
+              'px-3 py-1 rounded-r-md transition-colors font-medium',
+              exitMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+            )}
+          >
+            MCap cible
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
+        <table className="w-full min-w-[640px] text-xs sm:text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
+              <th className="px-5 py-4 text-right font-medium">Entrée</th>
+              <th className="px-5 py-4 text-right font-medium">Plus haut</th>
+              <th className="px-5 py-4 text-right font-medium">Plus bas</th>
+              <th className="px-5 py-4 text-right font-medium">
+                {exitMode === 'percent' ? 'Objectif %' : 'Objectif MCap'}
+              </th>
+              <th className="px-5 py-4 text-right font-medium">Gain actuel</th>
+              <th className="px-5 py-4 text-right font-medium">Gain max</th>
+              <th className="px-5 py-4 text-right font-medium">Perte max</th>
+              <th className="px-5 py-4 text-center font-medium">Objectif atteint</th>
+              <th className="w-14 px-3 py-4" aria-label="Actions" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {tokens.map((t) => (
+              <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
+                <td className="max-w-[100px] px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={cn(
+                        'size-2 shrink-0 rounded-full',
+                        t.statusId ? STATUS_DOT_CLASSES[t.statusId] : 'bg-muted-foreground/40'
+                      )}
+                      aria-hidden
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopyName(t)}
+                      className="truncate cursor-pointer hover:text-primary transition-colors"
+                      title="Cliquer pour copier"
+                    >
+                      {copiedId === t.id ? '✓ Copié' : t.name}
+                    </button>
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                  <InlineNumericInput
+                    value={t.entryPrice}
+                    onChange={(n) => onChangeEntryPrice(t.id, n)}
+                    min={0}
+                    className="w-24"
+                  />
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
+                <td className="px-5 py-4 text-right tabular-nums">
+                  {exitMode === 'percent' ? (
+                    <InlineNumericInput
+                      value={t.targetExitPercent}
+                      onChange={(n) => onChangeTarget(t.id, n)}
+                      suffix="%"
+                    />
+                  ) : (
+                    <McapTargetInput
+                      entryPrice={t.entryPrice}
+                      targetPercent={t.targetExitPercent}
+                      onChangeTarget={(n) => onChangeTarget(t.id, n)}
+                    />
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>
+                <td
+                  className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
+                    t.maxGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : ''
+                  }`}
+                >
+                  {formatPercent(t.maxGainPercent)}
+                </td>
+                <td
+                  className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
+                    t.maxLossPercent <= 0 ? 'text-red-600 dark:text-red-400' : ''
+                  }`}
+                >
+                  {formatPercent(t.maxLossPercent)}
+                </td>
+                <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
+                <td className="px-2 py-3 sm:px-3 sm:py-4">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Supprimer"
+                    onClick={() => onRemove(t.id)}
+                    className="min-h-[44px] min-w-[44px] border border-red-500 bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -4,7 +4,8 @@ import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Token } from '@/types/token';
+import type { Token, ExitMode } from '@/types/token';
+import { cn } from '@/lib/utils';
 
 function parseDecimal(value: string): number {
   const normalized = value.trim().replace(',', '.');
@@ -22,6 +23,8 @@ export function TokenForm({ onAdd }: TokenFormProps) {
   const [high, setHigh] = useState('');
   const [low, setLow] = useState('');
   const [targetExitPercent, setTargetExitPercent] = useState('');
+  const [targetMcap, setTargetMcap] = useState('');
+  const [exitMode, setExitMode] = useState<ExitMode>('percent');
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -29,15 +32,26 @@ export function TokenForm({ onAdd }: TokenFormProps) {
       const entry = parseDecimal(entryPrice);
       const h = parseDecimal(high);
       const l = parseDecimal(low);
-      const target = parseDecimal(targetExitPercent);
-      if (entry <= 0 || target < 0) return;
+      if (entry <= 0) return;
+
+      let computedTargetPercent: number;
+
+      if (exitMode === 'mcap') {
+        const tMcap = parseDecimal(targetMcap);
+        if (tMcap <= 0 || entry <= 0) return;
+        computedTargetPercent = ((tMcap / entry) - 1) * 100;
+      } else {
+        computedTargetPercent = parseDecimal(targetExitPercent);
+        if (computedTargetPercent < 0) return;
+      }
+
       const token: Token = {
         id: crypto.randomUUID(),
         name: name.trim() || `Token ${Date.now()}`,
         entryPrice: entry,
         high: h,
         low: l,
-        targetExitPercent: target,
+        targetExitPercent: computedTargetPercent,
       };
       onAdd(token);
       setName('');
@@ -45,8 +59,9 @@ export function TokenForm({ onAdd }: TokenFormProps) {
       setHigh('');
       setLow('');
       setTargetExitPercent('');
+      setTargetMcap('');
     },
-    [entryPrice, high, low, name, onAdd, targetExitPercent]
+    [entryPrice, high, low, name, onAdd, targetExitPercent, targetMcap, exitMode]
   );
 
   return (
@@ -96,31 +111,66 @@ export function TokenForm({ onAdd }: TokenFormProps) {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="target">Objectif sortie %</Label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              id="target"
-              inputMode="decimal"
-              placeholder="100"
-              value={targetExitPercent}
-              onChange={(e) => setTargetExitPercent(e.target.value)}
-              required
-              className="sm:max-w-[120px]"
-            />
-            <div className="flex flex-wrap gap-2">
-              {['70', '80', '90', '100'].map((value) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTargetExitPercent(value)}
-                >
-                  {value} %
-                </Button>
-              ))}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="target">Objectif sortie</Label>
+            <div className="flex rounded-md border text-xs">
+              <button
+                type="button"
+                onClick={() => setExitMode('percent')}
+                className={cn(
+                  'px-2 py-0.5 rounded-l-md transition-colors',
+                  exitMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                %
+              </button>
+              <button
+                type="button"
+                onClick={() => setExitMode('mcap')}
+                className={cn(
+                  'px-2 py-0.5 rounded-r-md transition-colors',
+                  exitMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                MCap
+              </button>
             </div>
           </div>
+          {exitMode === 'percent' ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id="target"
+                inputMode="decimal"
+                placeholder="100"
+                value={targetExitPercent}
+                onChange={(e) => setTargetExitPercent(e.target.value)}
+                required
+                className="sm:max-w-[120px]"
+              />
+              <div className="flex flex-wrap gap-2">
+                {['70', '80', '90', '100'].map((value) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTargetExitPercent(value)}
+                  >
+                    {value} %
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <Input
+              id="target-mcap"
+              inputMode="decimal"
+              placeholder="100000"
+              value={targetMcap}
+              onChange={(e) => setTargetMcap(e.target.value)}
+              required
+            />
+          )}
         </div>
         <div className="flex items-end">
           <Button type="submit" className="w-full sm:w-auto">

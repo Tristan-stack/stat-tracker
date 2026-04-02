@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
-import type { Token } from '@/types/token';
+import type { Token, ExitMode } from '@/types/token';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
 import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
@@ -71,6 +71,8 @@ export default function RuggerDetailPage() {
   const [editEndHour, setEditEndHour] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [globalTargetPercent, setGlobalTargetPercent] = useState('');
+  const [globalTargetMcap, setGlobalTargetMcap] = useState('');
+  const [globalExitMode, setGlobalExitMode] = useState<ExitMode>('percent');
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
@@ -279,23 +281,30 @@ export default function RuggerDetailPage() {
 
   const handleApplyGlobalTarget = useCallback(async () => {
     if (!id) return;
-    const value = Number(globalTargetPercent.replace(',', '.'));
-    if (!Number.isFinite(value)) return;
     setIsApplyingGlobalTarget(true);
     try {
+      let body: Record<string, number>;
+      if (globalExitMode === 'mcap') {
+        const mcap = Number(globalTargetMcap.replace(',', '.'));
+        if (!Number.isFinite(mcap) || mcap <= 0) return;
+        body = { targetExitMcap: mcap };
+      } else {
+        const value = Number(globalTargetPercent.replace(',', '.'));
+        if (!Number.isFinite(value)) return;
+        body = { targetExitPercent: value };
+      }
       const response = await fetch(`/api/ruggers/${id}/tokens`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetExitPercent: value }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) return;
-      setGlobalTargetPercent(String(value));
       await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     } finally {
       setIsApplyingGlobalTarget(false);
     }
-  }, [id, globalTargetPercent, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
+  }, [id, globalExitMode, globalTargetPercent, globalTargetMcap, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
 
   const handleResetTokens = useCallback(async () => {
     if (!id) return;
@@ -690,62 +699,100 @@ export default function RuggerDetailPage() {
             </p>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Ajoutés :</span>
+          {(['all', 'today', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
+            <button
+              key={period}
+              type="button"
+              onClick={() => {
+                setTokenCreatedSinceFilter(period);
+                setPage(1);
+              }}
+              className={cn(
+                'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                tokenCreatedSinceFilter === period
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              {getCreatedSinceLabel(period)}
+            </button>
+          ))}
+        </div>
         {isLoadingTokens ? (
           <p className="text-sm text-muted-foreground">Chargement des tokens…</p>
         ) : activeTokens.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
-            Aucun token pour ce rugger. Importe une liste JSON ci-dessus.
+            Aucun token pour ce rugger{tokenCreatedSinceFilter !== 'all' || tokenStatusFilter !== 'all' ? ' avec ces filtres' : ''}. Importe une liste JSON ci-dessus.
           </p>
         ) : (
           <>
-            {tokensPage?.allSameTargetPercent != null && (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-                <Label htmlFor="global-target-percent" className="text-sm font-medium">
-                  Objectif commun (%)
-                </Label>
-                <Input
-                  id="global-target-percent"
-                  type="text"
-                  inputMode="decimal"
-                  className="w-24"
-                  value={globalTargetPercent}
-                  onChange={(e) => setGlobalTargetPercent(e.target.value)}
-                  placeholder="0"
-                />
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                <Label className="text-sm font-medium">Objectif commun</Label>
+                <div className="flex rounded-md border text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setGlobalExitMode('percent')}
+                    className={cn(
+                      'px-2 py-0.5 rounded-l-md transition-colors font-medium',
+                      globalExitMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGlobalExitMode('mcap')}
+                    className={cn(
+                      'px-2 py-0.5 rounded-r-md transition-colors font-medium',
+                      globalExitMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    MCap
+                  </button>
+                </div>
+                {globalExitMode === 'percent' ? (
+                  <Input
+                    id="global-target-percent"
+                    type="text"
+                    inputMode="decimal"
+                    className="w-24"
+                    value={globalTargetPercent}
+                    onChange={(e) => setGlobalTargetPercent(e.target.value)}
+                    placeholder="100"
+                  />
+                ) : (
+                  <Input
+                    id="global-target-mcap"
+                    type="text"
+                    inputMode="decimal"
+                    className="w-32"
+                    value={globalTargetMcap}
+                    onChange={(e) => setGlobalTargetMcap(e.target.value)}
+                    placeholder="500000"
+                  />
+                )}
                 <Button
                   type="button"
                   size="sm"
-                  disabled={isApplyingGlobalTarget || !Number.isFinite(Number(globalTargetPercent.replace(',', '.')))}
+                  disabled={
+                    isApplyingGlobalTarget || (
+                      globalExitMode === 'percent'
+                        ? !Number.isFinite(Number(globalTargetPercent.replace(',', '.')))
+                        : !Number.isFinite(Number(globalTargetMcap.replace(',', '.'))) || Number(globalTargetMcap.replace(',', '.')) <= 0
+                    )
+                  }
                   onClick={handleApplyGlobalTarget}
                 >
                   {isApplyingGlobalTarget ? 'Application…' : 'Appliquer à tous'}
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Tous les tokens ont le même objectif. Modifie et applique pour les mettre à jour.
+                  {globalExitMode === 'percent'
+                    ? 'Applique le même % de sortie à tous les tokens.'
+                    : 'Calcule le % de sortie pour chaque token en fonction de son point d\'entrée.'}
                 </span>
               </div>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">Ajoutés :</span>
-              {(['all', 'today', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
-                <button
-                  key={period}
-                  type="button"
-                  onClick={() => {
-                    setTokenCreatedSinceFilter(period);
-                    setPage(1);
-                  }}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                    tokenCreatedSinceFilter === period
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  )}
-                >
-                  {getCreatedSinceLabel(period)}
-                </button>
-              ))}
-            </div>
             <TokenTable
               tokens={tokensWithMetrics}
               onRemove={handleRemoveToken}

@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getStoredTokens, saveTokens } from '@/lib/storage';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
-import type { Token } from '@/types/token';
+import type { Token, ExitMode } from '@/types/token';
+import { cn } from '@/lib/utils';
 
 export default function Home() {
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -62,15 +63,29 @@ export default function Home() {
   }, [tokens]);
 
   const [globalTargetPercent, setGlobalTargetPercent] = useState('');
+  const [globalTargetMcap, setGlobalTargetMcap] = useState('');
+  const [globalExitMode, setGlobalExitMode] = useState<ExitMode>('percent');
   const derivedGlobalTarget = allSameTargetPercent != null && globalTargetPercent === ''
     ? String(allSameTargetPercent)
     : globalTargetPercent;
 
   const handleApplyGlobalTarget = useCallback(() => {
-    const value = Number(derivedGlobalTarget.replace(',', '.'));
-    if (!Number.isFinite(value)) return;
-    setTokens((prev) => prev.map((t) => ({ ...t, targetExitPercent: value })));
-  }, [derivedGlobalTarget]);
+    if (globalExitMode === 'mcap') {
+      const mcap = Number(globalTargetMcap.replace(',', '.'));
+      if (!Number.isFinite(mcap) || mcap <= 0) return;
+      setTokens((prev) =>
+        prev.map((t) =>
+          t.entryPrice > 0
+            ? { ...t, targetExitPercent: Math.round(((mcap / t.entryPrice) - 1) * 10000) / 100 }
+            : t
+        )
+      );
+    } else {
+      const value = Number(derivedGlobalTarget.replace(',', '.'));
+      if (!Number.isFinite(value)) return;
+      setTokens((prev) => prev.map((t) => ({ ...t, targetExitPercent: value })));
+    }
+  }, [globalExitMode, derivedGlobalTarget, globalTargetMcap]);
 
   const tokensWithMetrics = tokens.map(getTokenWithMetrics);
 
@@ -114,11 +129,31 @@ export default function Home() {
             </p>
           ) : (
             <>
-              {allSameTargetPercent != null && (
-                <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-                  <Label htmlFor="global-target-percent" className="text-sm font-medium">
-                    Objectif commun (%)
-                  </Label>
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                <Label className="text-sm font-medium">Objectif commun</Label>
+                <div className="flex rounded-md border text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setGlobalExitMode('percent')}
+                    className={cn(
+                      'px-2 py-0.5 rounded-l-md transition-colors font-medium',
+                      globalExitMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGlobalExitMode('mcap')}
+                    className={cn(
+                      'px-2 py-0.5 rounded-r-md transition-colors font-medium',
+                      globalExitMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    MCap
+                  </button>
+                </div>
+                {globalExitMode === 'percent' ? (
                   <Input
                     id="global-target-percent"
                     type="text"
@@ -126,21 +161,37 @@ export default function Home() {
                     className="w-24"
                     value={derivedGlobalTarget}
                     onChange={(e) => setGlobalTargetPercent(e.target.value)}
-                    placeholder="0"
+                    placeholder="100"
                   />
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={!Number.isFinite(Number(derivedGlobalTarget.replace(',', '.')))}
-                    onClick={handleApplyGlobalTarget}
-                  >
-                    Appliquer à tous
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Tous les tokens ont le même objectif. Modifie et applique pour les mettre à jour.
-                  </span>
-                </div>
-              )}
+                ) : (
+                  <Input
+                    id="global-target-mcap"
+                    type="text"
+                    inputMode="decimal"
+                    className="w-32"
+                    value={globalTargetMcap}
+                    onChange={(e) => setGlobalTargetMcap(e.target.value)}
+                    placeholder="500000"
+                  />
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={
+                    globalExitMode === 'percent'
+                      ? !Number.isFinite(Number(derivedGlobalTarget.replace(',', '.')))
+                      : !Number.isFinite(Number(globalTargetMcap.replace(',', '.'))) || Number(globalTargetMcap.replace(',', '.')) <= 0
+                  }
+                  onClick={handleApplyGlobalTarget}
+                >
+                  Appliquer à tous
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {globalExitMode === 'percent'
+                    ? 'Applique le même % de sortie à tous les tokens.'
+                    : 'Calcule le % de sortie pour chaque token en fonction de son point d\'entrée.'}
+                </span>
+              </div>
               <TokenTable
                 tokens={tokensWithMetrics}
                 onRemove={handleRemove}

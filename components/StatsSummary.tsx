@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getAggregateMetrics, getTokenWithMetrics, getAcceptanceCriteria } from '@/lib/token-calculations';
-import type { Token, TokenWithMetrics } from '@/types/token';
+import type { Token, TokenWithMetrics, ExitMode } from '@/types/token';
 import { Plus, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -48,6 +49,106 @@ function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
     .sort((a, b) => a.targetPercent - b.targetPercent);
 }
 
+function mcapToPercent(entryPrice: number, mcap: number): number {
+  return entryPrice > 0 ? ((mcap / entryPrice) - 1) * 100 : Infinity;
+}
+
+interface OptimalResult {
+  value: number;
+  avgProfitPercent: number;
+  winCount: number;
+  winRate: number;
+  avgGainPerWinner: number;
+  avgLossPerLoser: number;
+}
+
+function scoreOptimal(avgProfit: number, winRate: number): number {
+  if (avgProfit <= 0) return -Infinity;
+  return avgProfit * winRate;
+}
+
+function buildOptimalResult(
+  value: number,
+  totalGain: number,
+  totalLoss: number,
+  wins: number,
+  total: number
+): { result: OptimalResult; score: number } {
+  const losers = total - wins;
+  const avg = (totalGain + totalLoss) / total;
+  const winRate = wins / total;
+  return {
+    result: {
+      value,
+      avgProfitPercent: avg,
+      winCount: wins,
+      winRate,
+      avgGainPerWinner: wins > 0 ? totalGain / wins : 0,
+      avgLossPerLoser: losers > 0 ? totalLoss / losers : 0,
+    },
+    score: scoreOptimal(avg, winRate),
+  };
+}
+
+function findOptimalPercent(twm: TokenWithMetrics[]): OptimalResult | null {
+  if (twm.length === 0) return null;
+
+  const candidates = [...new Set(twm.map((t) => t.maxGainPercent).filter((g) => g >= 0))].sort((a, b) => a - b);
+  if (candidates.length === 0) return null;
+
+  let best: { result: OptimalResult; score: number } | null = null;
+
+  for (const target of candidates) {
+    let totalGain = 0;
+    let totalLoss = 0;
+    let wins = 0;
+    for (const t of twm) {
+      if (t.maxGainPercent >= target) { totalGain += target; wins++; } else { totalLoss += t.maxLossPercent; }
+    }
+    const candidate = buildOptimalResult(target, totalGain, totalLoss, wins, twm.length);
+    if (best === null || candidate.score > best.score) best = candidate;
+  }
+
+  return best && best.result.avgProfitPercent > 0 ? best.result : null;
+}
+
+function findOptimalMcap(twm: TokenWithMetrics[]): OptimalResult | null {
+  if (twm.length === 0) return null;
+
+  const candidates = [...new Set(twm.map((t) => t.high).filter((h) => h > 0))].sort((a, b) => a - b);
+  if (candidates.length === 0) return null;
+
+  let best: { result: OptimalResult; score: number } | null = null;
+
+  for (const mcap of candidates) {
+    let totalGain = 0;
+    let totalLoss = 0;
+    let wins = 0;
+    for (const t of twm) {
+      if (t.high >= mcap) { totalGain += ((mcap / t.entryPrice) - 1) * 100; wins++; } else { totalLoss += t.maxLossPercent; }
+    }
+    const candidate = buildOptimalResult(mcap, totalGain, totalLoss, wins, twm.length);
+    if (best === null || candidate.score > best.score) best = candidate;
+  }
+
+  return best && best.result.avgProfitPercent > 0 ? best.result : null;
+}
+
+function resolveTpsForToken(
+  takeProfits: TakeProfitParsed[],
+  token: TokenWithMetrics,
+  tpMode: ExitMode
+): TakeProfitParsed[] {
+  if (tpMode === 'percent') return takeProfits;
+  return takeProfits
+    .map((tp) => ({
+      targetPercent: mcapToPercent(token.entryPrice, tp.targetPercent),
+      withdrawPercent: tp.withdrawPercent,
+    }))
+    .filter((tp) => Number.isFinite(tp.targetPercent))
+    .sort((a, b) => a.targetPercent - b.targetPercent);
+}
+
 function simulateTokenMultiTp(
   amount: number,
   token: TokenWithMetrics,
@@ -77,17 +178,18 @@ function simulateTokenMultiTp(
 function getMultiTpSimulation(
   amount: number,
   tokensWithMetrics: TokenWithMetrics[],
-  takeProfits: TakeProfitParsed[]
+  takeProfits: TakeProfitParsed[],
+  tpMode: ExitMode
 ) {
   const investedTotal = amount * tokensWithMetrics.length;
   let totalReceived = 0;
   let tokensWithAtLeastOneTp = 0;
 
-  const firstTpTarget = takeProfits.length > 0 ? takeProfits[0].targetPercent : Infinity;
-
   for (const token of tokensWithMetrics) {
-    totalReceived += simulateTokenMultiTp(amount, token, takeProfits);
-    if (token.maxGainPercent >= firstTpTarget) tokensWithAtLeastOneTp++;
+    const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+    totalReceived += simulateTokenMultiTp(amount, token, resolved);
+    const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
+    if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
   }
 
   const profit = totalReceived - investedTotal;
@@ -109,6 +211,7 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const acceptance = getAcceptanceCriteria(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
+  const [tpMode, setTpMode] = useState<ExitMode>('percent');
 
   const amount = parseDecimal(simulatedAmount);
   const hasAmount = amount > 0 && tokens.length > 0;
@@ -128,13 +231,16 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const investedTotal = hasAmount ? amount * tokens.length : 0;
   const gainRealistic = hasAmount ? (amount * realisticPercentSum) / 100 : 0;
 
+  const optimalPercent = useMemo(() => findOptimalPercent(tokensWithMetrics), [tokensWithMetrics]);
+  const optimalMcap = useMemo(() => findOptimalMcap(tokensWithMetrics), [tokensWithMetrics]);
+
   const parsedTps = useMemo(() => parseTakeProfits(takeProfits), [takeProfits]);
   const hasValidTps = parsedTps.length > 0;
 
   const multiTpResult = useMemo(() => {
     if (!hasAmount || !hasValidTps) return null;
-    return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps);
-  }, [hasAmount, hasValidTps, amount, tokensWithMetrics, parsedTps]);
+    return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps, tpMode);
+  }, [hasAmount, hasValidTps, amount, tokensWithMetrics, parsedTps, tpMode]);
 
   const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string) => {
     setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
@@ -225,6 +331,34 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                   )}/${metrics.tokenCount})`}
             </p>
           </div>
+          {optimalPercent && (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-muted-foreground">Sortie % équilibrée</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {formatPercent(optimalPercent.value)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Moy. {formatPercent(optimalPercent.avgProfitPercent)} — {formatNum(optimalPercent.winRate * 100, 0)}% winrate ({optimalPercent.winCount}/{metrics.tokenCount})
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Gain moy. {formatPercent(optimalPercent.avgGainPerWinner)} / Perte moy. {formatPercent(optimalPercent.avgLossPerLoser)}
+              </p>
+            </div>
+          )}
+          {optimalMcap && (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-muted-foreground">Sortie MCap équilibrée</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {formatNum(optimalMcap.value, 0)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Moy. {formatPercent(optimalMcap.avgProfitPercent)} — {formatNum(optimalMcap.winRate * 100, 0)}% winrate ({optimalMcap.winCount}/{metrics.tokenCount})
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Gain moy. {formatPercent(optimalMcap.avgGainPerWinner)} / Perte moy. {formatPercent(optimalMcap.avgLossPerLoser)}
+              </p>
+            </div>
+          )}
         </div>
 
         {metrics.tokenCount > 0 && (
@@ -314,10 +448,34 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             )}
 
             <div className="space-y-3 rounded-lg border bg-background/60 p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Take Profits (simulation multi-TP)
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Take Profits (simulation multi-TP)
+                  </p>
+                  <div className="flex rounded-md border text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setTpMode('percent')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-l-md transition-colors font-medium',
+                        tpMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                      )}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTpMode('mcap')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-r-md transition-colors font-medium',
+                        tpMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                      )}
+                    >
+                      MCap
+                    </button>
+                  </div>
+                </div>
                 {takeProfits.length < MAX_TPS && (
                   <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={addTp}>
                     <Plus className="h-3.5 w-3.5" />
@@ -336,12 +494,12 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                       <Input
                         type="text"
                         inputMode="decimal"
-                        className="h-8 w-20 text-xs tabular-nums"
-                        placeholder="Gain %"
+                        className={cn('h-8 text-xs tabular-nums', tpMode === 'mcap' ? 'w-24' : 'w-20')}
+                        placeholder={tpMode === 'mcap' ? 'MCap' : 'Gain %'}
                         value={tp.targetPercent}
                         onChange={(e) => handleTpChange(index, 'targetPercent', e.target.value)}
                       />
-                      <span className="text-xs text-muted-foreground">%</span>
+                      {tpMode === 'percent' && <span className="text-xs text-muted-foreground">%</span>}
                     </div>
                     <span className="text-xs text-muted-foreground">→ retirer</span>
                     <div className="flex items-center gap-1">

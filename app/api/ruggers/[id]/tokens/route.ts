@@ -201,22 +201,26 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: ruggerId } = await context.params;
-  const body = (await req.json()) as { targetExitPercent?: number };
-  const targetExitPercent = body.targetExitPercent;
+  const body = (await req.json()) as { targetExitPercent?: number; targetExitMcap?: number };
 
-  if (
-    typeof targetExitPercent !== 'number' ||
-    !Number.isFinite(targetExitPercent)
-  ) {
-    return NextResponse.json(
-      { error: 'targetExitPercent must be a number' },
-      { status: 400 }
+  if (body.targetExitMcap !== undefined) {
+    if (typeof body.targetExitMcap !== 'number' || !Number.isFinite(body.targetExitMcap) || body.targetExitMcap <= 0) {
+      return NextResponse.json({ error: 'targetExitMcap must be a positive number' }, { status: 400 });
+    }
+    await query(
+      'update rugger_tokens set target_exit_percent = (($1 / entry_price) - 1) * 100 where rugger_id = $2 and entry_price > 0',
+      [body.targetExitMcap, ruggerId]
     );
+    return NextResponse.json({ ok: true });
+  }
+
+  if (typeof body.targetExitPercent !== 'number' || !Number.isFinite(body.targetExitPercent)) {
+    return NextResponse.json({ error: 'targetExitPercent or targetExitMcap required' }, { status: 400 });
   }
 
   await query(
     'update rugger_tokens set target_exit_percent = $1 where rugger_id = $2',
-    [targetExitPercent, ruggerId]
+    [body.targetExitPercent, ruggerId]
   );
 
   return NextResponse.json({ ok: true });

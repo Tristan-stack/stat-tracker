@@ -1,5 +1,7 @@
 import type { StatusId } from './rugger';
 
+export type ExitMode = 'percent' | 'mcap';
+
 export interface Token {
   id: string;
   name: string;
