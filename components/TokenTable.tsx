@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics, ExitMode } from '@/types/token';
 import { STATUS_DOT_CLASSES } from '@/types/rugger';
-import { Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function formatNum(value: number, decimals = 2): string {
@@ -124,9 +124,17 @@ export interface TokenTableProps {
   onRemove: (id: string) => void;
   onChangeTarget: (id: string, nextPercent: number) => void;
   onChangeEntryPrice: (id: string, nextPrice: number) => void;
+  /** Si absent, la colonne visibilité n’est pas affichée (ex. page rugger). */
+  onToggleHidden?: (id: string) => void;
 }
 
-export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPrice }: TokenTableProps) {
+export function TokenTable({
+  tokens,
+  onRemove,
+  onChangeTarget,
+  onChangeEntryPrice,
+  onToggleHidden,
+}: TokenTableProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exitMode, setExitMode] = useState<ExitMode>('percent');
 
@@ -165,9 +173,14 @@ export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPric
       </div>
 
       <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
-        <table className="w-full min-w-[640px] text-xs sm:text-sm">
+        <table className="w-full min-w-[680px] text-xs sm:text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
+              {onToggleHidden && (
+                <th className="w-10 px-1 py-3 text-center font-medium sm:w-11 sm:px-2 sm:py-4">
+                  <span className="sr-only">Visibilité stats</span>
+                </th>
+              )}
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
               <th className="px-5 py-4 text-right font-medium">Entrée</th>
               <th className="px-5 py-4 text-right font-medium">Plus haut</th>
@@ -179,12 +192,46 @@ export function TokenTable({ tokens, onRemove, onChangeTarget, onChangeEntryPric
               <th className="px-5 py-4 text-right font-medium">Gain max</th>
               <th className="px-5 py-4 text-right font-medium">Perte max</th>
               <th className="px-5 py-4 text-center font-medium">Objectif atteint</th>
-              <th className="w-14 px-3 py-4" aria-label="Actions" />
+              <th className="min-w-[100px] px-3 py-4 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {tokens.map((t) => (
-              <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
+              <tr
+                key={t.id}
+                className={cn(
+                  'border-b last:border-0 hover:bg-muted/30',
+                  t.hidden && 'opacity-60 text-muted-foreground'
+                )}
+              >
+                {onToggleHidden && (
+                  <td className="w-10 px-1 py-3 text-center align-middle sm:w-11 sm:px-2 sm:py-4">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-foreground hover:bg-muted"
+                      aria-pressed={!t.hidden}
+                      aria-label={
+                        t.hidden
+                          ? 'Inclure ce token dans les statistiques'
+                          : 'Exclure ce token des statistiques'
+                      }
+                      title={
+                        t.hidden
+                          ? 'Inclure dans les statistiques'
+                          : 'Exclure des statistiques'
+                      }
+                      onClick={() => onToggleHidden(t.id)}
+                    >
+                      {t.hidden ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </td>
+                )}
                 <td className="max-w-[100px] px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>
                   <div className="flex items-center gap-2 min-w-0">
                     <span

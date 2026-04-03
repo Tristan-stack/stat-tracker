@@ -77,6 +77,54 @@ export default function RuggerDetailPage() {
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
   const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<TokenCreatedSinceFilter>('all');
+  const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const raw = window.localStorage.getItem(`stattracker-rugger-hidden:${id}`);
+      if (!raw) {
+        setHiddenTokenIds(new Set());
+        return;
+      }
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        setHiddenTokenIds(new Set());
+        return;
+      }
+      setHiddenTokenIds(new Set(parsed.filter((x): x is string => typeof x === 'string')));
+    } catch {
+      setHiddenTokenIds(new Set());
+    }
+  }, [id]);
+
+  const mergeHidden = useCallback(
+    (list: Token[]) => list.map((t) => ({ ...t, hidden: hiddenTokenIds.has(t.id) })),
+    [hiddenTokenIds]
+  );
+
+  const handleToggleHidden = useCallback(
+    (tokenId: string) => {
+      if (!id) return;
+      setHiddenTokenIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(tokenId)) next.delete(tokenId);
+        else next.add(tokenId);
+        try {
+          window.localStorage.setItem(`stattracker-rugger-hidden:${id}`, JSON.stringify([...next]));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    },
+    [id]
+  );
+
+  const tokensForStats = useMemo(
+    () => mergeHidden(allTokensForStats).filter((t) => !t.hidden),
+    [mergeHidden, allTokensForStats]
+  );
 
   const loadRugger = useCallback(async (ruggerId: string) => {
     setIsLoadingRugger(true);
@@ -363,7 +411,7 @@ export default function RuggerDetailPage() {
     return Math.max(1, Math.ceil(tokensPage.total / tokensPage.pageSize));
   }, [tokensPage]);
 
-  const activeTokens: Token[] = tokensPage?.tokens ?? [];
+  const activeTokens: Token[] = mergeHidden(tokensPage?.tokens ?? []);
   const tokensWithMetrics = activeTokens.map(getTokenWithMetrics);
 
   if (!id) {
@@ -651,9 +699,9 @@ export default function RuggerDetailPage() {
       )}
 
       <div className="space-y-8">
-        <StatsSummary tokens={allTokensForStats} />
+        <StatsSummary tokens={tokensForStats} />
 
-        <TokenImportExport tokens={allTokensForStats} onImport={handleImportTokens} />
+        <TokenImportExport tokens={mergeHidden(allTokensForStats)} onImport={handleImportTokens} />
 
         <TokenForm onAdd={handleAddToken} />
 
@@ -798,6 +846,7 @@ export default function RuggerDetailPage() {
               onRemove={handleRemoveToken}
               onChangeTarget={handleChangeTarget}
               onChangeEntryPrice={handleChangeEntryPrice}
+              onToggleHidden={handleToggleHidden}
             />
             <div className="flex justify-end gap-2">
               <Button

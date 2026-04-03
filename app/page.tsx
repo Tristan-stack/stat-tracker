@@ -56,6 +56,19 @@ export default function Home() {
     );
   }, []);
 
+  const handleToggleHidden = useCallback((id: string) => {
+    setTokens((prev) =>
+      prev.map((token) =>
+        token.id === id ? { ...token, hidden: !token.hidden } : token
+      )
+    );
+  }, []);
+
+  const activeTokens = useMemo(
+    () => tokens.filter((t) => !t.hidden),
+    [tokens]
+  );
+
   const allSameTargetPercent = useMemo(() => {
     if (tokens.length === 0) return null;
     const first = tokens[0].targetExitPercent;
@@ -102,7 +115,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <CreateRuggerFromTokens tokens={tokens} />
+            <CreateRuggerFromTokens tokens={activeTokens} />
             <Button
               type="button"
               variant="outline"
@@ -117,12 +130,20 @@ export default function Home() {
 
         <TokenForm onAdd={handleAdd} />
 
-        <StatsSummary tokens={tokens} />
+        <StatsSummary tokens={activeTokens} />
 
         <TokenImportExport tokens={tokens} onImport={setTokens} />
 
         <section className="space-y-6">
-          <h2 className="text-lg font-semibold">Tokens ({tokens.length})</h2>
+          <h2 className="text-lg font-semibold">
+            Tokens ({tokens.length})
+            {tokens.length > 0 && activeTokens.length !== tokens.length && (
+              <span className="font-normal text-muted-foreground">
+                {' '}
+                — {activeTokens.length} actif{activeTokens.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </h2>
           {tokens.length === 0 ? (
             <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
               Aucun token. Ajoute-en un avec le formulaire ci-dessus.
@@ -197,6 +218,7 @@ export default function Home() {
                 onRemove={handleRemove}
                 onChangeTarget={handleChangeTarget}
                 onChangeEntryPrice={handleChangeEntryPrice}
+                onToggleHidden={handleToggleHidden}
               />
             </>
           )}

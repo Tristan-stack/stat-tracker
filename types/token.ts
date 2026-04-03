@@ -10,6 +10,8 @@ export interface Token {
   low: number;
   targetExitPercent: number;
   statusId?: StatusId;
+  /** Exclu des statistiques et simulations (ligne toujours visible dans le tableau). */
+  hidden?: boolean;
 }
 
 export interface TokenWithMetrics extends Token {

@@ -28,6 +28,9 @@ function parseDecimal(value: string): number {
 }
 
 const MAX_TPS = 5;
+const WALLET_SLOTS = 5;
+/** Frais fixes (€) par couple wallet × token pour le mode revenu optimisé. */
+const FEE_EUR_PER_PAIR = 2;
 
 interface TakeProfitInput {
   targetPercent: string;
@@ -175,12 +178,23 @@ function simulateTokenMultiTp(
   return totalReceived;
 }
 
+interface MultiTpSimulationResult {
+  investedTotal: number;
+  totalReceived: number;
+  profit: number;
+  profitPercent: number;
+  tokensWithAtLeastOneTp: number;
+  tokensFullLoss: number;
+  totalFees: number;
+  profitBeforeFees: number;
+}
+
 function getMultiTpSimulation(
   amount: number,
   tokensWithMetrics: TokenWithMetrics[],
   takeProfits: TakeProfitParsed[],
   tpMode: ExitMode
-) {
+): MultiTpSimulationResult {
   const investedTotal = amount * tokensWithMetrics.length;
   let totalReceived = 0;
   let tokensWithAtLeastOneTp = 0;
@@ -192,11 +206,66 @@ function getMultiTpSimulation(
     if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
   }
 
-  const profit = totalReceived - investedTotal;
+  const profitBeforeFees = totalReceived - investedTotal;
+  const profit = profitBeforeFees;
   const profitPercent = investedTotal > 0 ? (profit / investedTotal) * 100 : 0;
   const tokensFullLoss = tokensWithMetrics.length - tokensWithAtLeastOneTp;
 
-  return { investedTotal, totalReceived, profit, profitPercent, tokensWithAtLeastOneTp, tokensFullLoss };
+  return {
+    investedTotal,
+    totalReceived,
+    profit,
+    profitPercent,
+    tokensWithAtLeastOneTp,
+    tokensFullLoss,
+    totalFees: 0,
+    profitBeforeFees,
+  };
+}
+
+function getMultiTpSimulationWalletAmounts(
+  walletAmounts: number[],
+  tokensWithMetrics: TokenWithMetrics[],
+  takeProfits: TakeProfitParsed[],
+  tpMode: ExitMode
+): MultiTpSimulationResult | null {
+  const N = tokensWithMetrics.length;
+  if (N === 0 || walletAmounts.length === 0) return null;
+
+  let investedTotal = 0;
+  let totalReceived = 0;
+  for (const amt of walletAmounts) {
+    investedTotal += amt * N;
+    for (const token of tokensWithMetrics) {
+      const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+      totalReceived += simulateTokenMultiTp(amt, token, resolved);
+    }
+  }
+
+  let tokensWithAtLeastOneTp = 0;
+  for (const token of tokensWithMetrics) {
+    const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+    const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
+    if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
+  }
+
+  const tokensFullLoss = tokensWithMetrics.length - tokensWithAtLeastOneTp;
+  const W = walletAmounts.length;
+  const totalFees = FEE_EUR_PER_PAIR * N * W;
+  const profitBeforeFees = totalReceived - investedTotal;
+  const profit = profitBeforeFees - totalFees;
+  const profitPercent = investedTotal > 0 ? (profit / investedTotal) * 100 : 0;
+
+  return {
+    investedTotal,
+    totalReceived,
+    profit,
+    profitPercent,
+    tokensWithAtLeastOneTp,
+    tokensFullLoss,
+    totalFees,
+    profitBeforeFees,
+  };
 }
 
 const DEFAULT_TP: TakeProfitInput = { targetPercent: '', withdrawPercent: '' };
@@ -210,13 +279,35 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const metrics = getAggregateMetrics(tokens);
   const acceptance = getAcceptanceCriteria(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
+  const [optimizedRevenue, setOptimizedRevenue] = useState(false);
+  const [walletEnabled, setWalletEnabled] = useState<boolean[]>(() =>
+    Array.from({ length: WALLET_SLOTS }, () => false)
+  );
+  const [walletAmounts, setWalletAmounts] = useState<string[]>(() =>
+    Array.from({ length: WALLET_SLOTS }, () => '')
+  );
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
   const [tpMode, setTpMode] = useState<ExitMode>('percent');
 
   const amount = parseDecimal(simulatedAmount);
-  const hasAmount = amount > 0 && tokens.length > 0;
 
-  const tokensWithMetrics = tokens.map(getTokenWithMetrics);
+  const effectiveWalletAmounts = useMemo(() => {
+    const out: number[] = [];
+    for (let i = 0; i < WALLET_SLOTS; i++) {
+      if (!walletEnabled[i]) continue;
+      const v = parseDecimal(walletAmounts[i] ?? '');
+      if (v > 0) out.push(v);
+    }
+    return out;
+  }, [walletEnabled, walletAmounts]);
+
+  const hasSimulationInput = useMemo(() => {
+    if (tokens.length === 0) return false;
+    if (!optimizedRevenue) return amount > 0;
+    return effectiveWalletAmounts.length > 0;
+  }, [tokens.length, optimizedRevenue, amount, effectiveWalletAmounts]);
+
+  const tokensWithMetrics = useMemo(() => tokens.map(getTokenWithMetrics), [tokens]);
 
   const reachedCount = tokensWithMetrics.filter((t) => t.targetReached).length;
   const missedCount = tokensWithMetrics.length - reachedCount;
@@ -228,8 +319,46 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   const averageRealisticPercent = tokens.length > 0 ? realisticPercentSum / tokens.length : 0;
 
-  const investedTotal = hasAmount ? amount * tokens.length : 0;
-  const gainRealistic = hasAmount ? (amount * realisticPercentSum) / 100 : 0;
+  const simpleRealistic = useMemo(() => {
+    if (!hasSimulationInput || tokens.length === 0) return null;
+    const twm = tokens.map(getTokenWithMetrics);
+    const N = twm.length;
+    const sumPercent = twm.reduce(
+      (sum, t) => sum + (t.targetReached ? t.targetExitPercent : t.maxLossPercent),
+      0
+    );
+    if (!optimizedRevenue) {
+      const investedTotal = amount * N;
+      const gainBeforeFees = (amount * sumPercent) / 100;
+      const totalFees = 0;
+      const netGain = gainBeforeFees - totalFees;
+      return {
+        investedTotal,
+        gainBeforeFees,
+        totalFees,
+        netGain,
+        finalAmount: investedTotal + netGain,
+        walletCount: 1,
+      };
+    }
+    let investedTotal = 0;
+    let gainBeforeFees = 0;
+    for (const a of effectiveWalletAmounts) {
+      investedTotal += a * N;
+      gainBeforeFees += (a * sumPercent) / 100;
+    }
+    const W = effectiveWalletAmounts.length;
+    const totalFees = FEE_EUR_PER_PAIR * N * W;
+    const netGain = gainBeforeFees - totalFees;
+    return {
+      investedTotal,
+      gainBeforeFees,
+      totalFees,
+      netGain,
+      finalAmount: investedTotal + netGain,
+      walletCount: W,
+    };
+  }, [hasSimulationInput, tokens, optimizedRevenue, amount, effectiveWalletAmounts]);
 
   const optimalPercent = useMemo(() => findOptimalPercent(tokensWithMetrics), [tokensWithMetrics]);
   const optimalMcap = useMemo(() => findOptimalMcap(tokensWithMetrics), [tokensWithMetrics]);
@@ -238,9 +367,26 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const hasValidTps = parsedTps.length > 0;
 
   const multiTpResult = useMemo(() => {
-    if (!hasAmount || !hasValidTps) return null;
-    return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps, tpMode);
-  }, [hasAmount, hasValidTps, amount, tokensWithMetrics, parsedTps, tpMode]);
+    if (!hasSimulationInput || !hasValidTps) return null;
+    if (!optimizedRevenue) {
+      return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps, tpMode);
+    }
+    return getMultiTpSimulationWalletAmounts(
+      effectiveWalletAmounts,
+      tokensWithMetrics,
+      parsedTps,
+      tpMode
+    );
+  }, [
+    hasSimulationInput,
+    hasValidTps,
+    optimizedRevenue,
+    amount,
+    effectiveWalletAmounts,
+    tokensWithMetrics,
+    parsedTps,
+    tpMode,
+  ]);
 
   const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string) => {
     setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
@@ -395,25 +541,93 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
         {showSimulation && (
           <div className="mt-2 space-y-4 rounded-lg border bg-muted/30 p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="w-full max-w-xs space-y-2">
-                <Label htmlFor="simulated-amount">Montant investi par token (à l&apos;entrée)</Label>
-                <Input
-                  id="simulated-amount"
-                  inputMode="decimal"
-                  placeholder="Ex. 1 000"
-                  value={simulatedAmount}
-                  onChange={(e) => setSimulatedAmount(e.target.value)}
-                />
-              </div>
-              {hasAmount && (
-                <p className="text-xs text-muted-foreground sm:text-sm">
-                  Simule le résultat global en investissant ce montant sur chaque token.
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  variant={optimizedRevenue ? 'default' : 'outline'}
+                  size="sm"
+                  aria-pressed={optimizedRevenue}
+                  onClick={() => setOptimizedRevenue((v) => !v)}
+                >
+                  Revenu optimisé
+                </Button>
+                <p className="text-xs text-muted-foreground max-w-xl">
+                  {optimizedRevenue
+                    ? `Plusieurs wallets : montant par token par wallet. Frais fixes ${FEE_EUR_PER_PAIR} € par wallet et par token (achat/vente).`
+                    : 'Un seul montant par token pour toute la simulation.'}
                 </p>
+              </div>
+
+              {!optimizedRevenue && (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="w-full max-w-xs space-y-2">
+                    <Label htmlFor="simulated-amount">Montant investi par token (à l&apos;entrée)</Label>
+                    <Input
+                      id="simulated-amount"
+                      inputMode="decimal"
+                      placeholder="Ex. 1 000"
+                      value={simulatedAmount}
+                      onChange={(e) => setSimulatedAmount(e.target.value)}
+                    />
+                  </div>
+                  {hasSimulationInput && (
+                    <p className="text-xs text-muted-foreground sm:text-sm">
+                      Simule le résultat global en investissant ce montant sur chaque token.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {optimizedRevenue && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium">Wallets (max. {WALLET_SLOTS})</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {Array.from({ length: WALLET_SLOTS }, (_, i) => (
+                      <label
+                        key={i}
+                        className="flex flex-wrap items-center gap-2 rounded-md border bg-background/80 px-3 py-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 shrink-0 rounded border-input"
+                          checked={walletEnabled[i]}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setWalletEnabled((prev) => {
+                              const next = [...prev];
+                              next[i] = checked;
+                              return next;
+                            });
+                          }}
+                          aria-label={`Activer wallet ${i + 1}`}
+                        />
+                        <span className="shrink-0 font-medium">Wallet {i + 1}</span>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="€ / token"
+                          className="h-8 max-w-[140px] text-xs tabular-nums"
+                          value={walletAmounts[i]}
+                          disabled={!walletEnabled[i]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setWalletAmounts((prev) => {
+                              const next = [...prev];
+                              next[i] = val;
+                              return next;
+                            });
+                          }}
+                          aria-label={`Montant par token wallet ${i + 1}`}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
-            {hasAmount && (
+            {hasSimulationInput && simpleRealistic && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Résultat réaliste (simple)
@@ -426,18 +640,32 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                 </p>
                 <p className="text-sm">
                   Investi total:{' '}
-                  <span className="font-semibold">{formatNum(investedTotal, 2)}</span>
+                  <span className="font-semibold">{formatNum(simpleRealistic.investedTotal, 2)}</span>
                 </p>
+                {simpleRealistic.totalFees > 0 && (
+                  <>
+                    <p className="text-sm">
+                      Bénéfice avant frais:{' '}
+                      <span className={`font-semibold ${simpleRealistic.gainBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {simpleRealistic.gainBeforeFees >= 0 ? '+' : ''}{formatNum(simpleRealistic.gainBeforeFees, 2)}
+                      </span>
+                    </p>
+                    <p className="text-sm">
+                      Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} tokens × {simpleRealistic.walletCount} wallet{simpleRealistic.walletCount !== 1 ? 's' : ''}):{' '}
+                      <span className="font-semibold tabular-nums">−{formatNum(simpleRealistic.totalFees, 2)} €</span>
+                    </p>
+                  </>
+                )}
                 <p className="text-sm">
                   Montant final:{' '}
-                  <span className={`font-semibold ${gainRealistic >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatNum(investedTotal + gainRealistic, 2)}
+                  <span className={`font-semibold ${simpleRealistic.finalAmount >= simpleRealistic.investedTotal ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatNum(simpleRealistic.finalAmount, 2)}
                   </span>
                 </p>
                 <p className="text-sm">
                   Bénéfice / Perte:{' '}
-                  <span className={`font-semibold ${gainRealistic >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {gainRealistic >= 0 ? '+' : ''}{formatNum(gainRealistic, 2)}
+                  <span className={`font-semibold ${simpleRealistic.netGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {simpleRealistic.netGain >= 0 ? '+' : ''}{formatNum(simpleRealistic.netGain, 2)}
                   </span>
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -526,7 +754,7 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                 ))}
               </div>
 
-              {hasAmount && multiTpResult && (
+              {hasSimulationInput && multiTpResult && (
                 <div className="mt-3 space-y-1.5 border-t pt-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Résultat multi-TP
@@ -535,10 +763,24 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                     Investi total:{' '}
                     <span className="font-semibold">{formatNum(multiTpResult.investedTotal, 2)}</span>
                   </p>
+                  {multiTpResult.totalFees > 0 && (
+                    <>
+                      <p className="text-sm">
+                        Bénéfice avant frais:{' '}
+                        <span className={`font-semibold ${multiTpResult.profitBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {multiTpResult.profitBeforeFees >= 0 ? '+' : ''}{formatNum(multiTpResult.profitBeforeFees, 2)}
+                        </span>
+                      </p>
+                      <p className="text-sm">
+                        Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} × {optimizedRevenue ? effectiveWalletAmounts.length : 1} wallet{optimizedRevenue && effectiveWalletAmounts.length !== 1 ? 's' : ''}):{' '}
+                        <span className="font-semibold tabular-nums">−{formatNum(multiTpResult.totalFees, 2)} €</span>
+                      </p>
+                    </>
+                  )}
                   <p className="text-sm">
                     Montant final:{' '}
                     <span className={`font-semibold ${multiTpResult.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {formatNum(multiTpResult.totalReceived, 2)}
+                      {formatNum(multiTpResult.totalReceived - multiTpResult.totalFees, 2)}
                     </span>
                   </p>
                   <p className="text-sm">

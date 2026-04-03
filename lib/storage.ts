@@ -9,17 +9,22 @@ export function getStoredTokens(): Token[] {
     if (raw === null) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is Token =>
-        typeof item === 'object' &&
-        item !== null &&
-        typeof (item as Token).id === 'string' &&
-        typeof (item as Token).name === 'string' &&
-        typeof (item as Token).entryPrice === 'number' &&
-        typeof (item as Token).high === 'number' &&
-        typeof (item as Token).low === 'number' &&
-        typeof (item as Token).targetExitPercent === 'number'
-    );
+    return parsed.filter((item): item is Token => {
+      if (typeof item !== 'object' || item === null) return false;
+      const t = item as Record<string, unknown>;
+      if (
+        typeof t.id !== 'string' ||
+        typeof t.name !== 'string' ||
+        typeof t.entryPrice !== 'number' ||
+        typeof t.high !== 'number' ||
+        typeof t.low !== 'number' ||
+        typeof t.targetExitPercent !== 'number'
+      ) {
+        return false;
+      }
+      if (t.hidden !== undefined && typeof t.hidden !== 'boolean') return false;
+      return true;
+    });
   } catch {
     return [];
   }
