@@ -33,23 +33,27 @@ const WALLET_SLOTS = 5;
 const FEE_EUR_PER_PAIR = 2;
 
 interface TakeProfitInput {
-  targetPercent: string;
+  /** Valeur saisie : gain % ou MCap absolu selon `targetMode`. */
+  targetValue: string;
   withdrawPercent: string;
+  targetMode: ExitMode;
 }
 
+/** Brut avant résolution par token (entrée différente → % effectif différent en mode MCap). */
 interface TakeProfitParsed {
-  targetPercent: number;
+  rawTarget: number;
+  targetMode: ExitMode;
   withdrawPercent: number;
 }
 
 function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
   return inputs
     .map((tp) => ({
-      targetPercent: parseDecimal(tp.targetPercent),
+      rawTarget: parseDecimal(tp.targetValue),
+      targetMode: tp.targetMode,
       withdrawPercent: parseDecimal(tp.withdrawPercent),
     }))
-    .filter((tp) => tp.targetPercent > 0 && tp.withdrawPercent > 0)
-    .sort((a, b) => a.targetPercent - b.targetPercent);
+    .filter((tp) => tp.rawTarget > 0 && tp.withdrawPercent > 0);
 }
 
 function mcapToPercent(entryPrice: number, mcap: number): number {
@@ -137,25 +141,27 @@ function findOptimalMcap(twm: TokenWithMetrics[]): OptimalResult | null {
   return best && best.result.avgProfitPercent > 0 ? best.result : null;
 }
 
+/** Convertit chaque TP (% ou MCap) en % de gain vs entrée, puis trie pour l’ordre d’exécution. */
 function resolveTpsForToken(
   takeProfits: TakeProfitParsed[],
-  token: TokenWithMetrics,
-  tpMode: ExitMode
-): TakeProfitParsed[] {
-  if (tpMode === 'percent') return takeProfits;
+  token: TokenWithMetrics
+): { targetPercent: number; withdrawPercent: number }[] {
   return takeProfits
     .map((tp) => ({
-      targetPercent: mcapToPercent(token.entryPrice, tp.targetPercent),
+      targetPercent:
+        tp.targetMode === 'percent'
+          ? tp.rawTarget
+          : mcapToPercent(token.entryPrice, tp.rawTarget),
       withdrawPercent: tp.withdrawPercent,
     }))
-    .filter((tp) => Number.isFinite(tp.targetPercent))
+    .filter((tp) => Number.isFinite(tp.targetPercent) && tp.targetPercent > 0)
     .sort((a, b) => a.targetPercent - b.targetPercent);
 }
 
 function simulateTokenMultiTp(
   amount: number,
   token: TokenWithMetrics,
-  takeProfits: TakeProfitParsed[]
+  takeProfits: { targetPercent: number; withdrawPercent: number }[]
 ): number {
   let remainingFraction = 1;
   let totalReceived = 0;
@@ -192,15 +198,14 @@ interface MultiTpSimulationResult {
 function getMultiTpSimulation(
   amount: number,
   tokensWithMetrics: TokenWithMetrics[],
-  takeProfits: TakeProfitParsed[],
-  tpMode: ExitMode
+  takeProfits: TakeProfitParsed[]
 ): MultiTpSimulationResult {
   const investedTotal = amount * tokensWithMetrics.length;
   let totalReceived = 0;
   let tokensWithAtLeastOneTp = 0;
 
   for (const token of tokensWithMetrics) {
-    const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+    const resolved = resolveTpsForToken(takeProfits, token);
     totalReceived += simulateTokenMultiTp(amount, token, resolved);
     const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
     if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
@@ -226,8 +231,7 @@ function getMultiTpSimulation(
 function getMultiTpSimulationWalletAmounts(
   walletAmounts: number[],
   tokensWithMetrics: TokenWithMetrics[],
-  takeProfits: TakeProfitParsed[],
-  tpMode: ExitMode
+  takeProfits: TakeProfitParsed[]
 ): MultiTpSimulationResult | null {
   const N = tokensWithMetrics.length;
   if (N === 0 || walletAmounts.length === 0) return null;
@@ -237,14 +241,14 @@ function getMultiTpSimulationWalletAmounts(
   for (const amt of walletAmounts) {
     investedTotal += amt * N;
     for (const token of tokensWithMetrics) {
-      const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+      const resolved = resolveTpsForToken(takeProfits, token);
       totalReceived += simulateTokenMultiTp(amt, token, resolved);
     }
   }
 
   let tokensWithAtLeastOneTp = 0;
   for (const token of tokensWithMetrics) {
-    const resolved = resolveTpsForToken(takeProfits, token, tpMode);
+    const resolved = resolveTpsForToken(takeProfits, token);
     const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
     if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
   }
@@ -268,7 +272,7 @@ function getMultiTpSimulationWalletAmounts(
   };
 }
 
-const DEFAULT_TP: TakeProfitInput = { targetPercent: '', withdrawPercent: '' };
+const DEFAULT_TP: TakeProfitInput = { targetValue: '', withdrawPercent: '', targetMode: 'percent' };
 
 export interface StatsSummaryProps {
   tokens: Token[];
@@ -287,7 +291,6 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
     Array.from({ length: WALLET_SLOTS }, () => '')
   );
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
-  const [tpMode, setTpMode] = useState<ExitMode>('percent');
 
   const amount = parseDecimal(simulatedAmount);
 
@@ -369,13 +372,12 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
   const multiTpResult = useMemo(() => {
     if (!hasSimulationInput || !hasValidTps) return null;
     if (!optimizedRevenue) {
-      return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps, tpMode);
+      return getMultiTpSimulation(amount, tokensWithMetrics, parsedTps);
     }
     return getMultiTpSimulationWalletAmounts(
       effectiveWalletAmounts,
       tokensWithMetrics,
-      parsedTps,
-      tpMode
+      parsedTps
     );
   }, [
     hasSimulationInput,
@@ -385,10 +387,9 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
     effectiveWalletAmounts,
     tokensWithMetrics,
     parsedTps,
-    tpMode,
   ]);
 
-  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string) => {
+  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string | ExitMode) => {
     setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
   };
 
@@ -685,32 +686,13 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
             <div className="space-y-3 rounded-lg border bg-background/60 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Take Profits (simulation multi-TP)
                   </p>
-                  <div className="flex rounded-md border text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setTpMode('percent')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-l-md transition-colors font-medium',
-                        tpMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-                      )}
-                    >
-                      %
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTpMode('mcap')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-r-md transition-colors font-medium',
-                        tpMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-                      )}
-                    >
-                      MCap
-                    </button>
-                  </div>
+                  <p className="text-[11px] text-muted-foreground max-w-md">
+                    Chaque ligne : objectif en <strong>%</strong> ou en <strong>MCap</strong> (même unité que entrée / plus haut), puis % retiré à ce palier.
+                  </p>
                 </div>
                 {takeProfits.length < MAX_TPS && (
                   <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={addTp}>
@@ -722,20 +704,47 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
               <div className="space-y-2">
                 {takeProfits.map((tp, index) => (
-                  <div key={index} className="flex items-center gap-2">
+                  <div key={index} className="flex flex-wrap items-center gap-2">
                     <span className="shrink-0 text-xs font-medium text-muted-foreground w-8">
                       TP{index + 1}
                     </span>
+                    <div className="flex rounded-md border text-[10px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleTpChange(index, 'targetMode', 'percent')}
+                        className={cn(
+                          'px-1.5 py-0.5 rounded-l-md font-medium transition-colors',
+                          tp.targetMode === 'percent'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted'
+                        )}
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTpChange(index, 'targetMode', 'mcap')}
+                        className={cn(
+                          'px-1.5 py-0.5 rounded-r-md font-medium transition-colors',
+                          tp.targetMode === 'mcap'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-muted'
+                        )}
+                      >
+                        MCap
+                      </button>
+                    </div>
                     <div className="flex items-center gap-1">
                       <Input
                         type="text"
                         inputMode="decimal"
-                        className={cn('h-8 text-xs tabular-nums', tpMode === 'mcap' ? 'w-24' : 'w-20')}
-                        placeholder={tpMode === 'mcap' ? 'MCap' : 'Gain %'}
-                        value={tp.targetPercent}
-                        onChange={(e) => handleTpChange(index, 'targetPercent', e.target.value)}
+                        className={cn('h-8 text-xs tabular-nums', tp.targetMode === 'mcap' ? 'w-24' : 'w-20')}
+                        placeholder={tp.targetMode === 'mcap' ? 'MCap' : 'Gain %'}
+                        value={tp.targetValue}
+                        onChange={(e) => handleTpChange(index, 'targetValue', e.target.value)}
+                        aria-label={tp.targetMode === 'mcap' ? `TP${index + 1} objectif MCap` : `TP${index + 1} objectif %`}
                       />
-                      {tpMode === 'percent' && <span className="text-xs text-muted-foreground">%</span>}
+                      {tp.targetMode === 'percent' && <span className="text-xs text-muted-foreground">%</span>}
                     </div>
                     <span className="text-xs text-muted-foreground">→ retirer</span>
                     <div className="flex items-center gap-1">
