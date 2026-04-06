@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireUser } from '@/lib/auth-session';
+import { RUGGER_LIST_SELECT, RUGGER_METRICS_RETURNING } from '@/lib/repositories/rugger-queries';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_ORDER } from '@/types/rugger';
 
@@ -41,41 +43,19 @@ function toRugger(r: RuggerRow): Rugger {
   };
 }
 
-const RUGGER_SELECT = `
-  select r.id, r.name, r.description, r.wallet_address, r.wallet_type,
-    r.volume_min, r.volume_max, r.start_hour, r.end_hour, r.notes, r.status_id, r.archived, r.created_at,
-    (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
-    (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
-  from ruggers r`;
-
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
 
   const rows = await query<RuggerRow>(
-    `
-      select
-        r.id,
-        r.name,
-        r.description,
-        r.wallet_address,
-        r.wallet_type,
-        r.volume_min,
-        r.volume_max,
-        r.start_hour,
-        r.end_hour,
-        r.notes,
-        r.status_id,
-        r.archived,
-        r.created_at,
-        (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
-        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
-      from ruggers r
-      where r.id = $1
-    `,
-    [ruggerId]
+    `${RUGGER_LIST_SELECT} where r.id = $1 and r.user_id = $2`,
+    [ruggerId, userId]
   );
 
   const row = rows[0];
@@ -90,6 +70,10 @@ export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
   const body = (await req.json()) as {
     name?: string | null;
@@ -110,7 +94,10 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid walletType' }, { status: 400 });
   }
 
-  const existing = await query<{ id: string; status_id: StatusId }>('select id, status_id from ruggers where id = $1', [ruggerId]);
+  const existing = await query<{ id: string; status_id: StatusId }>(
+    'select id, status_id from ruggers where id = $1 and user_id = $2',
+    [ruggerId, userId]
+  );
   if (existing.length === 0) {
     return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
   }
@@ -182,19 +169,21 @@ export async function PATCH(
   }
 
   if (updates.length === 0) {
-    const row = await query<RuggerRow>(`${RUGGER_SELECT} where r.id = $1`, [ruggerId]);
+    const row = await query<RuggerRow>(`${RUGGER_LIST_SELECT} where r.id = $1 and r.user_id = $2`, [
+      ruggerId,
+      userId,
+    ]);
     const r = row[0];
     if (!r) return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
     return NextResponse.json(toRugger(r));
   }
 
-  values.push(ruggerId);
+  values.push(ruggerId, userId);
   const setClause = updates.join(', ');
   const rows = await query<RuggerRow>(
-    `update ruggers set ${setClause} where id = $${paramIndex}
+    `update ruggers set ${setClause} where id = $${paramIndex++} and user_id = $${paramIndex}
      returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, archived, created_at,
-       (select count(*)::int from rugger_tokens t where t.rugger_id = ruggers.id) as token_count,
-       (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = ruggers.id) as avg_max_gain_percent`,
+       ${RUGGER_METRICS_RETURNING}`,
     values
   );
 
@@ -204,18 +193,25 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
 
-  const existing = await query<{ id: string }>('select id from ruggers where id = $1', [ruggerId]);
+  const existing = await query<{ id: string }>(
+    'select id from ruggers where id = $1 and user_id = $2',
+    [ruggerId, userId]
+  );
   if (existing.length === 0) {
     return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
   }
 
   await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
-  await query('delete from ruggers where id = $1', [ruggerId]);
+  await query('delete from ruggers where id = $1 and user_id = $2', [ruggerId, userId]);
 
   return NextResponse.json({ ok: true });
 }

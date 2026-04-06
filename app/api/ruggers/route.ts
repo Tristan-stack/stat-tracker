@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireUser } from '@/lib/auth-session';
+import { RUGGER_LIST_SELECT } from '@/lib/repositories/rugger-queries';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 
 const VALID_STATUS_IDS: StatusId[] = ['verification', 'en_test', 'actif'];
 
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { searchParams } = new URL(req.url);
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '20');
@@ -18,8 +24,8 @@ export async function GET(req: NextRequest) {
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 && pageSize <= 100 ? pageSize : 20;
   const offset = (safePage - 1) * safePageSize;
 
-  const conditions: string[] = [`r.archived = $3`];
-  const mainParams: (string | number | boolean)[] = [safePageSize, offset, showArchived];
+  const conditions: string[] = [`r.archived = $3`, `r.user_id = $4`];
+  const mainParams: (string | number | boolean)[] = [safePageSize, offset, showArchived, userId];
   if (statusFilter) {
     conditions.push(`r.status_id = $${mainParams.length + 1}`);
     mainParams.push(statusFilter);
@@ -42,34 +48,10 @@ export async function GET(req: NextRequest) {
     created_at: string;
     token_count: number;
     avg_max_gain_percent: number;
-  }>(
-    `
-      select
-        r.id,
-        r.name,
-        r.description,
-        r.wallet_address,
-        r.wallet_type,
-        r.volume_min,
-        r.volume_max,
-        r.start_hour,
-        r.end_hour,
-        r.notes,
-        r.status_id,
-        r.archived,
-        r.created_at,
-        (select count(*)::int from rugger_tokens t where t.rugger_id = r.id) as token_count,
-        (select coalesce(avg((t.high - t.entry_price) / nullif(t.entry_price, 0) * 100), 0) from rugger_tokens t where t.rugger_id = r.id) as avg_max_gain_percent
-      from ruggers r
-      ${whereClause}
-      order by r.created_at desc
-      limit $1 offset $2
-    `,
-    mainParams
-  );
+  }>(`${RUGGER_LIST_SELECT} ${whereClause} order by r.created_at desc limit $1 offset $2`, mainParams);
 
-  const countConditions: string[] = ['archived = $1'];
-  const countParams: (string | boolean)[] = [showArchived];
+  const countConditions: string[] = ['archived = $1', 'user_id = $2'];
+  const countParams: (string | boolean)[] = [showArchived, userId];
   if (statusFilter) {
     countConditions.push(`status_id = $${countParams.length + 1}`);
     countParams.push(statusFilter);
@@ -102,6 +84,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const body = (await req.json()) as {
     name?: string;
     description?: string;
@@ -135,7 +121,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (name === '' || name === null) {
-    const countRows = await query<{ count: string }>(`select count(*)::text as count from ruggers`, []);
+    const countRows = await query<{ count: string }>(
+      `select count(*)::text as count from ruggers where user_id = $1`,
+      [userId]
+    );
     const count = Number(countRows[0]?.count ?? '0');
     name = String(count + 1);
   }
@@ -155,11 +144,11 @@ export async function POST(req: NextRequest) {
     created_at: string;
   }>(
     `
-      insert into ruggers (name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      insert into ruggers (user_id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, created_at
     `,
-    [name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
+    [userId, name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
   );
 
   const row = rows[0];
@@ -184,4 +173,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(rugger, { status: 201 });
 }
-

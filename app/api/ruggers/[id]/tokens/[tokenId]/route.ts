@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireUser } from '@/lib/auth-session';
+import { ruggerExistsForUser } from '@/lib/rugger-access';
 
 export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ id: string; tokenId: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId, tokenId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   const body = (await req.json()) as { targetExitPercent?: number; entryPrice?: number };
 
   const setClauses: string[] = [];
@@ -49,7 +59,15 @@ export async function DELETE(
   _req: NextRequest,
   context: { params: Promise<{ id: string; tokenId: string }> }
 ) {
+  const auth = await requireUser(_req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId, tokenId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   await query(
     'delete from rugger_tokens where id = $1 and rugger_id = $2',
     [tokenId, ruggerId]

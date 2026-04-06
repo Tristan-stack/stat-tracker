@@ -6,6 +6,70 @@ datasource db {
   provider = "postgresql"
 }
 
+// Tables better-auth : présentes en base pour que `prisma db push` / migrate ne les suppriment pas.
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  ruggers       Rugger[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
 model Status {
   id      String        @id
   label   String
@@ -18,7 +82,8 @@ model Status {
 
 model Rugger {
   id            String        @id @default(dbgenerated("gen_random_uuid()"))
-  userId        String?       @map("user_id")
+  userId        String        @map("user_id")
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String?
   description   String?       @map("description")
   walletAddress String        @map("wallet_address")
@@ -35,6 +100,7 @@ model Rugger {
   tokens        RuggerToken[]
 
   @@unique([userId, walletAddress])
+  @@index([userId])
   @@map("ruggers")
 }
 
@@ -43,6 +109,7 @@ model RuggerToken {
   rugger            Rugger   @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
   ruggerId          String   @map("rugger_id")
   name              String
+  entryMcap         Float?   @map("entry_mcap")
   entryPrice        Float    @map("entry_price")
   high              Float
   low               Float

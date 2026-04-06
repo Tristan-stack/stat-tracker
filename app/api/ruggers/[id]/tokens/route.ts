@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { requireUser } from '@/lib/auth-session';
+import { ruggerExistsForUser } from '@/lib/rugger-access';
 import { MIGRATION_MCAP_THRESHOLD } from '@/lib/migration';
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
@@ -33,7 +35,6 @@ function getCreatedSinceBounds(createdSince: string | null): { from: string; to?
     return bounds;
   }
 
-  // Calendar-day filters: exclude "today" to match "yesterday/last N days".
   bounds.to = todayStart.toISOString();
 
   return bounds;
@@ -55,7 +56,15 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   const { searchParams } = new URL(req.url);
   const fetchAll = searchParams.get('all') === 'true';
   const statusFilter = searchParams.get('status') as StatusId | null;
@@ -139,7 +148,15 @@ export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   const body = (await req.json()) as { tokens?: Token[]; replace?: boolean };
   const payload = body.tokens ?? [];
   const replace = body.replace !== false;
@@ -164,7 +181,10 @@ export async function POST(
     return NextResponse.json({ error: 'No valid tokens' }, { status: 400 });
   }
 
-  const ruggerRows = await query<{ status_id: StatusId }>('select status_id from ruggers where id = $1', [ruggerId]);
+  const ruggerRows = await query<{ status_id: StatusId }>(
+    'select status_id from ruggers where id = $1 and user_id = $2',
+    [ruggerId, userId]
+  );
   const ruggerStatusId = ruggerRows[0]?.status_id ?? 'verification';
 
   if (replace) {
@@ -206,7 +226,15 @@ export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   const body = (await req.json()) as { targetExitPercent?: number; targetExitMcap?: number };
 
   if (body.targetExitMcap !== undefined) {
@@ -233,11 +261,18 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
   const { id: ruggerId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
   await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
   return NextResponse.json({ ok: true });
 }
-
