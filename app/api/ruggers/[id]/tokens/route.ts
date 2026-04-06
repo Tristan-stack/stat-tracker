@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { MIGRATION_MCAP_THRESHOLD } from '@/lib/migration';
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 
@@ -60,6 +61,7 @@ export async function GET(
   const statusFilter = searchParams.get('status') as StatusId | null;
   const createdSinceParam = searchParams.get('createdSince');
   const createdSinceBounds = getCreatedSinceBounds(createdSinceParam);
+  const migrationOnly = searchParams.get('migration') === 'true';
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
   const safePage = Number.isFinite(page) && page > 0 ? page : 1;
@@ -79,6 +81,10 @@ export async function GET(
       conditions.push('created_at < $' + (baseParams.length + 1));
       baseParams.push(createdSinceBounds.to);
     }
+  }
+  if (migrationOnly) {
+    conditions.push('high >= $' + (baseParams.length + 1));
+    baseParams.push(MIGRATION_MCAP_THRESHOLD);
   }
   const whereClause = 'where ' + conditions.join(' and ');
 

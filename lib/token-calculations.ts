@@ -59,19 +59,33 @@ export function getAggregateMetrics(tokens: Token[]): AggregateMetrics {
   };
 }
 
-export function getMaxConsecutiveLosses(tokens: Token[]): number {
+export function getConsecutiveLossStreakInfo(tokens: Token[]): {
+  maxLength: number;
+  maxLengthOccurrences: number;
+} {
   const withMetrics = tokens.map(getTokenWithMetrics);
-  let max = 0;
   let current = 0;
+  const streakLengths: number[] = [];
   for (const t of withMetrics) {
     if (!t.targetReached) {
       current++;
-      if (current > max) max = current;
     } else {
+      if (current > 0) streakLengths.push(current);
       current = 0;
     }
   }
-  return max;
+  if (current > 0) streakLengths.push(current);
+
+  if (streakLengths.length === 0) {
+    return { maxLength: 0, maxLengthOccurrences: 0 };
+  }
+  const maxLength = Math.max(...streakLengths);
+  const maxLengthOccurrences = streakLengths.filter((l) => l === maxLength).length;
+  return { maxLength, maxLengthOccurrences };
+}
+
+export function getMaxConsecutiveLosses(tokens: Token[]): number {
+  return getConsecutiveLossStreakInfo(tokens).maxLength;
 }
 
 export function getAcceptanceCriteria(tokens: Token[]): AcceptanceCriteria {
@@ -79,6 +93,7 @@ export function getAcceptanceCriteria(tokens: Token[]): AcceptanceCriteria {
     return {
       winRate: 0,
       maxConsecutiveLosses: 0,
+      maxConsecutiveLossOccurrences: 0,
       meetsWinRateCriteria: false,
       meetsLossStreakCriteria: true,
       meetsAllCriteria: false,
@@ -87,12 +102,15 @@ export function getAcceptanceCriteria(tokens: Token[]): AcceptanceCriteria {
   const withMetrics = tokens.map(getTokenWithMetrics);
   const reachedCount = withMetrics.filter((t) => t.targetReached).length;
   const winRate = (reachedCount / tokens.length) * 100;
-  const maxConsecutiveLosses = getMaxConsecutiveLosses(tokens);
+  const streakInfo = getConsecutiveLossStreakInfo(tokens);
+  const maxConsecutiveLosses = streakInfo.maxLength;
+  const maxConsecutiveLossOccurrences = streakInfo.maxLengthOccurrences;
   const meetsWinRateCriteria = winRate >= 45;
   const meetsLossStreakCriteria = maxConsecutiveLosses <= 6;
   return {
     winRate,
     maxConsecutiveLosses,
+    maxConsecutiveLossOccurrences,
     meetsWinRateCriteria,
     meetsLossStreakCriteria,
     meetsAllCriteria: meetsWinRateCriteria && meetsLossStreakCriteria,

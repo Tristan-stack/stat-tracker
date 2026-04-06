@@ -241,6 +241,7 @@ describe('getAcceptanceCriteria', () => {
     const criteria = getAcceptanceCriteria([]);
     expect(criteria.winRate).toBe(0);
     expect(criteria.maxConsecutiveLosses).toBe(0);
+    expect(criteria.maxConsecutiveLossOccurrences).toBe(0);
     expect(criteria.meetsWinRateCriteria).toBe(false);
     expect(criteria.meetsLossStreakCriteria).toBe(true);
     expect(criteria.meetsAllCriteria).toBe(false);
@@ -254,6 +255,7 @@ describe('getAcceptanceCriteria', () => {
 
     expect(criteria.winRate).toBeCloseTo(55.56, 1);
     expect(criteria.maxConsecutiveLosses).toBe(4);
+    expect(criteria.maxConsecutiveLossOccurrences).toBe(1);
     expect(criteria.meetsWinRateCriteria).toBe(true);
     expect(criteria.meetsLossStreakCriteria).toBe(true);
     expect(criteria.meetsAllCriteria).toBe(true);
@@ -277,6 +279,7 @@ describe('getAcceptanceCriteria', () => {
     const criteria = getAcceptanceCriteria(tokens);
 
     expect(criteria.maxConsecutiveLosses).toBe(7);
+    expect(criteria.maxConsecutiveLossOccurrences).toBe(1);
     expect(criteria.meetsLossStreakCriteria).toBe(false);
     expect(criteria.meetsAllCriteria).toBe(false);
   });
@@ -298,6 +301,17 @@ describe('getAcceptanceCriteria', () => {
     const criteria = getAcceptanceCriteria(tokens);
 
     expect(criteria.maxConsecutiveLosses).toBe(6);
+    expect(criteria.maxConsecutiveLossOccurrences).toBe(1);
     expect(criteria.meetsLossStreakCriteria).toBe(true);
+  });
+
+  it('counts multiple streaks at the same max length', () => {
+    const win = makeToken({ entryPrice: 100, high: 200, low: 90, targetExitPercent: 50 });
+    const loss = makeToken({ entryPrice: 100, high: 110, low: 60, targetExitPercent: 50 });
+    const tokens = [loss, loss, loss, win, loss, loss, loss];
+    const criteria = getAcceptanceCriteria(tokens);
+
+    expect(criteria.maxConsecutiveLosses).toBe(3);
+    expect(criteria.maxConsecutiveLossOccurrences).toBe(2);
   });
 });

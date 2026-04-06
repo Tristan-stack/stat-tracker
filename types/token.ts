@@ -33,6 +33,8 @@ export interface AggregateMetrics {
 export interface AcceptanceCriteria {
   winRate: number;
   maxConsecutiveLosses: number;
+  /** Nombre de séries distinctes dont la longueur est égale au max de pertes consécutives. */
+  maxConsecutiveLossOccurrences: number;
   meetsWinRateCriteria: boolean;
   meetsLossStreakCriteria: boolean;
   meetsAllCriteria: boolean;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { TokenTable } from '@/components/TokenTable';
@@ -15,6 +15,7 @@ import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
 import type { Token, ExitMode } from '@/types/token';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
+import { isMigrationPeakMcap, type MigrationView } from '@/lib/migration';
 import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 
@@ -77,6 +78,8 @@ export default function RuggerDetailPage() {
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
   const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<TokenCreatedSinceFilter>('all');
+  const [migrationView, setMigrationView] = useState<MigrationView>('all');
+  const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -126,6 +129,16 @@ export default function RuggerDetailPage() {
     [mergeHidden, allTokensForStats]
   );
 
+  const migrationKnownTotal = useMemo(
+    () => allTokensForStats.filter((t) => isMigrationPeakMcap(t.high)).length,
+    [allTokensForStats]
+  );
+
+  const handleMigrationViewChange = useCallback((view: MigrationView) => {
+    setMigrationView(view);
+    setPage(1);
+  }, []);
+
   const loadRugger = useCallback(async (ruggerId: string) => {
     setIsLoadingRugger(true);
     try {
@@ -139,7 +152,13 @@ export default function RuggerDetailPage() {
   }, []);
 
   const loadTokens = useCallback(
-    async (ruggerId: string, nextPage: number, status?: StatusId | 'all', createdSince?: TokenCreatedSinceFilter) => {
+    async (
+      ruggerId: string,
+      nextPage: number,
+      status?: StatusId | 'all',
+      createdSince?: TokenCreatedSinceFilter,
+      migrationOnly = false
+    ) => {
       setIsLoadingTokens(true);
       try {
         const searchParams = new URLSearchParams({
@@ -151,6 +170,9 @@ export default function RuggerDetailPage() {
         }
         if (createdSince && createdSince !== 'all') {
           searchParams.set('createdSince', createdSince);
+        }
+        if (migrationOnly) {
+          searchParams.set('migration', 'true');
         }
         const response = await fetch(
           `/api/ruggers/${ruggerId}/tokens?${searchParams.toString()}`
@@ -197,11 +219,23 @@ export default function RuggerDetailPage() {
     if (!id) {
       setTokensPage(null);
       setAllTokensForStats([]);
+      prevRuggerIdForFetchRef.current = null;
       return;
     }
-    void loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+
+    const ruggerChanged = prevRuggerIdForFetchRef.current !== id;
+    if (ruggerChanged) {
+      prevRuggerIdForFetchRef.current = id;
+      setMigrationView('all');
+      setPage(1);
+    }
+
+    const fetchPage = ruggerChanged ? 1 : page;
+    const migrationOnly = ruggerChanged ? false : migrationView === 'migrations';
+
+    void loadTokens(id, fetchPage, tokenStatusFilter, tokenCreatedSinceFilter, migrationOnly);
     void loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
-  }, [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
+  }, [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]);
 
   useEffect(() => {
     if (rugger && isEditing) {
@@ -231,11 +265,11 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
       await loadRugger(id);
     },
-    [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats, loadRugger]
+    [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats, loadRugger]
   );
 
   const handleAddToken = useCallback(
@@ -248,10 +282,10 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+    [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
   );
 
   const handleRemoveToken = useCallback(
@@ -261,10 +295,10 @@ export default function RuggerDetailPage() {
         method: 'DELETE',
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
   );
 
   const handleChangeTarget = useCallback(
@@ -276,10 +310,10 @@ export default function RuggerDetailPage() {
         body: JSON.stringify({ targetExitPercent: nextPercent }),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
   );
 
   const handleChangeEntryPrice = useCallback(
@@ -291,10 +325,10 @@ export default function RuggerDetailPage() {
         body: JSON.stringify({ entryPrice: nextPrice }),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]
+    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
   );
 
   const handleUpdateRugger = useCallback(
@@ -347,12 +381,12 @@ export default function RuggerDetailPage() {
         body: JSON.stringify(body),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
       await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     } finally {
       setIsApplyingGlobalTarget(false);
     }
-  }, [id, globalExitMode, globalTargetPercent, globalTargetMcap, page, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats]);
+  }, [id, globalExitMode, globalTargetPercent, globalTargetMcap, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]);
 
   const handleResetTokens = useCallback(async () => {
     if (!id) return;
@@ -360,10 +394,10 @@ export default function RuggerDetailPage() {
     const response = await fetch(`/api/ruggers/${id}/tokens`, { method: 'DELETE' });
     if (!response.ok) return;
     setPage(1);
-    await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter);
+    await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
     await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
     await loadRugger(id);
-  }, [id, tokenStatusFilter, tokenCreatedSinceFilter, loadTokens, loadAllTokensForStats, loadRugger]);
+  }, [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats, loadRugger]);
 
   const handleAdvanceStatus = useCallback(async () => {
     if (!id || !rugger) return;
@@ -847,6 +881,9 @@ export default function RuggerDetailPage() {
               onChangeTarget={handleChangeTarget}
               onChangeEntryPrice={handleChangeEntryPrice}
               onToggleHidden={handleToggleHidden}
+              migrationView={migrationView}
+              onMigrationViewChange={handleMigrationViewChange}
+              migrationKnownCount={migrationKnownTotal}
             />
             <div className="flex justify-end gap-2">
               <Button

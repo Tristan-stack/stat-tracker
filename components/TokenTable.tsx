@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics, ExitMode } from '@/types/token';
 import { STATUS_DOT_CLASSES } from '@/types/rugger';
 import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { isMigrationPeakMcap, MIGRATION_MCAP_THRESHOLD, type MigrationView } from '@/lib/migration';
 import { cn } from '@/lib/utils';
 
 function formatNum(value: number, decimals = 2): string {
@@ -126,6 +127,11 @@ export interface TokenTableProps {
   onChangeEntryPrice: (id: string, nextPrice: number) => void;
   /** Si absent, la colonne visibilité n’est pas affichée (ex. page rugger). */
   onToggleHidden?: (id: string) => void;
+  /** Filtre migration piloté par le parent (pagination serveur). */
+  migrationView?: MigrationView;
+  onMigrationViewChange?: (view: MigrationView) => void;
+  /** Total migrations connues (liste complète). Sinon dérivé des `tokens` passés. */
+  migrationKnownCount?: number;
 }
 
 export function TokenTable({
@@ -134,9 +140,38 @@ export function TokenTable({
   onChangeTarget,
   onChangeEntryPrice,
   onToggleHidden,
+  migrationView: migrationViewProp,
+  onMigrationViewChange,
+  migrationKnownCount,
 }: TokenTableProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exitMode, setExitMode] = useState<ExitMode>('percent');
+  const [localMigrationView, setLocalMigrationView] = useState<MigrationView>('all');
+
+  const serverControlsMigration = onMigrationViewChange != null;
+  const migrationView = serverControlsMigration ? (migrationViewProp ?? 'all') : localMigrationView;
+
+  const setMigrationView = useCallback(
+    (v: MigrationView) => {
+      if (serverControlsMigration) onMigrationViewChange(v);
+      else setLocalMigrationView(v);
+    },
+    [serverControlsMigration, onMigrationViewChange]
+  );
+
+  const derivedMigrationCount = useMemo(
+    () => tokens.filter((t) => isMigrationPeakMcap(t.high)).length,
+    [tokens]
+  );
+  const knownMigrationTotal = migrationKnownCount ?? derivedMigrationCount;
+
+  const displayedTokens = useMemo(() => {
+    if (serverControlsMigration) return tokens;
+    if (migrationView === 'migrations') {
+      return tokens.filter((t) => isMigrationPeakMcap(t.high));
+    }
+    return tokens;
+  }, [serverControlsMigration, tokens, migrationView]);
 
   const handleCopyName = useCallback(async (token: TokenWithMetrics) => {
     await navigator.clipboard.writeText(token.name);
@@ -146,7 +181,7 @@ export function TokenTable({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs font-medium text-muted-foreground">Objectif de sortie :</span>
         <div className="flex rounded-md border text-xs">
           <button
@@ -170,10 +205,40 @@ export function TokenTable({
             MCap cible
           </button>
         </div>
+        <span className="text-xs text-muted-foreground">|</span>
+        <span className="text-xs font-medium text-muted-foreground">Migration :</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border text-xs">
+            <button
+              type="button"
+              onClick={() => setMigrationView('all')}
+              className={cn(
+                'px-3 py-1 rounded-l-md transition-colors font-medium',
+                migrationView === 'all' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+              )}
+            >
+              Tous
+            </button>
+            <button
+              type="button"
+              onClick={() => setMigrationView('migrations')}
+              className={cn(
+                'px-3 py-1 rounded-r-md transition-colors font-medium',
+                migrationView === 'migrations' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+              )}
+            >
+              Migrations
+            </button>
+          </div>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {knownMigrationTotal}{' '}
+            {knownMigrationTotal === 1 ? 'migration connue' : 'migrations connues'}
+          </span>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
-        <table className="w-full min-w-[680px] text-xs sm:text-sm">
+        <table className="w-full min-w-[740px] text-xs sm:text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
               {onToggleHidden && (
@@ -184,6 +249,7 @@ export function TokenTable({
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
               <th className="px-5 py-4 text-right font-medium">Entrée</th>
               <th className="px-5 py-4 text-right font-medium">Plus haut</th>
+              <th className="px-3 py-4 text-center font-medium">Migration</th>
               <th className="px-5 py-4 text-right font-medium">Plus bas</th>
               <th className="px-5 py-4 text-right font-medium">
                 {exitMode === 'percent' ? 'Objectif %' : 'Objectif MCap'}
@@ -196,7 +262,7 @@ export function TokenTable({
             </tr>
           </thead>
           <tbody>
-            {tokens.map((t) => (
+            {displayedTokens.map((t) => (
               <tr
                 key={t.id}
                 className={cn(
@@ -260,6 +326,23 @@ export function TokenTable({
                   />
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
+                <td className="px-2 py-3 text-center align-middle sm:px-3 sm:py-4">
+                  <span
+                    className={cn(
+                      'inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold leading-none',
+                      isMigrationPeakMcap(t.high)
+                        ? 'bg-blue-600 text-white shadow-sm dark:bg-blue-500'
+                        : 'bg-muted text-muted-foreground'
+                    )}
+                    title={
+                      isMigrationPeakMcap(t.high)
+                        ? `MCap max ≥ ${MIGRATION_MCAP_THRESHOLD} (migration)`
+                        : `MCap max < ${MIGRATION_MCAP_THRESHOLD}`
+                    }
+                  >
+                    M
+                  </span>
+                </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.low)}</td>
                 <td className="px-5 py-4 text-right tabular-nums">
                   {exitMode === 'percent' ? (

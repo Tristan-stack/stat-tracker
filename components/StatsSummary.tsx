@@ -534,7 +534,15 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                   : 'text-red-700 dark:text-red-400'
               }`}
             >
-              Pertes consécutives max : {acceptance.maxConsecutiveLosses} {acceptance.meetsLossStreakCriteria ? '≤' : '>'} 6
+              Pertes consécutives max : {acceptance.maxConsecutiveLosses}{' '}
+              {acceptance.meetsLossStreakCriteria ? '≤' : '>'} 6
+              {acceptance.maxConsecutiveLosses > 0 && (
+                <span className="text-muted-foreground">
+                  {' '}
+                  ({acceptance.maxConsecutiveLossOccurrences} série
+                  {acceptance.maxConsecutiveLossOccurrences !== 1 ? 's' : ''} à ce max)
+                </span>
+              )}
             </span>
           </div>
         )}
