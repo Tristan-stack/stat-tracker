@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { requireUser } from '@/lib/auth-session';
+import { getPostgresErrorCode } from '@/lib/pg-errors';
 import { RUGGER_LIST_SELECT } from '@/lib/repositories/rugger-queries';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
     name = String(count + 1);
   }
 
-  const rows = await query<{
+  let rows: {
     id: string;
     name: string | null;
     description: string | null;
@@ -142,16 +143,42 @@ export async function POST(req: NextRequest) {
     notes: string | null;
     status_id: StatusId;
     created_at: string;
-  }>(
-    `
+  }[];
+
+  try {
+    rows = await query(
+      `
       insert into ruggers (user_id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes)
       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       returning id, name, description, wallet_address, wallet_type, volume_min, volume_max, start_hour, end_hour, notes, status_id, created_at
     `,
-    [userId, name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
-  );
+      [userId, name, description, walletAddress, walletType, volumeMin, volumeMax, startHour, endHour, notes]
+    );
+  } catch (e) {
+    const code = getPostgresErrorCode(e);
+    if (code === '23505') {
+      return NextResponse.json(
+        {
+          error:
+            'Un rugger avec cette adresse wallet existe déjà pour ton compte. Modifie l’existant ou utilise une autre adresse.',
+        },
+        { status: 409 }
+      );
+    }
+    if (code === '23503') {
+      return NextResponse.json(
+        { error: 'Compte utilisateur invalide en base. Reconnecte-toi ou contacte le support.' },
+        { status: 400 }
+      );
+    }
+    console.error('[POST /api/ruggers]', e);
+    return NextResponse.json({ error: 'Erreur base de données' }, { status: 500 });
+  }
 
   const row = rows[0];
+  if (!row) {
+    return NextResponse.json({ error: 'Insert sans ligne retournée' }, { status: 500 });
+  }
 
   const rugger: Rugger = {
     id: row.id,
