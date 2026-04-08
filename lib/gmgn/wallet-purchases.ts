@@ -27,6 +27,8 @@ export interface WalletPurchasePreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
+  /** Présent quand l’achat provient d’un fetch multi-wallets. */
+  sourceWallet?: string;
 }
 
 /**

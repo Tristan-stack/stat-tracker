@@ -78,6 +78,7 @@ interface GmgnPurchasePreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
+  sourceWallet?: string;
 }
 
 /** Client row: valeurs déjà en échelle MCap (× 1e6 depuis GMGN) ; champs éditables si tu veux corriger. */
@@ -90,6 +91,7 @@ interface GmgnPreviewRow {
   entryStr: string;
   highStr: string;
   lowStr: string;
+  sourceWallet?: string;
 }
 
 function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow[] {
@@ -102,7 +104,20 @@ function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow
     entryStr: formatGmgnDecimalString(p.entryPrice),
     highStr: formatGmgnDecimalString(p.high),
     lowStr: formatGmgnDecimalString(p.low),
+    sourceWallet: p.sourceWallet,
   }));
+}
+
+function parseWalletLines(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const a = line.trim();
+    if (a === '' || seen.has(a)) continue;
+    seen.add(a);
+    out.push(a);
+  }
+  return out;
 }
 
 /** Mints déjà enregistrés sur le rugger (`token_address` ou `name` si pas d’adresse séparée). */
@@ -155,6 +170,7 @@ export default function RuggerDetailPage() {
   const [tokenTableCustomTo, setTokenTableCustomTo] = useState('');
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
   const [gmgnWalletInput, setGmgnWalletInput] = useState('');
+  const [motherWalletText, setMotherWalletText] = useState('');
   const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
   const [gmgnFetchFrom, setGmgnFetchFrom] = useState('');
   const [gmgnFetchTo, setGmgnFetchTo] = useState('');
@@ -163,7 +179,7 @@ export default function RuggerDetailPage() {
   const [gmgnPreview, setGmgnPreview] = useState<GmgnPreviewRow[] | null>(null);
   /** Après un fetch réussi : message si liste vide ou si des lignes ont été exclues (déjà en base). */
   const [gmgnDedupeNotice, setGmgnDedupeNotice] = useState<string | null>(null);
-  const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'gmgn'>('gmgn');
+  const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'walletBuyer' | 'motherExchange'>('walletBuyer');
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
 
@@ -744,6 +760,89 @@ export default function RuggerDetailPage() {
     }
   }, [id, gmgnWalletInput, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, loadAllRuggerTokensUnfiltered]);
 
+  const handleMotherFetch = useCallback(async () => {
+    setGmgnError(null);
+    setGmgnPreview(null);
+    setGmgnDedupeNotice(null);
+    const wallets = parseWalletLines(motherWalletText);
+    if (wallets.length === 0) {
+      setGmgnError('Indique au moins une adresse wallet (une par ligne).');
+      return;
+    }
+    const MAX_WALLETS = 20;
+    if (wallets.length > MAX_WALLETS) {
+      setGmgnError(`Maximum ${MAX_WALLETS} adresses distinctes.`);
+      return;
+    }
+    if (!id) {
+      setGmgnError('Rugger introuvable.');
+      return;
+    }
+    const range =
+      gmgnFetchPeriod === 'today'
+        ? localTodayPurchaseRange()
+        : gmgnFetchPeriod === 'yesterday'
+          ? localYesterdayPurchaseRange()
+          : gmgnFetchPeriod === 'all'
+            ? localGmgnAllTimeRange()
+            : gmgnFetchFrom && gmgnFetchTo
+              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
+              : null;
+    if (!range) {
+      setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
+      return;
+    }
+    setGmgnLoading(true);
+    try {
+      const existingTokens = await loadAllRuggerTokensUnfiltered(id);
+      const knownMints = buildRuggerMintSet(existingTokens);
+
+      const res = await fetch('/api/gmgn/wallet-purchases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddresses: wallets,
+          fromMs: range.fromMs,
+          toMs: range.toMs,
+        }),
+      });
+      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
+      if (!res.ok) {
+        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+        return;
+      }
+      const rows = mapApiPurchasesToRows(data.purchases ?? []);
+      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
+      const skipped = rows.length - filtered.length;
+
+      if (rows.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(
+          'Aucun achat « buy » renvoyé par GMGN sur ce créneau (minuit local → maintenant). ' +
+            'Si les wallets sont très actifs, les achats récents peuvent être au-delà de la pagination : essaie « Tous » ou une plage personnalisée.'
+        );
+      } else if (filtered.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(
+          rows.length === 1
+            ? 'Cet achat est déjà enregistré sur ce rugger.'
+            : `Les ${rows.length} achat(s) trouvé(s) sont déjà enregistrés sur ce rugger.`
+        );
+      } else {
+        setGmgnPreview(filtered);
+        setGmgnDedupeNotice(
+          skipped > 0
+            ? `${skipped} achat(s) déjà présent(s) sur ce rugger — exclus de la liste.`
+            : null
+        );
+      }
+    } catch {
+      setGmgnError('Erreur réseau');
+    } finally {
+      setGmgnLoading(false);
+    }
+  }, [id, motherWalletText, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, loadAllRuggerTokensUnfiltered]);
+
   const handleAddGmgnPurchases = useCallback(
     async (items: GmgnPreviewRow[]) => {
       if (!id || items.length === 0) return;
@@ -1173,19 +1272,46 @@ export default function RuggerDetailPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setTokenAddMode('gmgn')}
+              onClick={() => {
+                setTokenAddMode('walletBuyer');
+                setGmgnPreview(null);
+                setGmgnDedupeNotice(null);
+                setGmgnError(null);
+              }}
               className={cn(
                 'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
-                tokenAddMode === 'gmgn'
+                tokenAddMode === 'walletBuyer'
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               )}
             >
-              Import GMGN (Solana)
+              Wallet Buyer Tracking
             </button>
             <button
               type="button"
-              onClick={() => setTokenAddMode('manual')}
+              onClick={() => {
+                setTokenAddMode('motherExchange');
+                setGmgnPreview(null);
+                setGmgnDedupeNotice(null);
+                setGmgnError(null);
+              }}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                tokenAddMode === 'motherExchange'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              Mother / Exchange Tracking
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTokenAddMode('manual');
+                setGmgnPreview(null);
+                setGmgnDedupeNotice(null);
+                setGmgnError(null);
+              }}
               className={cn(
                 'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
                 tokenAddMode === 'manual'
@@ -1199,7 +1325,7 @@ export default function RuggerDetailPage() {
 
           {tokenAddMode === 'manual' && <TokenForm onAdd={handleAddToken} />}
 
-          {tokenAddMode === 'gmgn' && (
+          {(tokenAddMode === 'walletBuyer' || tokenAddMode === 'motherExchange') && (
           <div className="space-y-4">
           <div className="space-y-2">
             <span className="text-sm font-medium text-foreground">Période du fetch</span>
@@ -1249,6 +1375,7 @@ export default function RuggerDetailPage() {
               </div>
             </div>
           )}
+          {tokenAddMode === 'walletBuyer' && (
           <div className="mt-4 flex max-w-2xl flex-col gap-3">
             <Label htmlFor="gmgn-wallet" className="block text-sm font-medium leading-normal">
               Adresse wallet
@@ -1261,8 +1388,34 @@ export default function RuggerDetailPage() {
               className="w-full font-mono text-sm"
             />
           </div>
+          )}
+          {tokenAddMode === 'motherExchange' && (
+          <div className="mt-4 flex max-w-2xl flex-col gap-3">
+            <Label htmlFor="mother-wallets" className="block text-sm font-medium leading-normal">
+              Adresses wallet (une par ligne)
+            </Label>
+            <textarea
+              id="mother-wallets"
+              value={motherWalletText}
+              onChange={(e) => setMotherWalletText(e.target.value)}
+              placeholder="Colle une ou plusieurs adresses Solana…"
+              rows={5}
+              className={cn(
+                'min-h-[120px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs transition-[color,box-shadow] outline-none',
+                'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                'disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30'
+              )}
+            />
+          </div>
+          )}
           {gmgnError && <p className="text-sm text-destructive">{gmgnError}</p>}
-          <Button type="button" onClick={() => void handleGmgnFetch()} disabled={gmgnLoading}>
+          <Button
+            type="button"
+            onClick={() =>
+              void (tokenAddMode === 'motherExchange' ? handleMotherFetch() : handleGmgnFetch())
+            }
+            disabled={gmgnLoading}
+          >
             {gmgnLoading ? 'Chargement GMGN…' : 'Fetch achats'}
           </Button>
           {gmgnPreview && gmgnPreview.length > 0 && (
@@ -1292,6 +1445,11 @@ export default function RuggerDetailPage() {
                       <div className="min-w-0 flex-1">
                         <div className="font-medium truncate">{p.name}</div>
                         <div className="font-mono text-[11px] text-muted-foreground truncate">{p.tokenAddress}</div>
+                        {p.sourceWallet && (
+                          <div className="font-mono text-[10px] text-muted-foreground/90 truncate">
+                            Wallet : {p.sourceWallet}
+                          </div>
+                        )}
                         <div className="text-xs text-muted-foreground">
                           {new Date(p.purchasedAt).toLocaleString('fr-FR')}
                           {p.truncatedKlines && ' · kline non chargé (limite)'}
