@@ -42,6 +42,8 @@ export interface AcceptanceCriteria {
   maxConsecutiveLosses: number;
   /** Nombre de séries distinctes dont la longueur est égale au max de pertes consécutives. */
   maxConsecutiveLossOccurrences: number;
+  /** Répartition complète des séries de pertes consécutives (longueur -> occurrences), triée décroissante. */
+  lossStreakDistribution: Array<{ length: number; occurrences: number }>;
   meetsWinRateCriteria: boolean;
   meetsLossStreakCriteria: boolean;
   meetsAllCriteria: boolean;

@@ -532,6 +532,20 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                   {acceptance.maxConsecutiveLossOccurrences !== 1 ? 's' : ''} à ce max)
                 </span>
               )}
+              {acceptance.lossStreakDistribution
+                .filter((streak) => streak.length !== acceptance.maxConsecutiveLosses)
+                .length > 0 && (
+                <span className="text-muted-foreground">
+                  {' '}
+                  — {acceptance.lossStreakDistribution
+                    .filter((streak) => streak.length !== acceptance.maxConsecutiveLosses)
+                    .map(
+                      (streak) =>
+                        `${streak.length} perte${streak.length > 1 ? 's' : ''}: ${streak.occurrences} série${streak.occurrences > 1 ? 's' : ''}`
+                    )
+                    .join(' · ')}
+                </span>
+              )}
             </span>
           </div>
         )}
