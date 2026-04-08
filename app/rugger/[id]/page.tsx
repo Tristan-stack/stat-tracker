@@ -10,6 +10,7 @@ import { TokenImportExport } from '@/components/TokenImportExport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
@@ -47,6 +48,26 @@ function getPurchaseFilterLabel(period: TokenPurchaseFilter): string {
   if (period === 'today') return 'Aujourd’hui';
   if (period === 'yesterday') return 'Hier';
   return 'Plage…';
+}
+
+function parseYyyyMmDdToDate(value: string): Date | undefined {
+  if (value.trim() === '') return undefined;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!parts) return undefined;
+  const year = Number(parts[1]);
+  const month = Number(parts[2]) - 1;
+  const day = Number(parts[3]);
+  const date = new Date(year, month, day);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date;
+}
+
+function formatDateToYyyyMmDd(date?: Date): string {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 interface GmgnPurchasePreview {
@@ -1210,20 +1231,20 @@ export default function RuggerDetailPage() {
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-2">
                 <Label htmlFor="gmgn-from">Du</Label>
-                <Input
-                  id="gmgn-from"
-                  type="date"
-                  value={gmgnFetchFrom}
-                  onChange={(e) => setGmgnFetchFrom(e.target.value)}
+                <DatePicker
+                  value={parseYyyyMmDdToDate(gmgnFetchFrom)}
+                  onChange={(date) => setGmgnFetchFrom(formatDateToYyyyMmDd(date))}
+                  placeholder="Date de début"
+                  className="w-[200px]"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="gmgn-to">Au</Label>
-                <Input
-                  id="gmgn-to"
-                  type="date"
-                  value={gmgnFetchTo}
-                  onChange={(e) => setGmgnFetchTo(e.target.value)}
+                <DatePicker
+                  value={parseYyyyMmDdToDate(gmgnFetchTo)}
+                  onChange={(date) => setGmgnFetchTo(formatDateToYyyyMmDd(date))}
+                  placeholder="Date de fin"
+                  className="w-[200px]"
                 />
               </div>
             </div>
@@ -1404,26 +1425,26 @@ export default function RuggerDetailPage() {
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-2">
                 <Label htmlFor="table-filter-from">Du</Label>
-                <Input
-                  id="table-filter-from"
-                  type="date"
-                  value={tokenTableCustomFrom}
-                  onChange={(e) => {
-                    setTokenTableCustomFrom(e.target.value);
+                <DatePicker
+                  value={parseYyyyMmDdToDate(tokenTableCustomFrom)}
+                  onChange={(date) => {
+                    setTokenTableCustomFrom(formatDateToYyyyMmDd(date));
                     setPage(1);
                   }}
+                  placeholder="Date de début"
+                  className="w-[200px]"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="table-filter-to">Au</Label>
-                <Input
-                  id="table-filter-to"
-                  type="date"
-                  value={tokenTableCustomTo}
-                  onChange={(e) => {
-                    setTokenTableCustomTo(e.target.value);
+                <DatePicker
+                  value={parseYyyyMmDdToDate(tokenTableCustomTo)}
+                  onChange={(date) => {
+                    setTokenTableCustomTo(formatDateToYyyyMmDd(date));
                     setPage(1);
                   }}
+                  placeholder="Date de fin"
+                  className="w-[200px]"
                 />
               </div>
             </div>

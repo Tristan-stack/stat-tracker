@@ -12,6 +12,8 @@ import { sanitizeUsdToMcapPrices } from '@/lib/gmgn/price-rounding';
 const CHAIN_SOL = 'sol';
 /** Limite de requêtes kline par import (throttle ~2 req/s côté GMGN). */
 const MAX_KLINE_ENRICH = 100;
+/** Sur une plage courte (ex. aujourd'hui), on privilégie la justesse: enrichir tous les tokens. */
+const SHORT_RANGE_FULL_KLINE_MS = 86400000;
 const MAX_ACTIVITY_PAGES = 80;
 /** Portefeuilles très actifs : plages courtes (ex. « aujourd’hui ») nécessitent plus de pages si l’API renvoie l’historique du plus ancien au plus récent. */
 const MAX_ACTIVITY_PAGES_SHORT_RANGE = 250;
@@ -102,12 +104,28 @@ export async function collectSolanaBuysInRange(
       types: ['buy'],
     });
     const activities = normalizeActivityPage(data);
+    const pageTimestamps = activities
+      .map((row) => rowTimestampSec(row))
+      .filter((ts) => ts > 0);
+
     for (const row of activities) {
       if (!isBuy(row)) continue;
       const ts = rowTimestampSec(row);
       if (ts < fromSec || ts > toSec) continue;
       collected.push(row);
     }
+
+    if (pageTimestamps.length > 1) {
+      const firstTs = pageTimestamps[0];
+      const lastTs = pageTimestamps[pageTimestamps.length - 1];
+      const seemsDescending = firstTs >= lastTs;
+      const oldestTs = Math.min(...pageTimestamps);
+
+      // Si l'API page du plus récent vers le plus ancien, on peut stopper dès
+      // qu'on est entièrement sous la borne basse (plus rien d'utile après).
+      if (seemsDescending && oldestTs < fromSec) break;
+    }
+
     const next = data.next;
     if (!next || activities.length === 0) break;
     cursor = next;
@@ -140,6 +158,8 @@ export async function buildPurchasePreviews(
   log(`wallet_activity: ${rows.length} achat(s) après filtre / dédup`);
   const nowMs = Date.now();
   const endMs = Math.min(toMs, nowMs);
+  const spanMs = Math.max(0, endMs - fromMs);
+  const maxKlineEnrich = spanMs <= SHORT_RANGE_FULL_KLINE_MS ? rows.length : MAX_KLINE_ENRICH;
   const out: WalletPurchasePreview[] = [];
   let klineCount = 0;
 
@@ -156,7 +176,7 @@ export async function buildPurchasePreviews(
     let low = entryPrice;
     let truncatedKlines = false;
 
-    if (klineCount < MAX_KLINE_ENRICH && purchaseMs < endMs) {
+    if (klineCount < maxKlineEnrich && purchaseMs < endMs) {
       klineCount += 1;
       const resolution = pickKlineResolution(purchaseMs, endMs);
       const klineDebug =
@@ -184,9 +204,9 @@ export async function buildPurchasePreviews(
       log(
         `   → agg_usd high=${String(agg.high)} low=${String(agg.low)} (candles=${candles.length})`
       );
-    } else if (klineCount >= MAX_KLINE_ENRICH && purchaseMs < endMs) {
+    } else if (klineCount >= maxKlineEnrich && purchaseMs < endMs) {
       truncatedKlines = true;
-      log(`── ${name} | ${mint.slice(0, 8)}… | kline ignoré (limite ${MAX_KLINE_ENRICH} tokens)`);
+      log(`── ${name} | ${mint.slice(0, 8)}… | kline ignoré (limite ${maxKlineEnrich} tokens)`);
     }
 
     const rawEntry = entryPrice > 0 ? entryPrice : 0;
