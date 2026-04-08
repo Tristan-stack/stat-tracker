@@ -3,6 +3,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { TokenWithMetrics } from '@/types/token';
+import { getTokenDisplayLabel } from '@/lib/token-display';
 import { Trash2 } from 'lucide-react';
 
 function formatNum(value: number, decimals = 2): string {
@@ -26,7 +27,7 @@ export function TokenCard({ token, onRemove }: TokenCardProps) {
   return (
     <Card className="flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base">{token.name}</CardTitle>
+        <CardTitle className="text-base">{getTokenDisplayLabel(token)}</CardTitle>
         <Button
           type="button"
           variant="ghost"

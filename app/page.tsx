@@ -36,10 +36,6 @@ export default function Home() {
     setTokens((prev) => [...prev, token]);
   }, []);
 
-  const handleRemove = useCallback((id: string) => {
-    setTokens((prev) => prev.filter((t) => t.id !== id));
-  }, []);
-
   const handleChangeTarget = useCallback((id: string, nextPercent: number) => {
     setTokens((prev) =>
       prev.map((token) =>
@@ -215,7 +211,6 @@ export default function Home() {
               </div>
               <TokenTable
                 tokens={tokensWithMetrics}
-                onRemove={handleRemove}
                 onChangeTarget={handleChangeTarget}
                 onChangeEntryPrice={handleChangeEntryPrice}
                 onToggleHidden={handleToggleHidden}

@@ -16,8 +16,17 @@ import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES, STATUS_FILTER_BUTTON_
 import type { Token, ExitMode } from '@/types/token';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
 import { isMigrationPeakMcap, type MigrationView } from '@/lib/migration';
+import {
+  appendTokenDateQueryParams,
+  localCustomDayRange,
+  localGmgnAllTimeRange,
+  localTodayPurchaseRange,
+  localYesterdayPurchaseRange,
+  type TokenPurchaseFilter,
+} from '@/lib/token-date-filter';
 import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
+import { formatGmgnDecimalString, parseGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 
 interface TokensResponse {
   tokens: Token[];
@@ -27,22 +36,65 @@ interface TokensResponse {
   allSameTargetPercent: number | null;
 }
 
-type TokenCreatedSinceFilter = 'all' | 'today' | '24h' | '3d' | '7d' | '1mo';
-
 const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
   mother: 'Mère',
   simple: 'Simple',
 };
 
-function getCreatedSinceLabel(period: TokenCreatedSinceFilter): string {
-  if (period === 'all') return 'All';
-  if (period === 'today') return 'Today';
-  if (period === '24h') return 'Last 24 hours';
-  if (period === '3d') return 'Last 3 days';
-  if (period === '7d') return 'Last 7 days';
-  return 'Last month';
+function getPurchaseFilterLabel(period: TokenPurchaseFilter): string {
+  if (period === 'all') return 'Tous';
+  if (period === 'today') return 'Aujourd’hui';
+  if (period === 'yesterday') return 'Hier';
+  return 'Plage…';
 }
+
+interface GmgnPurchasePreview {
+  tokenAddress: string;
+  name: string;
+  purchasedAt: string;
+  entryPrice: number;
+  high: number;
+  low: number;
+  truncatedKlines: boolean;
+}
+
+/** Client row: valeurs déjà en échelle MCap (× 1e6 depuis GMGN) ; champs éditables si tu veux corriger. */
+interface GmgnPreviewRow {
+  rowKey: string;
+  tokenAddress: string;
+  name: string;
+  purchasedAt: string;
+  truncatedKlines: boolean;
+  entryStr: string;
+  highStr: string;
+  lowStr: string;
+}
+
+function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow[] {
+  return purchases.map((p) => ({
+    rowKey: crypto.randomUUID(),
+    tokenAddress: p.tokenAddress,
+    name: p.name,
+    purchasedAt: p.purchasedAt,
+    truncatedKlines: p.truncatedKlines,
+    entryStr: formatGmgnDecimalString(p.entryPrice),
+    highStr: formatGmgnDecimalString(p.high),
+    lowStr: formatGmgnDecimalString(p.low),
+  }));
+}
+
+/** Mints déjà enregistrés sur le rugger (`token_address` ou `name` si pas d’adresse séparée). */
+function buildRuggerMintSet(tokens: Token[]): Set<string> {
+  const s = new Set<string>();
+  for (const t of tokens) {
+    const m = (t.tokenAddress?.trim() || t.name?.trim()) ?? '';
+    if (m !== '') s.add(m);
+  }
+  return s;
+}
+
+const DEFAULT_GMGN_TARGET_PERCENT = 100;
 
 function StatusBadge({ statusId }: { statusId: StatusId }) {
   return (
@@ -77,8 +129,20 @@ export default function RuggerDetailPage() {
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
-  const [tokenCreatedSinceFilter, setTokenCreatedSinceFilter] = useState<TokenCreatedSinceFilter>('all');
+  const [tokenPurchaseFilter, setTokenPurchaseFilter] = useState<TokenPurchaseFilter>('all');
+  const [tokenTableCustomFrom, setTokenTableCustomFrom] = useState('');
+  const [tokenTableCustomTo, setTokenTableCustomTo] = useState('');
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
+  const [gmgnWalletInput, setGmgnWalletInput] = useState('');
+  const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
+  const [gmgnFetchFrom, setGmgnFetchFrom] = useState('');
+  const [gmgnFetchTo, setGmgnFetchTo] = useState('');
+  const [gmgnLoading, setGmgnLoading] = useState(false);
+  const [gmgnError, setGmgnError] = useState<string | null>(null);
+  const [gmgnPreview, setGmgnPreview] = useState<GmgnPreviewRow[] | null>(null);
+  /** Après un fetch réussi : message si liste vide ou si des lignes ont été exclues (déjà en base). */
+  const [gmgnDedupeNotice, setGmgnDedupeNotice] = useState<string | null>(null);
+  const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'gmgn'>('gmgn');
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
 
@@ -156,7 +220,9 @@ export default function RuggerDetailPage() {
       ruggerId: string,
       nextPage: number,
       status?: StatusId | 'all',
-      createdSince?: TokenCreatedSinceFilter,
+      purchaseFilter?: TokenPurchaseFilter,
+      tableCustomFrom?: string,
+      tableCustomTo?: string,
       migrationOnly = false
     ) => {
       setIsLoadingTokens(true);
@@ -168,9 +234,12 @@ export default function RuggerDetailPage() {
         if (status && status !== 'all') {
           searchParams.set('status', status);
         }
-        if (createdSince && createdSince !== 'all') {
-          searchParams.set('createdSince', createdSince);
-        }
+        appendTokenDateQueryParams(
+          searchParams,
+          purchaseFilter ?? 'all',
+          tableCustomFrom,
+          tableCustomTo
+        );
         if (migrationOnly) {
           searchParams.set('migration', 'true');
         }
@@ -188,15 +257,19 @@ export default function RuggerDetailPage() {
   );
 
   const loadAllTokensForStats = useCallback(
-    async (ruggerId: string, status?: StatusId | 'all', createdSince?: TokenCreatedSinceFilter) => {
+    async (
+      ruggerId: string,
+      status?: StatusId | 'all',
+      purchaseFilter?: TokenPurchaseFilter,
+      tableCustomFrom?: string,
+      tableCustomTo?: string
+    ) => {
       try {
         const params = new URLSearchParams({ all: 'true' });
         if (status && status !== 'all') {
           params.set('status', status);
         }
-        if (createdSince && createdSince !== 'all') {
-          params.set('createdSince', createdSince);
-        }
+        appendTokenDateQueryParams(params, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo);
         const response = await fetch(
           `/api/ruggers/${ruggerId}/tokens?${params.toString()}`
         );
@@ -209,6 +282,18 @@ export default function RuggerDetailPage() {
     },
     []
   );
+
+  /** Tous les tokens du rugger, sans filtre statut / date — pour dédoublonner le fetch GMGN. */
+  const loadAllRuggerTokensUnfiltered = useCallback(async (ruggerId: string): Promise<Token[]> => {
+    try {
+      const response = await fetch(`/api/ruggers/${ruggerId}/tokens?all=true`);
+      if (!response.ok) return [];
+      const data = (await response.json()) as TokensResponse;
+      return data.tokens;
+    } catch {
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -233,9 +318,37 @@ export default function RuggerDetailPage() {
     const fetchPage = ruggerChanged ? 1 : page;
     const migrationOnly = ruggerChanged ? false : migrationView === 'migrations';
 
-    void loadTokens(id, fetchPage, tokenStatusFilter, tokenCreatedSinceFilter, migrationOnly);
-    void loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
-  }, [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]);
+    void loadTokens(
+      id,
+      fetchPage,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationOnly
+    );
+    void loadAllTokensForStats(
+      id,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo
+    );
+  }, [
+    id,
+    page,
+    tokenStatusFilter,
+    tokenPurchaseFilter,
+    tokenTableCustomFrom,
+    tokenTableCustomTo,
+    migrationView,
+    loadTokens,
+    loadAllTokensForStats,
+  ]);
+
+  useEffect(() => {
+    if (rugger?.walletAddress) setGmgnWalletInput(rugger.walletAddress);
+  }, [rugger?.walletAddress]);
 
   useEffect(() => {
     if (rugger && isEditing) {
@@ -265,11 +378,35 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(
+        id,
+        1,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
       await loadRugger(id);
     },
-    [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats, loadRugger]
+    [
+      id,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+      loadRugger,
+    ]
   );
 
   const handleAddToken = useCallback(
@@ -282,23 +419,33 @@ export default function RuggerDetailPage() {
       });
       if (!response.ok) return;
       setPage(1);
-      await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(
+        id,
+        1,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
     },
-    [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
-  );
-
-  const handleRemoveToken = useCallback(
-    async (tokenId: string) => {
-      if (!id) return;
-      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
-    },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
+    [
+      id,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+    ]
   );
 
   const handleChangeTarget = useCallback(
@@ -310,10 +457,34 @@ export default function RuggerDetailPage() {
         body: JSON.stringify({ targetExitPercent: nextPercent }),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(
+        id,
+        page,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
     },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
+    [
+      id,
+      page,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+    ]
   );
 
   const handleChangeEntryPrice = useCallback(
@@ -325,10 +496,34 @@ export default function RuggerDetailPage() {
         body: JSON.stringify({ entryPrice: nextPrice }),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(
+        id,
+        page,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
     },
-    [id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]
+    [
+      id,
+      page,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+    ]
   );
 
   const handleUpdateRugger = useCallback(
@@ -381,12 +576,39 @@ export default function RuggerDetailPage() {
         body: JSON.stringify(body),
       });
       if (!response.ok) return;
-      await loadTokens(id, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-      await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+      await loadTokens(
+        id,
+        page,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
     } finally {
       setIsApplyingGlobalTarget(false);
     }
-  }, [id, globalExitMode, globalTargetPercent, globalTargetMcap, page, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats]);
+  }, [
+    id,
+    globalExitMode,
+    globalTargetPercent,
+    globalTargetMcap,
+    page,
+    tokenStatusFilter,
+    tokenPurchaseFilter,
+    tokenTableCustomFrom,
+    tokenTableCustomTo,
+    migrationView,
+    loadTokens,
+    loadAllTokensForStats,
+  ]);
 
   const handleResetTokens = useCallback(async () => {
     if (!id) return;
@@ -394,10 +616,193 @@ export default function RuggerDetailPage() {
     const response = await fetch(`/api/ruggers/${id}/tokens`, { method: 'DELETE' });
     if (!response.ok) return;
     setPage(1);
-    await loadTokens(id, 1, tokenStatusFilter, tokenCreatedSinceFilter, migrationView === 'migrations');
-    await loadAllTokensForStats(id, tokenStatusFilter, tokenCreatedSinceFilter);
+    await loadTokens(
+      id,
+      1,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView === 'migrations'
+    );
+    await loadAllTokensForStats(
+      id,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo
+    );
     await loadRugger(id);
-  }, [id, tokenStatusFilter, tokenCreatedSinceFilter, migrationView, loadTokens, loadAllTokensForStats, loadRugger]);
+  }, [
+    id,
+    tokenStatusFilter,
+    tokenPurchaseFilter,
+    tokenTableCustomFrom,
+    tokenTableCustomTo,
+    migrationView,
+    loadTokens,
+    loadAllTokensForStats,
+    loadRugger,
+  ]);
+
+  const handleGmgnFetch = useCallback(async () => {
+    setGmgnError(null);
+    setGmgnPreview(null);
+    setGmgnDedupeNotice(null);
+    const w = gmgnWalletInput.trim();
+    if (!w) {
+      setGmgnError('Adresse wallet requise.');
+      return;
+    }
+    if (!id) {
+      setGmgnError('Rugger introuvable.');
+      return;
+    }
+    const range =
+      gmgnFetchPeriod === 'today'
+        ? localTodayPurchaseRange()
+        : gmgnFetchPeriod === 'yesterday'
+          ? localYesterdayPurchaseRange()
+          : gmgnFetchPeriod === 'all'
+            ? localGmgnAllTimeRange()
+            : gmgnFetchFrom && gmgnFetchTo
+              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
+              : null;
+    if (!range) {
+      setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
+      return;
+    }
+    setGmgnLoading(true);
+    try {
+      const existingTokens = await loadAllRuggerTokensUnfiltered(id);
+      const knownMints = buildRuggerMintSet(existingTokens);
+
+      const res = await fetch('/api/gmgn/wallet-purchases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddress: w,
+          fromMs: range.fromMs,
+          toMs: range.toMs,
+        }),
+      });
+      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
+      if (!res.ok) {
+        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+        return;
+      }
+      const rows = mapApiPurchasesToRows(data.purchases ?? []);
+      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
+      const skipped = rows.length - filtered.length;
+
+      if (rows.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(
+          'Aucun achat « buy » renvoyé par GMGN sur ce créneau (minuit local → maintenant). ' +
+            'Si le wallet est très actif, les achats récents peuvent être au-delà de la pagination : essaie « Tout » ou une plage personnalisée.'
+        );
+      } else if (filtered.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(
+          rows.length === 1
+            ? 'Cet achat est déjà enregistré sur ce rugger.'
+            : `Les ${rows.length} achat(s) trouvé(s) sont déjà enregistrés sur ce rugger.`
+        );
+      } else {
+        setGmgnPreview(filtered);
+        setGmgnDedupeNotice(
+          skipped > 0
+            ? `${skipped} achat(s) déjà présent(s) sur ce rugger — exclus de la liste.`
+            : null
+        );
+      }
+    } catch {
+      setGmgnError('Erreur réseau');
+    } finally {
+      setGmgnLoading(false);
+    }
+  }, [id, gmgnWalletInput, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, loadAllRuggerTokensUnfiltered]);
+
+  const handleAddGmgnPurchases = useCallback(
+    async (items: GmgnPreviewRow[]) => {
+      if (!id || items.length === 0) return;
+      const existingTokens = await loadAllRuggerTokensUnfiltered(id);
+      const knownMints = buildRuggerMintSet(existingTokens);
+      const newItems = items.filter((p) => !knownMints.has(p.tokenAddress.trim()));
+      if (newItems.length === 0) return;
+
+      const tokens: Token[] = newItems.map((p) => {
+        const entryPrice = parseGmgnDecimalString(p.entryStr);
+        const high = parseGmgnDecimalString(p.highStr);
+        const low = parseGmgnDecimalString(p.lowStr);
+        return {
+          id: crypto.randomUUID(),
+          name: p.tokenAddress,
+          tokenName: p.name,
+          entryPrice: entryPrice > 0 ? entryPrice : 1e-12,
+          high: high > 0 ? high : 1e-12,
+          low: low > 0 ? low : 1e-12,
+          targetExitPercent: DEFAULT_GMGN_TARGET_PERCENT,
+          purchasedAt: p.purchasedAt,
+          tokenAddress: p.tokenAddress,
+        };
+      });
+      const response = await fetch(`/api/ruggers/${id}/tokens`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokens, replace: false }),
+      });
+      if (!response.ok) return;
+      setGmgnPreview(null);
+      setGmgnDedupeNotice(null);
+      setPage(1);
+      await loadTokens(
+        id,
+        1,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
+    },
+    [
+      id,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+      loadAllRuggerTokensUnfiltered,
+    ]
+  );
+
+  const removeGmgnPreviewRow = useCallback((rowKey: string) => {
+    setGmgnPreview((prev) => {
+      if (!prev) return prev;
+      const next = prev.filter((r) => r.rowKey !== rowKey);
+      return next.length === 0 ? null : next;
+    });
+  }, []);
+
+  const updateGmgnPreviewRow = useCallback(
+    (rowKey: string, field: 'entryStr' | 'highStr' | 'lowStr', value: string) => {
+      setGmgnPreview((prev) => {
+        if (!prev) return prev;
+        return prev.map((r) => (r.rowKey === rowKey ? { ...r, [field]: value } : r));
+      });
+    },
+    []
+  );
 
   const handleAdvanceStatus = useCallback(async () => {
     if (!id || !rugger) return;
@@ -735,9 +1140,201 @@ export default function RuggerDetailPage() {
       <div className="space-y-8">
         <StatsSummary tokens={tokensForStats} />
 
-        <TokenImportExport tokens={mergeHidden(allTokensForStats)} onImport={handleImportTokens} />
+        <section className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow sm:p-6">
+          <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-3">
+            <h2 className="text-lg font-semibold leading-tight">Ajouter des tokens</h2>
+            <TokenImportExport
+              variant="menu"
+              tokens={mergeHidden(allTokensForStats)}
+              onImport={handleImportTokens}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setTokenAddMode('gmgn')}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                tokenAddMode === 'gmgn'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              Import GMGN (Solana)
+            </button>
+            <button
+              type="button"
+              onClick={() => setTokenAddMode('manual')}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                tokenAddMode === 'manual'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              Ajout manuel
+            </button>
+          </div>
 
-        <TokenForm onAdd={handleAddToken} />
+          {tokenAddMode === 'manual' && <TokenForm onAdd={handleAddToken} />}
+
+          {tokenAddMode === 'gmgn' && (
+          <div className="space-y-4">
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-foreground">Période du fetch</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {(['today', 'yesterday', 'all', 'custom'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setGmgnFetchPeriod(p)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                    gmgnFetchPeriod === p
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  )}
+                >
+                  {p === 'today'
+                    ? 'Aujourd’hui'
+                    : p === 'yesterday'
+                      ? 'Hier'
+                      : p === 'all'
+                        ? 'Tous'
+                        : 'Personnalisé'}
+                </button>
+              ))}
+            </div>
+          </div>
+          {gmgnFetchPeriod === 'custom' && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="gmgn-from">Du</Label>
+                <Input
+                  id="gmgn-from"
+                  type="date"
+                  value={gmgnFetchFrom}
+                  onChange={(e) => setGmgnFetchFrom(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="gmgn-to">Au</Label>
+                <Input
+                  id="gmgn-to"
+                  type="date"
+                  value={gmgnFetchTo}
+                  onChange={(e) => setGmgnFetchTo(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <div className="mt-4 flex max-w-2xl flex-col gap-3">
+            <Label htmlFor="gmgn-wallet" className="block text-sm font-medium leading-normal">
+              Adresse wallet
+            </Label>
+            <Input
+              id="gmgn-wallet"
+              value={gmgnWalletInput}
+              onChange={(e) => setGmgnWalletInput(e.target.value)}
+              placeholder="Adresse Solana"
+              className="w-full font-mono text-sm"
+            />
+          </div>
+          {gmgnError && <p className="text-sm text-destructive">{gmgnError}</p>}
+          <Button type="button" onClick={() => void handleGmgnFetch()} disabled={gmgnLoading}>
+            {gmgnLoading ? 'Chargement GMGN…' : 'Fetch achats'}
+          </Button>
+          {gmgnPreview && gmgnPreview.length > 0 && (
+            <div className="space-y-3">
+              {gmgnDedupeNotice && (
+                <p className="text-xs text-muted-foreground">{gmgnDedupeNotice}</p>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  {gmgnPreview.length} nouveau{gmgnPreview.length !== 1 ? 'x' : ''} achat
+                  {gmgnPreview.length !== 1 ? 's' : ''} à ajouter
+                </p>
+                <Button type="button" size="sm" onClick={() => void handleAddGmgnPurchases(gmgnPreview)}>
+                  Tout ajouter au rugger
+                </Button>
+              </div>
+              <ul className="max-h-96 space-y-3 overflow-y-auto rounded-lg border bg-muted/20 p-3 text-sm">
+                {gmgnPreview.map((p) => (
+                  <li
+                    key={p.rowKey}
+                    className={cn(
+                      'flex flex-col gap-3 rounded-md border bg-background/80 px-3 py-2',
+                      p.truncatedKlines && 'border-2 border-red-500'
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{p.name}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground truncate">{p.tokenAddress}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(p.purchasedAt).toLocaleString('fr-FR')}
+                          {p.truncatedKlines && ' · kline non chargé (limite)'}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => removeGmgnPreviewRow(p.rowKey)}
+                          aria-label="Retirer de la liste"
+                        >
+                          <IconTrash className="size-4" />
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => void handleAddGmgnPurchases([p])}>
+                          Ajouter
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Entrée</Label>
+                        <Input
+                          className="font-mono text-xs"
+                          inputMode="decimal"
+                          value={p.entryStr}
+                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'entryStr', e.target.value)}
+                          placeholder="ex. 6.41"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">High</Label>
+                        <Input
+                          className="font-mono text-xs"
+                          inputMode="decimal"
+                          value={p.highStr}
+                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'highStr', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Low</Label>
+                        <Input
+                          className="font-mono text-xs"
+                          inputMode="decimal"
+                          value={p.lowStr}
+                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'lowStr', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {gmgnPreview !== null && gmgnPreview.length === 0 && !gmgnLoading && (
+            <p className="text-sm text-muted-foreground">
+              {gmgnDedupeNotice ?? 'Aucun nouveau token à ajouter.'}
+            </p>
+          )}
+          </div>
+          )}
+        </section>
 
         <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -781,32 +1378,62 @@ export default function RuggerDetailPage() {
             </p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Ajoutés :</span>
-          {(['all', 'today', '24h', '3d', '7d', '1mo'] satisfies TokenCreatedSinceFilter[]).map((period) => (
-            <button
-              key={period}
-              type="button"
-              onClick={() => {
-                setTokenCreatedSinceFilter(period);
-                setPage(1);
-              }}
-              className={cn(
-                'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                tokenCreatedSinceFilter === period
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
-              )}
-            >
-              {getCreatedSinceLabel(period)}
-            </button>
-          ))}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Date d&apos;achat :</span>
+            {(['all', 'today', 'yesterday', 'custom'] satisfies TokenPurchaseFilter[]).map((period) => (
+              <button
+                key={period}
+                type="button"
+                onClick={() => {
+                  setTokenPurchaseFilter(period);
+                  setPage(1);
+                }}
+                className={cn(
+                  'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                  tokenPurchaseFilter === period
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                )}
+              >
+                {getPurchaseFilterLabel(period)}
+              </button>
+            ))}
+          </div>
+          {tokenPurchaseFilter === 'custom' && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="table-filter-from">Du</Label>
+                <Input
+                  id="table-filter-from"
+                  type="date"
+                  value={tokenTableCustomFrom}
+                  onChange={(e) => {
+                    setTokenTableCustomFrom(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="table-filter-to">Au</Label>
+                <Input
+                  id="table-filter-to"
+                  type="date"
+                  value={tokenTableCustomTo}
+                  onChange={(e) => {
+                    setTokenTableCustomTo(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
         {isLoadingTokens ? (
           <p className="text-sm text-muted-foreground">Chargement des tokens…</p>
         ) : activeTokens.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
-            Aucun token pour ce rugger{tokenCreatedSinceFilter !== 'all' || tokenStatusFilter !== 'all' ? ' avec ces filtres' : ''}. Importe une liste JSON ci-dessus.
+            Aucun token pour ce rugger{tokenPurchaseFilter !== 'all' || tokenStatusFilter !== 'all' ? ' avec ces filtres' : ''}. Importe une liste JSON ci-dessus.
           </p>
         ) : (
           <>
@@ -877,7 +1504,6 @@ export default function RuggerDetailPage() {
               </div>
             <TokenTable
               tokens={tokensWithMetrics}
-              onRemove={handleRemoveToken}
               onChangeTarget={handleChangeTarget}
               onChangeEntryPrice={handleChangeEntryPrice}
               onToggleHidden={handleToggleHidden}

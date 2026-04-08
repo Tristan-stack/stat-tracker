@@ -116,3 +116,163 @@ export function getAcceptanceCriteria(tokens: Token[]): AcceptanceCriteria {
     meetsAllCriteria: meetsWinRateCriteria && meetsLossStreakCriteria,
   };
 }
+
+/**
+ * Résultat d’une stratégie de sortie (TP) simulée sur l’historique.
+ * `winRate` est entre 0 et 1 (comme dans l’UI : ×100 pour afficher en %).
+ * En mode « MCap », `value` est le **niveau de prix** visé (même unité que `high`), pas une capitalisation USD.
+ */
+export interface OptimalExitResult {
+  value: number;
+  avgProfitPercent: number;
+  winCount: number;
+  winRate: number;
+  avgGainPerWinner: number;
+  avgLossPerLoser: number;
+  total: number;
+}
+
+function scoreOptimal(avgProfit: number, winRate: number): number {
+  if (avgProfit <= 0) return -Infinity;
+  return avgProfit * winRate;
+}
+
+function buildOptimalResult(
+  value: number,
+  totalGain: number,
+  totalLoss: number,
+  wins: number,
+  total: number
+): { result: OptimalExitResult; score: number } {
+  const losers = total - wins;
+  const avg = (totalGain + totalLoss) / total;
+  const winRate = wins / total;
+  return {
+    result: {
+      value,
+      avgProfitPercent: avg,
+      winCount: wins,
+      winRate,
+      avgGainPerWinner: wins > 0 ? totalGain / wins : 0,
+      avgLossPerLoser: losers > 0 ? totalLoss / losers : 0,
+      total,
+    },
+    score: scoreOptimal(avg, winRate),
+  };
+}
+
+/** Objectif % qui maximise rentabilité moyenne × taux de réussite (même logique que le résumé UI). */
+export function findOptimalPercent(twm: TokenWithMetrics[]): OptimalExitResult | null {
+  if (twm.length === 0) return null;
+
+  const candidates = [...new Set(twm.map((t) => t.maxGainPercent).filter((g) => g >= 0))].sort(
+    (a, b) => a - b
+  );
+  if (candidates.length === 0) return null;
+
+  let best: { result: OptimalExitResult; score: number } | null = null;
+
+  for (const target of candidates) {
+    let totalGain = 0;
+    let totalLoss = 0;
+    let wins = 0;
+    for (const t of twm) {
+      if (t.maxGainPercent >= target) {
+        totalGain += target;
+        wins++;
+      } else {
+        totalLoss += t.maxLossPercent;
+      }
+    }
+    const candidate = buildOptimalResult(target, totalGain, totalLoss, wins, twm.length);
+    if (best === null || candidate.score > best.score) best = candidate;
+  }
+
+  return best && best.result.avgProfitPercent > 0 ? best.result : null;
+}
+
+/**
+ * Objectif « MCap » = niveau de prix `high` atteignable ; même score que pour le %.
+ */
+export function findOptimalMcap(twm: TokenWithMetrics[]): OptimalExitResult | null {
+  if (twm.length === 0) return null;
+
+  const candidates = [...new Set(twm.map((t) => t.high).filter((h) => h > 0))].sort((a, b) => a - b);
+  if (candidates.length === 0) return null;
+
+  let best: { result: OptimalExitResult; score: number } | null = null;
+
+  for (const mcap of candidates) {
+    let totalGain = 0;
+    let totalLoss = 0;
+    let wins = 0;
+    for (const t of twm) {
+      if (t.high >= mcap) {
+        totalGain += ((mcap / t.entryPrice) - 1) * 100;
+        wins++;
+      } else {
+        totalLoss += t.maxLossPercent;
+      }
+    }
+    const candidate = buildOptimalResult(mcap, totalGain, totalLoss, wins, twm.length);
+    if (best === null || candidate.score > best.score) best = candidate;
+  }
+
+  return best && best.result.avgProfitPercent > 0 ? best.result : null;
+}
+
+export type SnipeSuggestionMode = 'percent' | 'mcap' | 'tie';
+
+export function suggestSnipeMode(
+  optimalPercent: OptimalExitResult | null,
+  optimalMcap: OptimalExitResult | null
+): { mode: SnipeSuggestionMode; summary: string } {
+  if (!optimalPercent && !optimalMcap) {
+    return {
+      mode: 'tie',
+      summary: 'Pas assez de données pour comparer % et MCap.',
+    };
+  }
+  if (!optimalMcap) {
+    return {
+      mode: 'percent',
+      summary: 'Seul le mode % est calculable sur cet historique.',
+    };
+  }
+  if (!optimalPercent) {
+    return {
+      mode: 'mcap',
+      summary: 'Seul le mode MCap est calculable sur cet historique.',
+    };
+  }
+  const p = optimalPercent;
+  const m = optimalMcap;
+  if (p.winCount > m.winCount) {
+    return {
+      mode: 'percent',
+      summary: `Le mode % atteint plus souvent le TP (${p.winCount}/${p.total} vs ${m.winCount}/${m.total}).`,
+    };
+  }
+  if (m.winCount > p.winCount) {
+    return {
+      mode: 'mcap',
+      summary: `Le mode MCap atteint plus souvent le TP (${m.winCount}/${m.total} vs ${p.winCount}/${p.total}).`,
+    };
+  }
+  if (p.avgProfitPercent > m.avgProfitPercent) {
+    return {
+      mode: 'percent',
+      summary: `Même nombre de TP atteints ; le mode % est plus rentable en moyenne sur le mouvement.`,
+    };
+  }
+  if (m.avgProfitPercent > p.avgProfitPercent) {
+    return {
+      mode: 'mcap',
+      summary: `Même nombre de TP atteints ; le mode MCap est plus rentable en moyenne sur le mouvement.`,
+    };
+  }
+  return {
+    mode: 'tie',
+    summary: 'Les deux modes sont équivalents sur le score et le nombre de TP atteints.',
+  };
+}

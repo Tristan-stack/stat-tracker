@@ -6,40 +6,6 @@ import { MIGRATION_MCAP_THRESHOLD } from '@/lib/migration';
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 
-const CREATED_SINCE_DAYS: Record<string, number> = {
-  today: 0,
-  '24h': 1,
-  '3d': 3,
-  '7d': 7,
-  '1mo': 30,
-};
-
-function startOfLocalDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function getCreatedSinceBounds(createdSince: string | null): { from: string; to?: string } | null {
-  if (!createdSince || !(createdSince in CREATED_SINCE_DAYS)) return null;
-
-  const days = CREATED_SINCE_DAYS[createdSince];
-  const todayStart = startOfLocalDay(new Date());
-  const from = new Date(todayStart);
-  from.setDate(from.getDate() - days);
-
-  const bounds: { from: string; to?: string } = { from: from.toISOString() };
-
-  if (createdSince === 'today') {
-    const tomorrowStart = new Date(todayStart);
-    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-    bounds.to = tomorrowStart.toISOString();
-    return bounds;
-  }
-
-  bounds.to = todayStart.toISOString();
-
-  return bounds;
-}
-
 interface DbToken {
   id: string;
   rugger_id: string;
@@ -50,6 +16,17 @@ interface DbToken {
   target_exit_percent: number;
   status_id: StatusId;
   created_at: string;
+  purchased_at: string | null;
+  token_address: string | null;
+  token_name: string | null;
+}
+
+function parseOptionalIsoToParam(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string' || v.trim() === '') return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 export async function GET(
@@ -68,8 +45,8 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const fetchAll = searchParams.get('all') === 'true';
   const statusFilter = searchParams.get('status') as StatusId | null;
-  const createdSinceParam = searchParams.get('createdSince');
-  const createdSinceBounds = getCreatedSinceBounds(createdSinceParam);
+  const tokenDateFrom = searchParams.get('tokenDateFrom');
+  const tokenDateTo = searchParams.get('tokenDateTo');
   const migrationOnly = searchParams.get('migration') === 'true';
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
@@ -83,12 +60,19 @@ export async function GET(
     conditions.push('status_id = $' + (baseParams.length + 1));
     baseParams.push(statusFilter);
   }
-  if (createdSinceBounds) {
-    conditions.push('created_at >= $' + (baseParams.length + 1));
-    baseParams.push(createdSinceBounds.from);
-    if (createdSinceBounds.to) {
-      conditions.push('created_at < $' + (baseParams.length + 1));
-      baseParams.push(createdSinceBounds.to);
+  const effectiveTsExpr = 'coalesce(purchased_at, created_at)';
+  if (tokenDateFrom) {
+    const d = new Date(tokenDateFrom);
+    if (!Number.isNaN(d.getTime())) {
+      conditions.push(`${effectiveTsExpr} >= $` + (baseParams.length + 1));
+      baseParams.push(d.toISOString());
+    }
+  }
+  if (tokenDateTo) {
+    const d = new Date(tokenDateTo);
+    if (!Number.isNaN(d.getTime())) {
+      conditions.push(`${effectiveTsExpr} <= $` + (baseParams.length + 1));
+      baseParams.push(d.toISOString());
     }
   }
   if (migrationOnly) {
@@ -103,14 +87,16 @@ export async function GET(
   );
   const total = Number(countRows[0]?.count ?? '0');
 
-  const selectCols = 'id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, created_at';
+  const selectCols =
+    'id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, created_at, purchased_at, token_address, token_name';
+  const orderBy = `order by coalesce(purchased_at, created_at) desc`;
   const rows = fetchAll
     ? await query<DbToken>(
-        `select ${selectCols} from rugger_tokens ${whereClause} order by created_at desc`,
+        `select ${selectCols} from rugger_tokens ${whereClause} ${orderBy}`,
         baseParams
       )
     : await query<DbToken>(
-        `select ${selectCols} from rugger_tokens ${whereClause} order by created_at desc limit $${baseParams.length + 1} offset $${baseParams.length + 2}`,
+        `select ${selectCols} from rugger_tokens ${whereClause} ${orderBy} limit $${baseParams.length + 1} offset $${baseParams.length + 2}`,
         [...baseParams, safePageSize, offset]
       );
 
@@ -125,15 +111,21 @@ export async function GET(
     }
   }
 
-  const tokens: Token[] = rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    entryPrice: row.entry_price,
-    high: row.high,
-    low: row.low,
-    targetExitPercent: row.target_exit_percent,
-    statusId: row.status_id,
-  }));
+  const tokens: Token[] = rows.map((row) => {
+    const t: Token = {
+      id: row.id,
+      name: row.name,
+      entryPrice: row.entry_price,
+      high: row.high,
+      low: row.low,
+      targetExitPercent: row.target_exit_percent,
+      statusId: row.status_id,
+    };
+    if (row.purchased_at) t.purchasedAt = new Date(row.purchased_at).toISOString();
+    if (row.token_address) t.tokenAddress = row.token_address;
+    if (row.token_name) t.tokenName = row.token_name;
+    return t;
+  });
 
   return NextResponse.json({
     tokens,
@@ -191,13 +183,22 @@ export async function POST(
     await query('delete from rugger_tokens where rugger_id = $1', [ruggerId]);
   }
 
-  const rowsToInsert: (string | number)[] = [];
+  const rowsToInsert: (string | number | null)[] = [];
   const placeholders: string[] = [];
   cleaned.forEach((token, index) => {
-    const base = index * 8;
+    const base = index * 11;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
     );
+    const purchasedIso = parseOptionalIsoToParam(token.purchasedAt);
+    const tokenAddr =
+      typeof token.tokenAddress === 'string' && token.tokenAddress.trim() !== ''
+        ? token.tokenAddress.trim()
+        : null;
+    const tokenLabel =
+      typeof token.tokenName === 'string' && token.tokenName.trim() !== ''
+        ? token.tokenName.trim()
+        : null;
     rowsToInsert.push(
       crypto.randomUUID(),
       ruggerId,
@@ -206,14 +207,17 @@ export async function POST(
       token.high,
       token.low,
       token.targetExitPercent,
-      ruggerStatusId
+      ruggerStatusId,
+      purchasedIso,
+      tokenAddr,
+      tokenLabel
     );
   });
 
   await query<DbToken>(
     `
       insert into rugger_tokens
-        (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id)
+        (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, purchased_at, token_address, token_name)
       values ${placeholders.join(', ')}
     `,
     rowsToInsert

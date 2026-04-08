@@ -18,12 +18,14 @@ export interface TokenFormProps {
 }
 
 export function TokenForm({ onAdd }: TokenFormProps) {
-  const [name, setName] = useState('');
+  const [mintAddress, setMintAddress] = useState('');
+  const [tokenName, setTokenName] = useState('');
   const [entryPrice, setEntryPrice] = useState('');
   const [high, setHigh] = useState('');
   const [low, setLow] = useState('');
   const [targetExitPercent, setTargetExitPercent] = useState('');
   const [targetMcap, setTargetMcap] = useState('');
+  const [purchasedAtLocal, setPurchasedAtLocal] = useState('');
   const [exitMode, setExitMode] = useState<ExitMode>('percent');
 
   const handleSubmit = useCallback(
@@ -45,36 +47,68 @@ export function TokenForm({ onAdd }: TokenFormProps) {
         if (computedTargetPercent < 0) return;
       }
 
+      const mint = mintAddress.trim();
+      if (!mint) return;
+
       const token: Token = {
         id: crypto.randomUUID(),
-        name: name.trim() || `Token ${Date.now()}`,
+        name: mint,
+        tokenAddress: mint,
         entryPrice: entry,
         high: h,
         low: l,
         targetExitPercent: computedTargetPercent,
       };
+      const label = tokenName.trim();
+      if (label) token.tokenName = label;
+      if (purchasedAtLocal.trim() !== '') {
+        const d = new Date(purchasedAtLocal);
+        if (!Number.isNaN(d.getTime())) token.purchasedAt = d.toISOString();
+      }
       onAdd(token);
-      setName('');
+      setMintAddress('');
+      setTokenName('');
       setEntryPrice('');
       setHigh('');
       setLow('');
       setTargetExitPercent('');
       setTargetMcap('');
+      setPurchasedAtLocal('');
     },
-    [entryPrice, high, low, name, onAdd, targetExitPercent, targetMcap, exitMode]
+    [entryPrice, high, low, mintAddress, tokenName, onAdd, purchasedAtLocal, targetExitPercent, targetMcap, exitMode]
   );
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow sm:gap-6 sm:p-6 lg:p-8">
       <h2 className="text-lg font-semibold">Nouveau token</h2>
       <div className="grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-6">
-        <div className="space-y-2.5">
-          <Label htmlFor="name">Nom (optionnel)</Label>
+        <div className="space-y-2.5 lg:col-span-2">
+          <Label htmlFor="purchased-at">Date d&apos;achat (optionnel)</Label>
           <Input
-            id="name"
+            id="purchased-at"
+            type="datetime-local"
+            value={purchasedAtLocal}
+            onChange={(e) => setPurchasedAtLocal(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2.5 lg:col-span-2">
+          <Label htmlFor="mint">Adresse mint</Label>
+          <Input
+            id="mint"
+            placeholder="Mint Solana (obligatoire)"
+            value={mintAddress}
+            onChange={(e) => setMintAddress(e.target.value)}
+            className="font-mono text-sm"
+            required
+          />
+        </div>
+        <div className="space-y-2.5">
+          <Label htmlFor="token-name">Nom du token (optionnel)</Label>
+          <Input
+            id="token-name"
             placeholder="ex. TOKEN_A"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={tokenName}
+            onChange={(e) => setTokenName(e.target.value)}
           />
         </div>
         <div className="space-y-2">

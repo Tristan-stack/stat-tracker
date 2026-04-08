@@ -16,10 +16,18 @@ export async function PATCH(
     return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
   }
 
-  const body = (await req.json()) as { targetExitPercent?: number; entryPrice?: number };
+  const body = (await req.json()) as {
+    targetExitPercent?: number;
+    entryPrice?: number;
+    purchasedAt?: string | null;
+    tokenAddress?: string | null;
+    /** Mint / identifiant canonique. */
+    name?: string;
+    tokenName?: string | null;
+  };
 
   const setClauses: string[] = [];
-  const values: (number | string)[] = [];
+  const values: (number | string | null)[] = [];
   let paramIndex = 1;
 
   if (body.targetExitPercent !== undefined) {
@@ -36,6 +44,54 @@ export async function PATCH(
     }
     setClauses.push(`entry_price = $${paramIndex++}`);
     values.push(body.entryPrice);
+  }
+
+  if (body.purchasedAt !== undefined) {
+    if (body.purchasedAt === null || body.purchasedAt === '') {
+      setClauses.push(`purchased_at = $${paramIndex++}`);
+      values.push(null);
+    } else if (typeof body.purchasedAt === 'string') {
+      const d = new Date(body.purchasedAt);
+      if (Number.isNaN(d.getTime())) {
+        return NextResponse.json({ error: 'purchasedAt must be a valid ISO date string' }, { status: 400 });
+      }
+      setClauses.push(`purchased_at = $${paramIndex++}`);
+      values.push(d.toISOString());
+    } else {
+      return NextResponse.json({ error: 'purchasedAt invalid' }, { status: 400 });
+    }
+  }
+
+  if (body.tokenAddress !== undefined) {
+    if (body.tokenAddress === null || body.tokenAddress === '') {
+      setClauses.push(`token_address = $${paramIndex++}`);
+      values.push(null);
+    } else if (typeof body.tokenAddress === 'string') {
+      setClauses.push(`token_address = $${paramIndex++}`);
+      values.push(body.tokenAddress.trim());
+    } else {
+      return NextResponse.json({ error: 'tokenAddress invalid' }, { status: 400 });
+    }
+  }
+
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string' || body.name.trim() === '') {
+      return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 });
+    }
+    setClauses.push(`name = $${paramIndex++}`);
+    values.push(body.name.trim());
+  }
+
+  if (body.tokenName !== undefined) {
+    if (body.tokenName === null || body.tokenName === '') {
+      setClauses.push(`token_name = $${paramIndex++}`);
+      values.push(null);
+    } else if (typeof body.tokenName === 'string') {
+      setClauses.push(`token_name = $${paramIndex++}`);
+      values.push(body.tokenName.trim());
+    } else {
+      return NextResponse.json({ error: 'tokenName invalid' }, { status: 400 });
+    }
   }
 
   if (setClauses.length === 0) {

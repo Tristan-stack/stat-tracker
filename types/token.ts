@@ -4,12 +4,19 @@ export type ExitMode = 'percent' | 'mcap';
 
 export interface Token {
   id: string;
+  /** Identifiant canonique : adresse mint (Solana) lorsqu’elle est connue. */
   name: string;
+  /** Nom / symbole affiché (optionnel). */
+  tokenName?: string;
   entryPrice: number;
   high: number;
   low: number;
   targetExitPercent: number;
   statusId?: StatusId;
+  /** Date d’achat (ISO) — optionnel ; tri/filtre via coalesce avec createdAt côté API. */
+  purchasedAt?: string;
+  /** Mint Solana — optionnel (import GMGN). */
+  tokenAddress?: string;
   /** Exclu des statistiques et simulations (ligne toujours visible dans le tableau). */
   hidden?: boolean;
 }

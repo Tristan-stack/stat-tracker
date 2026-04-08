@@ -105,19 +105,24 @@ model Rugger {
 }
 
 model RuggerToken {
-  id                String   @id @default(dbgenerated("gen_random_uuid()"))
-  rugger            Rugger   @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
-  ruggerId          String   @map("rugger_id")
+  id                String    @id @default(dbgenerated("gen_random_uuid()"))
+  rugger            Rugger    @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
+  ruggerId          String    @map("rugger_id")
   name              String
-  entryMcap         Float?   @map("entry_mcap")
-  entryPrice        Float    @map("entry_price")
+  entryMcap         Float?    @map("entry_mcap")
+  entryPrice        Float     @map("entry_price")
   high              Float
   low               Float
-  targetExitPercent Float    @map("target_exit_percent")
-  statusId          String   @default("verification") @map("status_id")
-  status            Status   @relation(fields: [statusId], references: [id])
-  createdAt         DateTime @default(now()) @map("created_at")
+  targetExitPercent Float     @map("target_exit_percent")
+  statusId          String    @default("verification") @map("status_id")
+  status            Status    @relation(fields: [statusId], references: [id])
+  createdAt         DateTime  @default(now()) @map("created_at")
+  purchasedAt       DateTime? @map("purchased_at")
+  tokenAddress      String?   @map("token_address")
+  /** Libellé / symbole affiché ; `name` conserve l’identifiant mint (adresse). */
+  tokenName         String?   @map("token_name")
 
   @@index([ruggerId, createdAt])
+  @@index([ruggerId, purchasedAt])
   @@map("rugger_tokens")
 }

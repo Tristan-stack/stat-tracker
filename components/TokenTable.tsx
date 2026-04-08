@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics, ExitMode } from '@/types/token';
 import { STATUS_DOT_CLASSES } from '@/types/rugger';
-import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { isMigrationPeakMcap, MIGRATION_MCAP_THRESHOLD, type MigrationView } from '@/lib/migration';
 import { cn } from '@/lib/utils';
+import { formatMintShort, getTokenMintAddress, getTokenTableNameCell } from '@/lib/token-display';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -20,12 +21,36 @@ function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatNum(value, 2)} %`;
 }
 
+function formatPurchaseDate(iso: string | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
 function percentToMcap(entryPrice: number, targetPercent: number): number {
   return entryPrice * (1 + targetPercent / 100);
 }
 
 function mcapToPercent(entryPrice: number, targetMcap: number): number {
   return ((targetMcap / entryPrice) - 1) * 100;
+}
+
+/** Token importé via GMGN (mint Solana renseigné). */
+function isGmgnImportedToken(t: Pick<TokenWithMetrics, 'tokenAddress'>): boolean {
+  return Boolean(t.tokenAddress?.trim());
+}
+
+/** Données incomplètes : pas de date d’achat, ou high/low encore plats comme l’entrée (klines manquants). */
+export function tokenRowHasMissingImportData(t: TokenWithMetrics): boolean {
+  if (!isGmgnImportedToken(t)) return false;
+  if (!t.purchasedAt?.trim()) return true;
+  const e = t.entryPrice;
+  if (e <= 0) return false;
+  const tol = Math.max(1e-12, Math.abs(e) * 1e-9);
+  const flatHigh = Math.abs(t.high - e) <= tol;
+  const flatLow = Math.abs(t.low - e) <= tol;
+  return flatHigh && flatLow;
 }
 
 function InlineNumericInput({
@@ -122,7 +147,6 @@ function McapTargetInput({
 
 export interface TokenTableProps {
   tokens: TokenWithMetrics[];
-  onRemove: (id: string) => void;
   onChangeTarget: (id: string, nextPercent: number) => void;
   onChangeEntryPrice: (id: string, nextPrice: number) => void;
   /** Si absent, la colonne visibilité n’est pas affichée (ex. page rugger). */
@@ -136,7 +160,6 @@ export interface TokenTableProps {
 
 export function TokenTable({
   tokens,
-  onRemove,
   onChangeTarget,
   onChangeEntryPrice,
   onToggleHidden,
@@ -173,8 +196,8 @@ export function TokenTable({
     return tokens;
   }, [serverControlsMigration, tokens, migrationView]);
 
-  const handleCopyName = useCallback(async (token: TokenWithMetrics) => {
-    await navigator.clipboard.writeText(token.name);
+  const handleCopyMint = useCallback(async (token: TokenWithMetrics) => {
+    await navigator.clipboard.writeText(getTokenMintAddress(token));
     setCopiedId(token.id);
     setTimeout(() => setCopiedId((prev) => (prev === token.id ? null : prev)), 1500);
   }, []);
@@ -238,7 +261,7 @@ export function TokenTable({
       </div>
 
       <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
-        <table className="w-full min-w-[740px] text-xs sm:text-sm">
+        <table className="w-full min-w-[880px] text-xs sm:text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
               {onToggleHidden && (
@@ -247,6 +270,8 @@ export function TokenTable({
                 </th>
               )}
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
+              <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Adresse</th>
+              <th className="whitespace-nowrap px-2 py-3 text-left font-medium sm:px-3 sm:py-4">Achat</th>
               <th className="px-5 py-4 text-right font-medium">Entrée</th>
               <th className="px-5 py-4 text-right font-medium">Plus haut</th>
               <th className="px-3 py-4 text-center font-medium">Migration</th>
@@ -258,7 +283,6 @@ export function TokenTable({
               <th className="px-5 py-4 text-right font-medium">Gain max</th>
               <th className="px-5 py-4 text-right font-medium">Perte max</th>
               <th className="px-5 py-4 text-center font-medium">Objectif atteint</th>
-              <th className="min-w-[100px] px-3 py-4 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -267,8 +291,15 @@ export function TokenTable({
                 key={t.id}
                 className={cn(
                   'border-b last:border-0 hover:bg-muted/30',
-                  t.hidden && 'opacity-60 text-muted-foreground'
+                  t.hidden && 'opacity-60 text-muted-foreground',
+                  tokenRowHasMissingImportData(t) &&
+                    'border-l-4 border-l-red-500 bg-red-500/[0.06] dark:bg-red-500/10'
                 )}
+                title={
+                  tokenRowHasMissingImportData(t)
+                    ? 'Import GMGN : date ou plage high/low incomplète — vérifie les valeurs.'
+                    : undefined
+                }
               >
                 {onToggleHidden && (
                   <td className="w-10 px-1 py-3 text-center align-middle sm:w-11 sm:px-2 sm:py-4">
@@ -298,7 +329,7 @@ export function TokenTable({
                     </Button>
                   </td>
                 )}
-                <td className="max-w-[100px] px-3 py-3 font-medium sm:max-w-none sm:px-5 sm:py-4" title={t.name}>
+                <td className="max-w-[120px] px-3 py-3 font-medium sm:max-w-[200px] sm:px-5 sm:py-4">
                   <div className="flex items-center gap-2 min-w-0">
                     <span
                       className={cn(
@@ -307,15 +338,23 @@ export function TokenTable({
                       )}
                       aria-hidden
                     />
-                    <button
-                      type="button"
-                      onClick={() => handleCopyName(t)}
-                      className="truncate cursor-pointer hover:text-primary transition-colors"
-                      title="Cliquer pour copier"
-                    >
-                      {copiedId === t.id ? '✓ Copié' : t.name}
-                    </button>
+                    <span className="truncate" title={getTokenTableNameCell(t)}>
+                      {getTokenTableNameCell(t)}
+                    </span>
                   </div>
+                </td>
+                <td className="max-w-[140px] px-3 py-3 font-mono text-[11px] sm:max-w-none sm:px-5 sm:py-4">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyMint(t)}
+                    className="w-full truncate text-left hover:text-primary transition-colors"
+                    title={`${getTokenMintAddress(t)} — cliquer pour copier`}
+                  >
+                    {copiedId === t.id ? '✓ Copié' : formatMintShort(getTokenMintAddress(t))}
+                  </button>
+                </td>
+                <td className="whitespace-nowrap px-2 py-3 text-left text-muted-foreground tabular-nums sm:px-3 sm:py-4">
+                  {formatPurchaseDate(t.purchasedAt)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
                   <InlineNumericInput
@@ -375,18 +414,6 @@ export function TokenTable({
                   {formatPercent(t.maxLossPercent)}
                 </td>
                 <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
-                <td className="px-2 py-3 sm:px-3 sm:py-4">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Supprimer"
-                    onClick={() => onRemove(t.id)}
-                    className="min-h-[44px] min-w-[44px] border border-red-500 bg-red-500/10 text-red-500 hover:bg-red-500/20 hover:text-red-500"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </td>
               </tr>
             ))}
           </tbody>

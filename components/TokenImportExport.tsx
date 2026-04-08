@@ -1,15 +1,34 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
+import { IconDotsVertical } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { Token } from '@/types/token';
+import { cn } from '@/lib/utils';
 
 export interface TokenImportExportProps {
   tokens: Token[];
   onImport: (tokens: Token[]) => void;
+  /** Bloc sous la carte (page d’accueil) ou menu ⋮ en haut à droite (rugger). */
+  variant?: 'block' | 'menu';
+  /** Bloc plus compact et largeur limitée (variant `block` uniquement). */
+  compact?: boolean;
 }
 
-export function TokenImportExport({ tokens, onImport }: TokenImportExportProps) {
+export function TokenImportExport({
+  tokens,
+  onImport,
+  variant = 'block',
+  compact = false,
+}: TokenImportExportProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleExport = useCallback(() => {
@@ -76,25 +95,80 @@ export function TokenImportExport({ tokens, onImport }: TokenImportExportProps) 
     fileInputRef.current?.click();
   }, []);
 
+  const hiddenInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="application/json"
+      className="hidden"
+      onChange={handleFileChange}
+    />
+  );
+
+  if (variant === 'menu') {
+    return (
+      <div className="shrink-0">
+        {hiddenInput}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-9 text-muted-foreground hover:text-foreground"
+              aria-label="Importer ou exporter les tokens (JSON)"
+            >
+              <IconDotsVertical className="size-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              Import / export JSON
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                setTimeout(() => triggerImport(), 0);
+              }}
+            >
+              Importer des tokens…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={tokens.length === 0}
+              onSelect={(e) => {
+                e.preventDefault();
+                handleExport();
+              }}
+            >
+              Exporter les tokens
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  }
+
   return (
-    <section className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-      <div>
-        <h2 className="text-sm font-semibold">Import / export des tokens</h2>
-        <p className="text-xs text-muted-foreground">
+    <section
+      className={cn(
+        'flex flex-col gap-2 rounded-xl border bg-card',
+        compact
+          ? 'w-full max-w-md p-3 sm:flex-row sm:items-center sm:justify-between'
+          : 'gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5'
+      )}
+    >
+      {hiddenInput}
+      <div className="min-w-0">
+        <h2 className={cn('font-semibold', compact ? 'text-xs' : 'text-sm')}>Import / export des tokens</h2>
+        <p className={cn('text-muted-foreground', compact ? 'text-[11px] leading-snug' : 'text-xs')}>
           Sauvegarde ou recharge ta liste de tokens au format JSON.
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={tokens.length === 0}>
           Exporter les tokens
         </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={handleFileChange}
-        />
         <Button type="button" variant="outline" size="sm" onClick={triggerImport}>
           Importer des tokens
         </Button>
@@ -102,4 +176,3 @@ export function TokenImportExport({ tokens, onImport }: TokenImportExportProps) 
     </section>
   );
 }
-

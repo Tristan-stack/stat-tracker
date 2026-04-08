@@ -5,7 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getAggregateMetrics, getTokenWithMetrics, getAcceptanceCriteria } from '@/lib/token-calculations';
+import {
+  getAggregateMetrics,
+  getTokenWithMetrics,
+  getAcceptanceCriteria,
+  findOptimalPercent,
+  findOptimalMcap,
+  suggestSnipeMode,
+} from '@/lib/token-calculations';
 import type { Token, TokenWithMetrics, ExitMode } from '@/types/token';
 import { Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -58,87 +65,6 @@ function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
 
 function mcapToPercent(entryPrice: number, mcap: number): number {
   return entryPrice > 0 ? ((mcap / entryPrice) - 1) * 100 : Infinity;
-}
-
-interface OptimalResult {
-  value: number;
-  avgProfitPercent: number;
-  winCount: number;
-  winRate: number;
-  avgGainPerWinner: number;
-  avgLossPerLoser: number;
-}
-
-function scoreOptimal(avgProfit: number, winRate: number): number {
-  if (avgProfit <= 0) return -Infinity;
-  return avgProfit * winRate;
-}
-
-function buildOptimalResult(
-  value: number,
-  totalGain: number,
-  totalLoss: number,
-  wins: number,
-  total: number
-): { result: OptimalResult; score: number } {
-  const losers = total - wins;
-  const avg = (totalGain + totalLoss) / total;
-  const winRate = wins / total;
-  return {
-    result: {
-      value,
-      avgProfitPercent: avg,
-      winCount: wins,
-      winRate,
-      avgGainPerWinner: wins > 0 ? totalGain / wins : 0,
-      avgLossPerLoser: losers > 0 ? totalLoss / losers : 0,
-    },
-    score: scoreOptimal(avg, winRate),
-  };
-}
-
-function findOptimalPercent(twm: TokenWithMetrics[]): OptimalResult | null {
-  if (twm.length === 0) return null;
-
-  const candidates = [...new Set(twm.map((t) => t.maxGainPercent).filter((g) => g >= 0))].sort((a, b) => a - b);
-  if (candidates.length === 0) return null;
-
-  let best: { result: OptimalResult; score: number } | null = null;
-
-  for (const target of candidates) {
-    let totalGain = 0;
-    let totalLoss = 0;
-    let wins = 0;
-    for (const t of twm) {
-      if (t.maxGainPercent >= target) { totalGain += target; wins++; } else { totalLoss += t.maxLossPercent; }
-    }
-    const candidate = buildOptimalResult(target, totalGain, totalLoss, wins, twm.length);
-    if (best === null || candidate.score > best.score) best = candidate;
-  }
-
-  return best && best.result.avgProfitPercent > 0 ? best.result : null;
-}
-
-function findOptimalMcap(twm: TokenWithMetrics[]): OptimalResult | null {
-  if (twm.length === 0) return null;
-
-  const candidates = [...new Set(twm.map((t) => t.high).filter((h) => h > 0))].sort((a, b) => a - b);
-  if (candidates.length === 0) return null;
-
-  let best: { result: OptimalResult; score: number } | null = null;
-
-  for (const mcap of candidates) {
-    let totalGain = 0;
-    let totalLoss = 0;
-    let wins = 0;
-    for (const t of twm) {
-      if (t.high >= mcap) { totalGain += ((mcap / t.entryPrice) - 1) * 100; wins++; } else { totalLoss += t.maxLossPercent; }
-    }
-    const candidate = buildOptimalResult(mcap, totalGain, totalLoss, wins, twm.length);
-    if (best === null || candidate.score > best.score) best = candidate;
-  }
-
-  return best && best.result.avgProfitPercent > 0 ? best.result : null;
 }
 
 /** Convertit chaque TP (% ou MCap) en % de gain vs entrée, puis trie pour l’ordre d’exécution. */
@@ -365,6 +291,10 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   const optimalPercent = useMemo(() => findOptimalPercent(tokensWithMetrics), [tokensWithMetrics]);
   const optimalMcap = useMemo(() => findOptimalMcap(tokensWithMetrics), [tokensWithMetrics]);
+  const snipeSuggestion = useMemo(
+    () => suggestSnipeMode(optimalPercent, optimalMcap),
+    [optimalPercent, optimalMcap]
+  );
 
   const parsedTps = useMemo(() => parseTakeProfits(takeProfits), [takeProfits]);
   const hasValidTps = parsedTps.length > 0;
@@ -507,6 +437,64 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
             </div>
           )}
         </div>
+
+        {metrics.tokenCount > 0 && (optimalPercent || optimalMcap) && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+              <div>
+                <p className="text-sm font-medium">Conseil snipe : % vs prix cible (MCap)</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Comparaison des stratégies « équilibrées » sur l’historique (meilleur score
+                  rentabilité × fréquence) : objectif en % vs objectif en niveau de prix (MCap).
+                </p>
+              </div>
+              <p className="text-sm">
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                  {snipeSuggestion.mode === 'percent' && 'Privilégier viser en %'}
+                  {snipeSuggestion.mode === 'mcap' && 'Privilégier viser en MCap (niveau de prix)'}
+                  {snipeSuggestion.mode === 'tie' && 'Les deux modes sont proches'}
+                </span>
+                <span className="text-muted-foreground"> — {snipeSuggestion.summary}</span>
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[280px] border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="py-1.5 pr-2 font-medium">Stratégie</th>
+                      <th className="py-1.5 pr-2 font-medium">Objectif</th>
+                      <th className="py-1.5 pr-2 font-medium">TP atteints</th>
+                      <th className="py-1.5 font-medium">Moy. %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tabular-nums">
+                    <tr className="border-b border-border/60">
+                      <td className="py-1.5 pr-2">% équilibré</td>
+                      <td className="py-1.5 pr-2">
+                        {optimalPercent ? formatPercent(optimalPercent.value) : '—'}
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        {optimalPercent ? `${optimalPercent.winCount}/${optimalPercent.total}` : '—'}
+                      </td>
+                      <td className="py-1.5">
+                        {optimalPercent ? formatPercent(optimalPercent.avgProfitPercent) : '—'}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-1.5 pr-2">MCap équilibré</td>
+                      <td className="py-1.5 pr-2">
+                        {optimalMcap ? formatNum(optimalMcap.value, 0) : '—'}
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        {optimalMcap ? `${optimalMcap.winCount}/${optimalMcap.total}` : '—'}
+                      </td>
+                      <td className="py-1.5">
+                        {optimalMcap ? formatPercent(optimalMcap.avgProfitPercent) : '—'}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
         {metrics.tokenCount > 0 && (
           <div
