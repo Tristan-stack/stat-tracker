@@ -40,6 +40,7 @@ const WALLET_SLOTS = 5;
 const FEE_EUR_PER_PAIR = 2;
 
 interface TakeProfitInput {
+  executionType: 'tp' | 'initial';
   /** Valeur saisie : gain % ou MCap absolu selon `targetMode`. */
   targetValue: string;
   withdrawPercent: string;
@@ -48,6 +49,7 @@ interface TakeProfitInput {
 
 /** Brut avant résolution par token (entrée différente → % effectif différent en mode MCap). */
 interface TakeProfitParsed {
+  executionType: 'tp' | 'initial';
   rawTarget: number;
   targetMode: ExitMode;
   withdrawPercent: number;
@@ -56,24 +58,39 @@ interface TakeProfitParsed {
 function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
   return inputs
     .map((tp) => ({
+      executionType: tp.executionType,
       rawTarget: parseDecimal(tp.targetValue),
       targetMode: tp.targetMode,
-      withdrawPercent: parseDecimal(tp.withdrawPercent),
+      withdrawPercent:
+        tp.executionType === 'initial'
+          ? 0
+          : parseDecimal(tp.withdrawPercent),
     }))
-    .filter((tp) => tp.rawTarget > 0 && tp.withdrawPercent > 0);
+    .filter((tp) =>
+      tp.executionType === 'initial'
+        ? tp.rawTarget > 0
+        : tp.rawTarget > 0 && tp.withdrawPercent > 0
+    );
 }
 
 function mcapToPercent(entryPrice: number, mcap: number): number {
   return entryPrice > 0 ? ((mcap / entryPrice) - 1) * 100 : Infinity;
 }
 
+function autoInitialSellPercentFromTarget(targetPercent: number): number | null {
+  const multiple = 1 + targetPercent / 100;
+  if (!Number.isFinite(multiple) || multiple <= 0) return null;
+  return Math.max(0, Math.min(100, (1 / multiple) * 100));
+}
+
 /** Convertit chaque TP (% ou MCap) en % de gain vs entrée, puis trie pour l’ordre d’exécution. */
 function resolveTpsForToken(
   takeProfits: TakeProfitParsed[],
   token: TokenWithMetrics
-): { targetPercent: number; withdrawPercent: number }[] {
+): { targetPercent: number; withdrawPercent: number; executionType: 'tp' | 'initial' }[] {
   return takeProfits
     .map((tp) => ({
+      executionType: tp.executionType,
       targetPercent:
         tp.targetMode === 'percent'
           ? tp.rawTarget
@@ -87,7 +104,7 @@ function resolveTpsForToken(
 function simulateTokenMultiTp(
   amount: number,
   token: TokenWithMetrics,
-  takeProfits: { targetPercent: number; withdrawPercent: number }[]
+  takeProfits: { targetPercent: number; withdrawPercent: number; executionType: 'tp' | 'initial' }[]
 ): number {
   let remainingFraction = 1;
   let totalReceived = 0;
@@ -95,7 +112,19 @@ function simulateTokenMultiTp(
   for (const tp of takeProfits) {
     if (remainingFraction <= 0) break;
     if (token.maxGainPercent >= tp.targetPercent) {
-      const soldFraction = remainingFraction * Math.min(tp.withdrawPercent, 100) / 100;
+      let soldFraction = 0;
+      if (tp.executionType === 'initial') {
+        const multiple = 1 + tp.targetPercent / 100;
+        if (multiple > 0) {
+          // Vendre uniquement la fraction nécessaire pour récupérer la mise initiale.
+          const requiredFractionOfOriginal = 1 / multiple;
+          soldFraction = Math.min(remainingFraction, requiredFractionOfOriginal);
+        }
+      } else {
+        soldFraction = remainingFraction * Math.min(tp.withdrawPercent, 100) / 100;
+      }
+
+      if (soldFraction <= 0) continue;
       totalReceived += amount * soldFraction * (1 + tp.targetPercent / 100);
       remainingFraction -= soldFraction;
     } else {
@@ -198,7 +227,12 @@ function getMultiTpSimulationWalletAmounts(
   };
 }
 
-const DEFAULT_TP: TakeProfitInput = { targetValue: '', withdrawPercent: '', targetMode: 'percent' };
+const DEFAULT_TP: TakeProfitInput = {
+  executionType: 'tp',
+  targetValue: '',
+  withdrawPercent: '',
+  targetMode: 'percent',
+};
 
 export interface StatsSummaryProps {
   tokens: Token[];
@@ -217,6 +251,8 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
     Array.from({ length: WALLET_SLOTS }, () => '')
   );
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [takeProfitsRight, setTakeProfitsRight] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
 
   const amount = parseDecimal(simulatedAmount);
 
@@ -298,6 +334,8 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   const parsedTps = useMemo(() => parseTakeProfits(takeProfits), [takeProfits]);
   const hasValidTps = parsedTps.length > 0;
+  const parsedTpsRight = useMemo(() => parseTakeProfits(takeProfitsRight), [takeProfitsRight]);
+  const hasValidTpsRight = parsedTpsRight.length > 0;
 
   const multiTpResult = useMemo(() => {
     if (!hasSimulationInput || !hasValidTps) return null;
@@ -319,7 +357,37 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
     parsedTps,
   ]);
 
-  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string | ExitMode) => {
+  const multiTpResultRight = useMemo(() => {
+    if (!hasSimulationInput || !hasValidTpsRight) return null;
+    if (!optimizedRevenue) {
+      return getMultiTpSimulation(amount, tokensWithMetrics, parsedTpsRight);
+    }
+    return getMultiTpSimulationWalletAmounts(
+      effectiveWalletAmounts,
+      tokensWithMetrics,
+      parsedTpsRight
+    );
+  }, [
+    hasSimulationInput,
+    hasValidTpsRight,
+    optimizedRevenue,
+    amount,
+    effectiveWalletAmounts,
+    tokensWithMetrics,
+    parsedTpsRight,
+  ]);
+  const compareStrategies = useMemo(
+    () =>
+      compareEnabled
+        ? [
+            { key: 'left' as const, title: 'Stratégie gauche', tps: takeProfits, result: multiTpResult },
+            { key: 'right' as const, title: 'Stratégie droite', tps: takeProfitsRight, result: multiTpResultRight },
+          ]
+        : [{ key: 'left' as const, title: 'Stratégie', tps: takeProfits, result: multiTpResult }],
+    [compareEnabled, takeProfits, takeProfitsRight, multiTpResult, multiTpResultRight]
+  );
+
+  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string | ExitMode | 'tp' | 'initial') => {
     setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
   };
 
@@ -330,6 +398,31 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   const removeTp = (index: number) => {
     setTakeProfits((prev) => {
+      if (prev.length <= 1) return [{ ...DEFAULT_TP }];
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleTpChangeFor = (
+    strategy: 'left' | 'right',
+    index: number,
+    field: keyof TakeProfitInput,
+    value: string | ExitMode | 'tp' | 'initial'
+  ) => {
+    const setter = strategy === 'left' ? setTakeProfits : setTakeProfitsRight;
+    setter((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
+  };
+
+  const addTpFor = (strategy: 'left' | 'right') => {
+    const current = strategy === 'left' ? takeProfits : takeProfitsRight;
+    if (current.length >= MAX_TPS) return;
+    const setter = strategy === 'left' ? setTakeProfits : setTakeProfitsRight;
+    setter((prev) => [...prev, { ...DEFAULT_TP }]);
+  };
+
+  const removeTpFor = (strategy: 'left' | 'right', index: number) => {
+    const setter = strategy === 'left' ? setTakeProfits : setTakeProfitsRight;
+    setter((prev) => {
       if (prev.length <= 1) return [{ ...DEFAULT_TP }];
       return prev.filter((_, i) => i !== index);
     });
@@ -693,128 +786,196 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
                     Take Profits (simulation multi-TP)
                   </p>
                   <p className="text-[11px] text-muted-foreground max-w-md">
-                    Chaque ligne : objectif en <strong>%</strong> ou en <strong>MCap</strong> (même unité que entrée / plus haut), puis % retiré à ce palier.
+                    Chaque ligne : <strong>%</strong>, <strong>MCap</strong> ou <strong>Sell initial</strong>. En mode Sell initial, le simulateur vend automatiquement la part necessaire pour recuperer la mise.
                   </p>
                 </div>
-                {takeProfits.length < MAX_TPS && (
-                  <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={addTp}>
-                    <Plus className="h-3.5 w-3.5" />
-                    Ajouter TP
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant={compareEnabled ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setCompareEnabled((v) => !v)}
+                >
+                  Compare
+                </Button>
               </div>
 
-              <div className="space-y-2">
-                {takeProfits.map((tp, index) => (
-                  <div key={index} className="flex flex-wrap items-center gap-2">
-                    <span className="shrink-0 text-xs font-medium text-muted-foreground w-8">
-                      TP{index + 1}
-                    </span>
-                    <div className="flex rounded-md border text-[10px] shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleTpChange(index, 'targetMode', 'percent')}
-                        className={cn(
-                          'px-1.5 py-0.5 rounded-l-md font-medium transition-colors',
-                          tp.targetMode === 'percent'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-muted-foreground hover:bg-muted'
+              <div className={cn('grid gap-4', compareEnabled ? 'md:grid-cols-2' : 'grid-cols-1')}>
+                {compareStrategies.map((strategy) => (
+                  <div key={strategy.key} className="space-y-2 rounded-md border bg-background/40 p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">{strategy.title}</p>
+                      {strategy.tps.length < MAX_TPS && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => addTpFor(strategy.key)}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Ajouter TP
+                        </Button>
+                      )}
+                    </div>
+
+                    {strategy.tps.map((tp, index) => (
+                      <div key={`${strategy.key}-${index}`} className="flex flex-wrap items-center gap-2">
+                        <span className="w-8 shrink-0 text-xs font-medium text-muted-foreground">TP{index + 1}</span>
+                        <div className="flex rounded-md border text-[10px] shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleTpChangeFor(strategy.key, index, 'executionType', 'tp')}
+                            className={cn(
+                              'px-1.5 py-0.5 rounded-l-md font-medium transition-colors',
+                              tp.executionType === 'tp'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted'
+                            )}
+                          >
+                            TP
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTpChangeFor(strategy.key, index, 'executionType', 'initial')}
+                            className={cn(
+                              'px-1.5 py-0.5 rounded-r-md font-medium transition-colors',
+                              tp.executionType === 'initial'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted'
+                            )}
+                          >
+                            Sell initial
+                          </button>
+                        </div>
+                        <div className="flex rounded-md border text-[10px] shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleTpChangeFor(strategy.key, index, 'targetMode', 'percent')}
+                            className={cn(
+                              'px-1.5 py-0.5 rounded-l-md font-medium transition-colors',
+                              tp.targetMode === 'percent'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted'
+                            )}
+                          >
+                            %
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTpChangeFor(strategy.key, index, 'targetMode', 'mcap')}
+                            className={cn(
+                              'px-1.5 py-0.5 rounded-r-md font-medium transition-colors',
+                              tp.targetMode === 'mcap'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:bg-muted'
+                            )}
+                          >
+                            MCap
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            className={cn('h-8 text-xs tabular-nums', tp.targetMode === 'mcap' ? 'w-24' : 'w-20')}
+                            placeholder={tp.targetMode === 'mcap' ? 'MCap' : 'Gain %'}
+                            value={tp.targetValue}
+                            onChange={(e) => handleTpChangeFor(strategy.key, index, 'targetValue', e.target.value)}
+                          />
+                          {tp.targetMode === 'percent' && <span className="text-xs text-muted-foreground">%</span>}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {tp.executionType === 'initial' ? '-> sell initial' : '-> retirer'}
+                        </span>
+                        {tp.executionType === 'initial' ? (
+                          <div className="flex items-center gap-1">
+                            <span className="rounded border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+                              auto (mise)
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {(() => {
+                                const target = parseDecimal(tp.targetValue);
+                                if (target <= 0) return '';
+                                if (tp.targetMode === 'percent') {
+                                  const p = autoInitialSellPercentFromTarget(target);
+                                  return p === null ? '' : `~${formatNum(p, 2)}%`;
+                                }
+                                const percents = tokensWithMetrics
+                                  .map((t) => mcapToPercent(t.entryPrice, target))
+                                  .map((p) => autoInitialSellPercentFromTarget(p))
+                                  .filter((p): p is number => p !== null);
+                                if (percents.length === 0) return '';
+                                const avg = percents.reduce((sum, p) => sum + p, 0) / percents.length;
+                                return `~${formatNum(avg, 2)}% moy`;
+                              })()}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              className="h-8 w-16 text-xs tabular-nums"
+                              placeholder="Retrait"
+                              value={tp.withdrawPercent}
+                              onChange={(e) => handleTpChangeFor(strategy.key, index, 'withdrawPercent', e.target.value)}
+                            />
+                            <span className="text-xs text-muted-foreground">%</span>
+                          </div>
                         )}
-                      >
-                        %
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTpChange(index, 'targetMode', 'mcap')}
-                        className={cn(
-                          'px-1.5 py-0.5 rounded-r-md font-medium transition-colors',
-                          tp.targetMode === 'mcap'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-muted-foreground hover:bg-muted'
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeTpFor(strategy.key, index)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+
+                    {hasSimulationInput && strategy.result && (
+                      <div className="mt-3 space-y-1.5 border-t pt-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Resultat multi-TP
+                        </p>
+                        <p className="text-sm">
+                          Investi total:{' '}
+                          <span className="font-semibold">{formatNum(strategy.result.investedTotal, 2)}</span>
+                        </p>
+                        {strategy.result.totalFees > 0 && (
+                          <>
+                            <p className="text-sm">
+                              Benefice avant frais:{' '}
+                              <span className={`font-semibold ${strategy.result.profitBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                {strategy.result.profitBeforeFees >= 0 ? '+' : ''}{formatNum(strategy.result.profitBeforeFees, 2)}
+                              </span>
+                            </p>
+                            <p className="text-sm">
+                              Frais totaux ({FEE_EUR_PER_PAIR} EUR x {tokensWithMetrics.length} x {optimizedRevenue ? effectiveWalletAmounts.length : 1} wallet{optimizedRevenue && effectiveWalletAmounts.length !== 1 ? 's' : ''}):{' '}
+                              <span className="font-semibold tabular-nums">-{formatNum(strategy.result.totalFees, 2)} EUR</span>
+                            </p>
+                          </>
                         )}
-                      >
-                        MCap
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        className={cn('h-8 text-xs tabular-nums', tp.targetMode === 'mcap' ? 'w-24' : 'w-20')}
-                        placeholder={tp.targetMode === 'mcap' ? 'MCap' : 'Gain %'}
-                        value={tp.targetValue}
-                        onChange={(e) => handleTpChange(index, 'targetValue', e.target.value)}
-                        aria-label={tp.targetMode === 'mcap' ? `TP${index + 1} objectif MCap` : `TP${index + 1} objectif %`}
-                      />
-                      {tp.targetMode === 'percent' && <span className="text-xs text-muted-foreground">%</span>}
-                    </div>
-                    <span className="text-xs text-muted-foreground">→ retirer</span>
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        className="h-8 w-16 text-xs tabular-nums"
-                        placeholder="Retrait"
-                        value={tp.withdrawPercent}
-                        onChange={(e) => handleTpChange(index, 'withdrawPercent', e.target.value)}
-                      />
-                      <span className="text-xs text-muted-foreground">%</span>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeTp(index)}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                        <p className="text-sm">
+                          Montant final:{' '}
+                          <span className={`font-semibold ${strategy.result.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {formatNum(strategy.result.totalReceived - strategy.result.totalFees, 2)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          Benefice / Perte:{' '}
+                          <span className={`font-semibold ${strategy.result.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {strategy.result.profit >= 0 ? '+' : ''}{formatNum(strategy.result.profit, 2)} ({strategy.result.profitPercent >= 0 ? '+' : ''}{formatNum(strategy.result.profitPercent, 2)} %)
+                          </span>
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-
-              {hasSimulationInput && multiTpResult && (
-                <div className="mt-3 space-y-1.5 border-t pt-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Résultat multi-TP
-                  </p>
-                  <p className="text-sm">
-                    Investi total:{' '}
-                    <span className="font-semibold">{formatNum(multiTpResult.investedTotal, 2)}</span>
-                  </p>
-                  {multiTpResult.totalFees > 0 && (
-                    <>
-                      <p className="text-sm">
-                        Bénéfice avant frais:{' '}
-                        <span className={`font-semibold ${multiTpResult.profitBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {multiTpResult.profitBeforeFees >= 0 ? '+' : ''}{formatNum(multiTpResult.profitBeforeFees, 2)}
-                        </span>
-                      </p>
-                      <p className="text-sm">
-                        Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} × {optimizedRevenue ? effectiveWalletAmounts.length : 1} wallet{optimizedRevenue && effectiveWalletAmounts.length !== 1 ? 's' : ''}):{' '}
-                        <span className="font-semibold tabular-nums">−{formatNum(multiTpResult.totalFees, 2)} €</span>
-                      </p>
-                    </>
-                  )}
-                  <p className="text-sm">
-                    Montant final:{' '}
-                    <span className={`font-semibold ${multiTpResult.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {formatNum(multiTpResult.totalReceived - multiTpResult.totalFees, 2)}
-                    </span>
-                  </p>
-                  <p className="text-sm">
-                    Bénéfice / Perte:{' '}
-                    <span className={`font-semibold ${multiTpResult.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {multiTpResult.profit >= 0 ? '+' : ''}{formatNum(multiTpResult.profit, 2)}{' '}
-                      ({multiTpResult.profitPercent >= 0 ? '+' : ''}{formatNum(multiTpResult.profitPercent, 2)} %)
-                    </span>
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    <span className="text-green-600 dark:text-green-400">{multiTpResult.tokensWithAtLeastOneTp}</span> token{multiTpResult.tokensWithAtLeastOneTp !== 1 ? 's' : ''} avec au moins 1 TP atteint,{' '}
-                    <span className="text-red-600 dark:text-red-400">{multiTpResult.tokensFullLoss}</span> en perte totale (aucun TP atteint)
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         )}

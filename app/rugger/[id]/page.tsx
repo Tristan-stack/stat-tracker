@@ -563,6 +563,44 @@ export default function RuggerDetailPage() {
     ]
   );
 
+  const handleDeleteToken = useCallback(
+    async (tokenId: string) => {
+      if (!id) return;
+      if (!window.confirm('Supprimer ce token ?')) return;
+      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) return;
+      await loadTokens(
+        id,
+        page,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo,
+        migrationView === 'migrations'
+      );
+      await loadAllTokensForStats(
+        id,
+        tokenStatusFilter,
+        tokenPurchaseFilter,
+        tokenTableCustomFrom,
+        tokenTableCustomTo
+      );
+    },
+    [
+      id,
+      page,
+      tokenStatusFilter,
+      tokenPurchaseFilter,
+      tokenTableCustomFrom,
+      tokenTableCustomTo,
+      migrationView,
+      loadTokens,
+      loadAllTokensForStats,
+    ]
+  );
+
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
@@ -1685,6 +1723,7 @@ export default function RuggerDetailPage() {
               tokens={tokensWithMetrics}
               onChangeTarget={handleChangeTarget}
               onChangeEntryPrice={handleChangeEntryPrice}
+              onDeleteToken={handleDeleteToken}
               onToggleHidden={handleToggleHidden}
               migrationView={migrationView}
               onMigrationViewChange={handleMigrationViewChange}
