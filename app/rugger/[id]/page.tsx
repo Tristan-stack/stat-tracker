@@ -171,6 +171,7 @@ export default function RuggerDetailPage() {
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
   const [gmgnWalletInput, setGmgnWalletInput] = useState('');
   const [motherWalletText, setMotherWalletText] = useState('');
+  const [tokenTrackingText, setTokenTrackingText] = useState('');
   const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
   const [gmgnFetchFrom, setGmgnFetchFrom] = useState('');
   const [gmgnFetchTo, setGmgnFetchTo] = useState('');
@@ -179,7 +180,7 @@ export default function RuggerDetailPage() {
   const [gmgnPreview, setGmgnPreview] = useState<GmgnPreviewRow[] | null>(null);
   /** Après un fetch réussi : message si liste vide ou si des lignes ont été exclues (déjà en base). */
   const [gmgnDedupeNotice, setGmgnDedupeNotice] = useState<string | null>(null);
-  const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'walletBuyer' | 'motherExchange'>('walletBuyer');
+  const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'walletBuyer' | 'motherExchange' | 'tokenTracking'>('walletBuyer');
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
 
@@ -881,6 +882,88 @@ export default function RuggerDetailPage() {
     }
   }, [id, motherWalletText, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, loadAllRuggerTokensUnfiltered]);
 
+  const handleTokenTrackingFetch = useCallback(async () => {
+    setGmgnError(null);
+    setGmgnPreview(null);
+    setGmgnDedupeNotice(null);
+    const tokens = parseWalletLines(tokenTrackingText);
+    if (tokens.length === 0) {
+      setGmgnError('Indique au moins une adresse token (une par ligne).');
+      return;
+    }
+    const MAX_TOKENS = 30;
+    if (tokens.length > MAX_TOKENS) {
+      setGmgnError(`Maximum ${MAX_TOKENS} tokens distincts.`);
+      return;
+    }
+    if (!id) {
+      setGmgnError('Rugger introuvable.');
+      return;
+    }
+    const range =
+      gmgnFetchPeriod === 'today'
+        ? localTodayPurchaseRange()
+        : gmgnFetchPeriod === 'yesterday'
+          ? localYesterdayPurchaseRange()
+          : gmgnFetchPeriod === 'all'
+            ? localGmgnAllTimeRange()
+            : gmgnFetchFrom && gmgnFetchTo
+              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
+              : null;
+    if (!range) {
+      setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
+      return;
+    }
+
+    setGmgnLoading(true);
+    try {
+      const existingTokens = await loadAllRuggerTokensUnfiltered(id);
+      const knownMints = buildRuggerMintSet(existingTokens);
+
+      const res = await fetch('/api/gmgn/token-tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokenAddresses: tokens,
+          fromMs: range.fromMs,
+          toMs: range.toMs,
+        }),
+      });
+      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
+      if (!res.ok) {
+        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+        return;
+      }
+
+      const rows = mapApiPurchasesToRows(data.purchases ?? []);
+      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
+      const skipped = rows.length - filtered.length;
+
+      if (rows.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice('Aucune donnée GMGN trouvée pour ces tokens sur ce créneau.');
+      } else if (filtered.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(
+          rows.length === 1
+            ? 'Ce token est déjà enregistré sur ce rugger.'
+            : `Les ${rows.length} token(s) trouvé(s) sont déjà enregistrés sur ce rugger.`
+        );
+      } else {
+        setGmgnPreview(filtered);
+        setGmgnDedupeNotice(
+          skipped > 0
+            ? `${skipped} token(s) déjà présent(s) sur ce rugger — exclus de la liste.`
+            : null
+        );
+      }
+    } catch {
+      setGmgnError('Erreur réseau');
+    } finally {
+      setGmgnLoading(false);
+    }
+  }, [id, tokenTrackingText, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, loadAllRuggerTokensUnfiltered]);
+
   const handleAddGmgnPurchases = useCallback(
     async (items: GmgnPreviewRow[]) => {
       if (!id || items.length === 0) return;
@@ -1345,6 +1428,23 @@ export default function RuggerDetailPage() {
             <button
               type="button"
               onClick={() => {
+                setTokenAddMode('tokenTracking');
+                setGmgnPreview(null);
+                setGmgnDedupeNotice(null);
+                setGmgnError(null);
+              }}
+              className={cn(
+                'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                tokenAddMode === 'tokenTracking'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              )}
+            >
+              Token Tracking
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setTokenAddMode('manual');
                 setGmgnPreview(null);
                 setGmgnDedupeNotice(null);
@@ -1363,7 +1463,7 @@ export default function RuggerDetailPage() {
 
           {tokenAddMode === 'manual' && <TokenForm onAdd={handleAddToken} />}
 
-          {(tokenAddMode === 'walletBuyer' || tokenAddMode === 'motherExchange') && (
+          {(tokenAddMode === 'walletBuyer' || tokenAddMode === 'motherExchange' || tokenAddMode === 'tokenTracking') && (
           <div className="space-y-4">
           <div className="space-y-2">
             <span className="text-sm font-medium text-foreground">Période du fetch</span>
@@ -1446,11 +1546,36 @@ export default function RuggerDetailPage() {
             />
           </div>
           )}
+          {tokenAddMode === 'tokenTracking' && (
+          <div className="mt-4 flex max-w-2xl flex-col gap-3">
+            <Label htmlFor="token-tracking" className="block text-sm font-medium leading-normal">
+              Adresses token (une par ligne)
+            </Label>
+            <textarea
+              id="token-tracking"
+              value={tokenTrackingText}
+              onChange={(e) => setTokenTrackingText(e.target.value)}
+              placeholder="Colle une ou plusieurs adresses de token Solana…"
+              rows={5}
+              className={cn(
+                'min-h-[120px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs transition-[color,box-shadow] outline-none',
+                'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                'disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30'
+              )}
+            />
+          </div>
+          )}
           {gmgnError && <p className="text-sm text-destructive">{gmgnError}</p>}
           <Button
             type="button"
             onClick={() =>
-              void (tokenAddMode === 'motherExchange' ? handleMotherFetch() : handleGmgnFetch())
+              void (
+                tokenAddMode === 'motherExchange'
+                  ? handleMotherFetch()
+                  : tokenAddMode === 'tokenTracking'
+                    ? handleTokenTrackingFetch()
+                    : handleGmgnFetch()
+              )
             }
             disabled={gmgnLoading}
           >
