@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics, ExitMode } from '@/types/token';
 import { STATUS_DOT_CLASSES } from '@/types/rugger';
-import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, RefreshCcw, Trash2 } from 'lucide-react';
 import { isMigrationPeakMcap, MIGRATION_MCAP_THRESHOLD, type MigrationView } from '@/lib/migration';
 import { cn } from '@/lib/utils';
 import { formatMintShort, getTokenMintAddress, getTokenTableNameCell } from '@/lib/token-display';
@@ -149,6 +149,8 @@ export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onChangeTarget: (id: string, nextPercent: number) => void;
   onChangeEntryPrice: (id: string, nextPrice: number) => void;
+  onRefreshToken?: (token: TokenWithMetrics) => void;
+  refreshingTokenIds?: Set<string>;
   onDeleteToken?: (id: string) => void;
   /** Si absent, la colonne visibilité n’est pas affichée (ex. page rugger). */
   onToggleHidden?: (id: string) => void;
@@ -163,6 +165,8 @@ export function TokenTable({
   tokens,
   onChangeTarget,
   onChangeEntryPrice,
+  onRefreshToken,
+  refreshingTokenIds,
   onDeleteToken,
   onToggleHidden,
   migrationView: migrationViewProp,
@@ -285,7 +289,7 @@ export function TokenTable({
               <th className="px-5 py-4 text-right font-medium">Gain max</th>
               <th className="px-5 py-4 text-right font-medium">Perte max</th>
               <th className="px-5 py-4 text-center font-medium">Objectif atteint</th>
-              {onDeleteToken && <th className="px-3 py-4 text-center font-medium">Action</th>}
+              {(onDeleteToken || onRefreshToken) && <th className="px-3 py-4 text-center font-medium">Action</th>}
             </tr>
           </thead>
           <tbody>
@@ -341,7 +345,7 @@ export function TokenTable({
                       )}
                       aria-hidden
                     />
-                    <span className="truncate" title={getTokenTableNameCell(t)}>
+                    <span className="truncate normal-case" title={getTokenTableNameCell(t)}>
                       {getTokenTableNameCell(t)}
                     </span>
                   </div>
@@ -417,19 +421,42 @@ export function TokenTable({
                   {formatPercent(t.maxLossPercent)}
                 </td>
                 <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
-                {onDeleteToken && (
+                {(onDeleteToken || onRefreshToken) && (
                   <td className="px-2 py-3 text-center sm:px-3 sm:py-4">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => onDeleteToken(t.id)}
-                      aria-label="Supprimer le token"
-                      title="Supprimer le token"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center justify-center gap-1">
+                      {onRefreshToken && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-primary"
+                          onClick={() => onRefreshToken(t)}
+                          disabled={refreshingTokenIds?.has(t.id) === true}
+                          aria-label="Rafraîchir les valeurs depuis GMGN"
+                          title="Rafraîchir depuis GMGN (sans toucher l'entrée)"
+                        >
+                          <RefreshCcw
+                            className={cn(
+                              'h-4 w-4',
+                              refreshingTokenIds?.has(t.id) && 'animate-spin'
+                            )}
+                          />
+                        </Button>
+                      )}
+                      {onDeleteToken && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => onDeleteToken(t.id)}
+                          aria-label="Supprimer le token"
+                          title="Supprimer le token"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>

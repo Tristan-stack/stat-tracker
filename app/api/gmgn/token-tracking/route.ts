@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     tokenAddresses?: unknown;
     fromMs?: unknown;
     toMs?: unknown;
+    athHigh?: unknown;
   };
 
   const fromMs = typeof b.fromMs === 'number' && Number.isFinite(b.fromMs) ? b.fromMs : NaN;
@@ -68,7 +69,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const purchases = await buildTokenTrackingPreviews(tokenList, fromMs, toMs);
+    const purchases = await buildTokenTrackingPreviews(tokenList, fromMs, toMs, {
+      athHigh: b.athHigh === true,
+    });
     return NextResponse.json({ purchases });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'GMGN request failed';

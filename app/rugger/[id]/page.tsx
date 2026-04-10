@@ -183,6 +183,7 @@ export default function RuggerDetailPage() {
   const [tokenAddMode, setTokenAddMode] = useState<'manual' | 'walletBuyer' | 'motherExchange' | 'tokenTracking'>('walletBuyer');
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
+  const [refreshingTokenIds, setRefreshingTokenIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!id) return;
@@ -599,6 +600,97 @@ export default function RuggerDetailPage() {
       migrationView,
       loadTokens,
       loadAllTokensForStats,
+    ]
+  );
+
+  const handleRefreshTokenFromGmgn = useCallback(
+    async (token: Token) => {
+      if (!id) return;
+      const mint = token.tokenAddress?.trim() ?? '';
+      if (mint === '') {
+        setGmgnError('Token sans mint : refresh GMGN impossible.');
+        return;
+      }
+      setRefreshingTokenIds((prev) => new Set(prev).add(token.id));
+
+      const fromMs = localGmgnAllTimeRange().fromMs;
+      const toMs = Date.now();
+
+      try {
+        const res = await fetch('/api/gmgn/token-tracking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tokenAddress: mint,
+            fromMs,
+            toMs,
+            athHigh: true,
+          }),
+        });
+        const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
+        if (!res.ok || !data.purchases || data.purchases.length === 0) {
+          setGmgnError(data.error ?? 'Aucune donnée GMGN trouvée pour ce token.');
+          return;
+        }
+
+        const p = data.purchases[0];
+        const patchRes = await fetch(`/api/ruggers/${id}/tokens/${token.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            high: p.high,
+            low: p.low,
+            tokenName: p.name,
+            purchasedAt: p.purchasedAt,
+            // IMPORTANT: on ne touche pas entryPrice.
+          }),
+        });
+        if (!patchRes.ok) return;
+
+        // Mise à jour locale pour éviter le "jump" visuel lié au refetch complet.
+        setTokensPage((prev) =>
+          prev
+            ? {
+                ...prev,
+                tokens: prev.tokens.map((t) =>
+                  t.id === token.id
+                    ? {
+                        ...t,
+                        high: p.high,
+                        low: p.low,
+                        tokenName: p.name,
+                        purchasedAt: p.purchasedAt,
+                      }
+                    : t
+                ),
+              }
+            : prev
+        );
+        setAllTokensForStats((prev) =>
+          prev.map((t) =>
+            t.id === token.id
+              ? {
+                  ...t,
+                  high: p.high,
+                  low: p.low,
+                  tokenName: p.name,
+                  purchasedAt: p.purchasedAt,
+                }
+              : t
+          )
+        );
+      } finally {
+        setRefreshingTokenIds((prev) => {
+          const next = new Set(prev);
+          next.delete(token.id);
+          return next;
+        });
+      }
+    },
+    [
+      id,
+      setTokensPage,
+      setAllTokensForStats,
     ]
   );
 
@@ -1848,6 +1940,8 @@ export default function RuggerDetailPage() {
               tokens={tokensWithMetrics}
               onChangeTarget={handleChangeTarget}
               onChangeEntryPrice={handleChangeEntryPrice}
+              onRefreshToken={handleRefreshTokenFromGmgn}
+              refreshingTokenIds={refreshingTokenIds}
               onDeleteToken={handleDeleteToken}
               onToggleHidden={handleToggleHidden}
               migrationView={migrationView}

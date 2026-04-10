@@ -19,6 +19,8 @@ export async function PATCH(
   const body = (await req.json()) as {
     targetExitPercent?: number;
     entryPrice?: number;
+    high?: number;
+    low?: number;
     purchasedAt?: string | null;
     tokenAddress?: string | null;
     /** Mint / identifiant canonique. */
@@ -44,6 +46,22 @@ export async function PATCH(
     }
     setClauses.push(`entry_price = $${paramIndex++}`);
     values.push(body.entryPrice);
+  }
+
+  if (body.high !== undefined) {
+    if (typeof body.high !== 'number' || !Number.isFinite(body.high) || body.high < 0) {
+      return NextResponse.json({ error: 'high must be a non-negative number' }, { status: 400 });
+    }
+    setClauses.push(`high = $${paramIndex++}`);
+    values.push(body.high);
+  }
+
+  if (body.low !== undefined) {
+    if (typeof body.low !== 'number' || !Number.isFinite(body.low) || body.low < 0) {
+      return NextResponse.json({ error: 'low must be a non-negative number' }, { status: 400 });
+    }
+    setClauses.push(`low = $${paramIndex++}`);
+    values.push(body.low);
   }
 
   if (body.purchasedAt !== undefined) {
