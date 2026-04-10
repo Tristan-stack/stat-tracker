@@ -1,5 +1,5 @@
 /** Filtre tableau tokens par date d’achat effective (coalesce purchasedAt / createdAt côté API). */
-export type TokenPurchaseFilter = 'all' | 'today' | 'yesterday' | 'custom';
+export type TokenPurchaseFilter = 'all' | 'today' | 'yesterday' | 'day' | 'custom';
 
 function startOfLocalDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -55,7 +55,9 @@ export function appendTokenDateQueryParams(
   params: URLSearchParams,
   filter: TokenPurchaseFilter,
   customFrom?: string,
-  customTo?: string
+  customTo?: string,
+  /** `YYYY-MM-DD` — un seul jour civil local (début → fin de journée). */
+  pickDay?: string
 ): void {
   if (filter === 'all') return;
   if (filter === 'today') {
@@ -68,6 +70,14 @@ export function appendTokenDateQueryParams(
     const { fromMs, toMs } = localYesterdayPurchaseRange();
     params.set('tokenDateFrom', new Date(fromMs).toISOString());
     params.set('tokenDateTo', new Date(toMs).toISOString());
+    return;
+  }
+  if (filter === 'day' && pickDay) {
+    const r = localCustomDayRange(pickDay, pickDay);
+    if (r) {
+      params.set('tokenDateFrom', new Date(r.fromMs).toISOString());
+      params.set('tokenDateTo', new Date(r.toMs).toISOString());
+    }
     return;
   }
   if (filter === 'custom' && customFrom && customTo) {

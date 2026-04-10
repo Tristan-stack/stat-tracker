@@ -40,4 +40,20 @@ describe('appendTokenDateQueryParams', () => {
     expect(p.get('tokenDateFrom')).toBeTruthy();
     expect(p.get('tokenDateTo')).toBeTruthy();
   });
+
+  it('adds same-day range for filter day with pickDay', () => {
+    const p = new URLSearchParams();
+    appendTokenDateQueryParams(p, 'day', undefined, undefined, '2026-04-10');
+    const from = p.get('tokenDateFrom');
+    const to = p.get('tokenDateTo');
+    expect(from).toBeTruthy();
+    expect(to).toBeTruthy();
+    expect(new Date(from!).getTime()).toBeLessThanOrEqual(new Date(to!).getTime());
+  });
+
+  it('adds nothing for day without pickDay', () => {
+    const p = new URLSearchParams();
+    appendTokenDateQueryParams(p, 'day', undefined, undefined, '');
+    expect([...p.keys()].length).toBe(0);
+  });
 });

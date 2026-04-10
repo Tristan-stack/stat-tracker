@@ -37,6 +37,8 @@ interface TokensResponse {
   allSameTargetPercent: number | null;
 }
 
+const TOKEN_TABLE_PAGE_SIZES = [10, 15, 30] as const;
+
 const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
   mother: 'Mère',
@@ -47,6 +49,7 @@ function getPurchaseFilterLabel(period: TokenPurchaseFilter): string {
   if (period === 'all') return 'Tous';
   if (period === 'today') return 'Aujourd’hui';
   if (period === 'yesterday') return 'Hier';
+  if (period === 'day') return 'Un jour';
   return 'Plage…';
 }
 
@@ -149,6 +152,8 @@ export default function RuggerDetailPage() {
   const [tokensPage, setTokensPage] = useState<TokensResponse | null>(null);
   const [allTokensForStats, setAllTokensForStats] = useState<Token[]>([]);
   const [page, setPage] = useState(1);
+  const [tokenTablePageSize, setTokenTablePageSize] =
+    useState<(typeof TOKEN_TABLE_PAGE_SIZES)[number]>(10);
   const [isLoadingRugger, setIsLoadingRugger] = useState(true);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -156,8 +161,6 @@ export default function RuggerDetailPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editWalletAddress, setEditWalletAddress] = useState('');
   const [editWalletType, setEditWalletType] = useState<WalletType>('simple');
-  const [editStartHour, setEditStartHour] = useState('');
-  const [editEndHour, setEditEndHour] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [globalTargetPercent, setGlobalTargetPercent] = useState('');
   const [globalTargetMcap, setGlobalTargetMcap] = useState('');
@@ -168,6 +171,7 @@ export default function RuggerDetailPage() {
   const [tokenPurchaseFilter, setTokenPurchaseFilter] = useState<TokenPurchaseFilter>('all');
   const [tokenTableCustomFrom, setTokenTableCustomFrom] = useState('');
   const [tokenTableCustomTo, setTokenTableCustomTo] = useState('');
+  const [tokenTablePickDay, setTokenTablePickDay] = useState('');
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
   const [gmgnWalletInput, setGmgnWalletInput] = useState('');
   const [motherWalletText, setMotherWalletText] = useState('');
@@ -184,6 +188,7 @@ export default function RuggerDetailPage() {
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
   const [refreshingTokenIds, setRefreshingTokenIds] = useState<Set<string>>(() => new Set());
+  const [unfilteredRuggerTokens, setUnfilteredRuggerTokens] = useState<Token[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -232,6 +237,11 @@ export default function RuggerDetailPage() {
     [mergeHidden, allTokensForStats]
   );
 
+  const tokensForActivityInference = useMemo(
+    () => mergeHidden(unfilteredRuggerTokens).filter((t) => !t.hidden),
+    [mergeHidden, unfilteredRuggerTokens]
+  );
+
   const migrationKnownTotal = useMemo(
     () => allTokensForStats.filter((t) => isMigrationPeakMcap(t.high)).length,
     [allTokensForStats]
@@ -258,17 +268,19 @@ export default function RuggerDetailPage() {
     async (
       ruggerId: string,
       nextPage: number,
+      listPageSize: number,
       status?: StatusId | 'all',
       purchaseFilter?: TokenPurchaseFilter,
       tableCustomFrom?: string,
       tableCustomTo?: string,
+      pickDay?: string,
       migrationOnly = false
     ) => {
       setIsLoadingTokens(true);
       try {
         const searchParams = new URLSearchParams({
           page: String(nextPage),
-          pageSize: '10',
+          pageSize: String(listPageSize),
         });
         if (status && status !== 'all') {
           searchParams.set('status', status);
@@ -277,7 +289,8 @@ export default function RuggerDetailPage() {
           searchParams,
           purchaseFilter ?? 'all',
           tableCustomFrom,
-          tableCustomTo
+          tableCustomTo,
+          pickDay
         );
         if (migrationOnly) {
           searchParams.set('migration', 'true');
@@ -301,14 +314,21 @@ export default function RuggerDetailPage() {
       status?: StatusId | 'all',
       purchaseFilter?: TokenPurchaseFilter,
       tableCustomFrom?: string,
-      tableCustomTo?: string
+      tableCustomTo?: string,
+      pickDay?: string
     ) => {
       try {
         const params = new URLSearchParams({ all: 'true' });
         if (status && status !== 'all') {
           params.set('status', status);
         }
-        appendTokenDateQueryParams(params, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo);
+        appendTokenDateQueryParams(
+          params,
+          purchaseFilter ?? 'all',
+          tableCustomFrom,
+          tableCustomTo,
+          pickDay
+        );
         const response = await fetch(
           `/api/ruggers/${ruggerId}/tokens?${params.toString()}`
         );
@@ -333,6 +353,20 @@ export default function RuggerDetailPage() {
       return [];
     }
   }, []);
+
+  useEffect(() => {
+    if (!id) {
+      setUnfilteredRuggerTokens([]);
+      return;
+    }
+    let cancelled = false;
+    void loadAllRuggerTokensUnfiltered(id).then((list) => {
+      if (!cancelled) setUnfilteredRuggerTokens(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, rugger?.tokenCount, allTokensForStats.length, loadAllRuggerTokensUnfiltered]);
 
   useEffect(() => {
     if (!id) return;
@@ -360,10 +394,12 @@ export default function RuggerDetailPage() {
     void loadTokens(
       id,
       fetchPage,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationOnly
     );
     void loadAllTokensForStats(
@@ -371,7 +407,8 @@ export default function RuggerDetailPage() {
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
-      tokenTableCustomTo
+      tokenTableCustomTo,
+      tokenTablePickDay
     );
   }, [
     id,
@@ -380,7 +417,9 @@ export default function RuggerDetailPage() {
     tokenPurchaseFilter,
     tokenTableCustomFrom,
     tokenTableCustomTo,
+    tokenTablePickDay,
     migrationView,
+    tokenTablePageSize,
     loadTokens,
     loadAllTokensForStats,
   ]);
@@ -395,8 +434,6 @@ export default function RuggerDetailPage() {
       setEditDescription(rugger.description ?? '');
       setEditWalletAddress(rugger.walletAddress);
       setEditWalletType(rugger.walletType);
-      setEditStartHour(rugger.startHour != null ? String(rugger.startHour) : '');
-      setEditEndHour(rugger.endHour != null ? String(rugger.endHour) : '');
       setEditNotes(rugger.notes ?? '');
     }
   }, [rugger, isEditing]);
@@ -420,10 +457,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         1,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -431,16 +470,19 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
       await loadRugger(id);
     },
     [
       id,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -461,10 +503,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         1,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -472,15 +516,18 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     },
     [
       id,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -499,10 +546,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         page,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -510,16 +559,19 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     },
     [
       id,
       page,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -538,10 +590,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         page,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -549,16 +603,19 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     },
     [
       id,
       page,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -576,10 +633,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         page,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -587,16 +646,19 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     },
     [
       id,
       page,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -679,6 +741,7 @@ export default function RuggerDetailPage() {
               : t
           )
         );
+        void loadAllRuggerTokensUnfiltered(id).then(setUnfilteredRuggerTokens);
       } finally {
         setRefreshingTokenIds((prev) => {
           const next = new Set(prev);
@@ -687,23 +750,13 @@ export default function RuggerDetailPage() {
         });
       }
     },
-    [
-      id,
-      setTokensPage,
-      setAllTokensForStats,
-    ]
+    [id, setTokensPage, setAllTokensForStats, loadAllRuggerTokensUnfiltered]
   );
 
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
       if (!id || editWalletAddress.trim() === '') return;
-      const parseHour = (s: string): number | null => {
-        const t = s.trim();
-        if (t === '') return null;
-        const n = Number(t);
-        return Number.isFinite(n) && n >= 0 && n <= 23 ? n : null;
-      };
       const response = await fetch(`/api/ruggers/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -712,8 +765,6 @@ export default function RuggerDetailPage() {
           description: editDescription.trim() || null,
           walletAddress: editWalletAddress.trim(),
           walletType: editWalletType,
-          startHour: parseHour(editStartHour),
-          endHour: parseHour(editEndHour),
           notes: editNotes.trim() || null,
         }),
       });
@@ -721,7 +772,7 @@ export default function RuggerDetailPage() {
       setIsEditing(false);
       await loadRugger(id);
     },
-    [id, editName, editDescription, editWalletAddress, editWalletType, editStartHour, editEndHour, editNotes, loadRugger]
+    [id, editName, editDescription, editWalletAddress, editWalletType, editNotes, loadRugger]
   );
 
   const handleApplyGlobalTarget = useCallback(async () => {
@@ -747,10 +798,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         page,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -758,7 +811,8 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     } finally {
       setIsApplyingGlobalTarget(false);
@@ -769,10 +823,12 @@ export default function RuggerDetailPage() {
     globalTargetPercent,
     globalTargetMcap,
     page,
+    tokenTablePageSize,
     tokenStatusFilter,
     tokenPurchaseFilter,
     tokenTableCustomFrom,
     tokenTableCustomTo,
+    tokenTablePickDay,
     migrationView,
     loadTokens,
     loadAllTokensForStats,
@@ -787,10 +843,12 @@ export default function RuggerDetailPage() {
     await loadTokens(
       id,
       1,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView === 'migrations'
     );
     await loadAllTokensForStats(
@@ -798,15 +856,18 @@ export default function RuggerDetailPage() {
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
-      tokenTableCustomTo
+      tokenTableCustomTo,
+      tokenTablePickDay
     );
     await loadRugger(id);
   }, [
     id,
+    tokenTablePageSize,
     tokenStatusFilter,
     tokenPurchaseFilter,
     tokenTableCustomFrom,
     tokenTableCustomTo,
+    tokenTablePickDay,
     migrationView,
     loadTokens,
     loadAllTokensForStats,
@@ -1092,10 +1153,12 @@ export default function RuggerDetailPage() {
       await loadTokens(
         id,
         1,
+        tokenTablePageSize,
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
         tokenTableCustomTo,
+        tokenTablePickDay,
         migrationView === 'migrations'
       );
       await loadAllTokensForStats(
@@ -1103,15 +1166,18 @@ export default function RuggerDetailPage() {
         tokenStatusFilter,
         tokenPurchaseFilter,
         tokenTableCustomFrom,
-        tokenTableCustomTo
+        tokenTableCustomTo,
+        tokenTablePickDay
       );
     },
     [
       id,
+      tokenTablePageSize,
       tokenStatusFilter,
       tokenPurchaseFilter,
       tokenTableCustomFrom,
       tokenTableCustomTo,
+      tokenTablePickDay,
       migrationView,
       loadTokens,
       loadAllTokensForStats,
@@ -1302,11 +1368,6 @@ export default function RuggerDetailPage() {
                   Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
                 </p>
               )}
-              {(rugger.startHour != null || rugger.endHour != null) && (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Intervalle horaire : {rugger.startHour ?? '?'}h – {rugger.endHour ?? '?'}h
-                </p>
-              )}
               {rugger.notes?.trim() ? (
                 <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">
                   {rugger.notes}
@@ -1415,34 +1476,6 @@ export default function RuggerDetailPage() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Intervalle horaire (optionnel)</Label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Rug de</span>
-                    <Input
-                      id="edit-detail-start-hour"
-                      type="number"
-                      min={0}
-                      max={23}
-                      value={editStartHour}
-                      onChange={(e) => setEditStartHour(e.target.value)}
-                      placeholder="9"
-                      className="w-16"
-                    />
-                    <span className="text-xs text-muted-foreground">h à</span>
-                    <Input
-                      id="edit-detail-end-hour"
-                      type="number"
-                      min={0}
-                      max={23}
-                      value={editEndHour}
-                      onChange={(e) => setEditEndHour(e.target.value)}
-                      placeholder="18"
-                      className="w-16"
-                    />
-                    <span className="text-xs text-muted-foreground">h</span>
-                  </div>
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="edit-detail-notes">Notes (optionnel)</Label>
                   <textarea
                     id="edit-detail-notes"
@@ -1471,7 +1504,10 @@ export default function RuggerDetailPage() {
       )}
 
       <div className="space-y-8">
-        <StatsSummary tokens={tokensForStats} />
+        <StatsSummary
+          tokens={tokensForStats}
+          activityInferenceTokens={tokensForActivityInference}
+        />
 
         <section className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow sm:p-6">
           <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-3">
@@ -1815,25 +1851,46 @@ export default function RuggerDetailPage() {
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">Date d&apos;achat :</span>
-            {(['all', 'today', 'yesterday', 'custom'] satisfies TokenPurchaseFilter[]).map((period) => (
-              <button
-                key={period}
-                type="button"
-                onClick={() => {
-                  setTokenPurchaseFilter(period);
-                  setPage(1);
-                }}
-                className={cn(
-                  'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                  tokenPurchaseFilter === period
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                )}
-              >
-                {getPurchaseFilterLabel(period)}
-              </button>
-            ))}
+            {(['all', 'today', 'yesterday', 'day', 'custom'] satisfies TokenPurchaseFilter[]).map(
+              (period) => (
+                <button
+                  key={period}
+                  type="button"
+                  onClick={() => {
+                    setTokenPurchaseFilter(period);
+                    setPage(1);
+                    if (period === 'day') {
+                      setTokenTablePickDay((prev) => prev || formatDateToYyyyMmDd(new Date()));
+                    }
+                  }}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                    tokenPurchaseFilter === period
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  )}
+                >
+                  {getPurchaseFilterLabel(period)}
+                </button>
+              )
+            )}
           </div>
+          {tokenPurchaseFilter === 'day' && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-2">
+                <Label>Jour</Label>
+                <DatePicker
+                  value={parseYyyyMmDdToDate(tokenTablePickDay)}
+                  onChange={(date) => {
+                    setTokenTablePickDay(formatDateToYyyyMmDd(date));
+                    setPage(1);
+                  }}
+                  placeholder="Choisir un jour"
+                  className="w-[200px]"
+                />
+              </div>
+            </div>
+          )}
           {tokenPurchaseFilter === 'custom' && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-2">
@@ -1863,7 +1920,7 @@ export default function RuggerDetailPage() {
             </div>
           )}
         </div>
-        {isLoadingTokens ? (
+        {isLoadingTokens && tokensPage === null ? (
           <p className="text-sm text-muted-foreground">Chargement des tokens…</p>
         ) : activeTokens.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
@@ -1871,6 +1928,17 @@ export default function RuggerDetailPage() {
           </p>
         ) : (
           <>
+            {isLoadingTokens ? (
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                Actualisation des données…
+              </p>
+            ) : null}
+            <div
+              className={cn(
+                'space-y-4 transition-opacity',
+                isLoadingTokens && 'pointer-events-none opacity-60'
+              )}
+            >
             <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
                 <Label className="text-sm font-medium">Objectif commun</Label>
                 <div className="flex rounded-md border text-xs">
@@ -1948,25 +2016,52 @@ export default function RuggerDetailPage() {
               onMigrationViewChange={handleMigrationViewChange}
               migrationKnownCount={migrationKnownTotal}
             />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                Page précédente
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Page suivante
-              </Button>
+            <div className="flex flex-wrap items-center justify-start gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Par page</span>
+              <div className="flex rounded-md border text-xs">
+                {TOKEN_TABLE_PAGE_SIZES.map((n, i) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => {
+                      setTokenTablePageSize(n);
+                      setPage(1);
+                    }}
+                    className={cn(
+                      'px-2.5 py-1 font-medium transition-colors',
+                      i === 0 && 'rounded-l-md',
+                      i === TOKEN_TABLE_PAGE_SIZES.length - 1 && 'rounded-r-md',
+                      i > 0 && 'border-l border-border',
+                      tokenTablePageSize === n
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Page précédente
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Page suivante
+                </Button>
+              </div>
+            </div>
             </div>
           </>
         )}

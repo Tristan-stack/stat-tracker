@@ -13,6 +13,7 @@ import {
   findOptimalMcap,
   suggestSnipeMode,
 } from '@/lib/token-calculations';
+import { inferActivityHoursFromTokens } from '@/lib/infer-activity-hours';
 import type { Token, TokenWithMetrics, ExitMode } from '@/types/token';
 import { Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -237,10 +238,24 @@ const DEFAULT_TP: TakeProfitInput = {
 export interface StatsSummaryProps {
   tokens: Token[];
   showSimulation?: boolean;
+  /**
+   * Tokens pour estimer la tranche horaire (ex. tous les tokens du rugger sans filtre date).
+   * Si absent, l’estimation utilise `tokens`.
+   */
+  activityInferenceTokens?: Token[];
 }
 
-export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProps) {
+export function StatsSummary({
+  tokens,
+  showSimulation = true,
+  activityInferenceTokens,
+}: StatsSummaryProps) {
   const metrics = getAggregateMetrics(tokens);
+  const activityBasis = activityInferenceTokens ?? tokens;
+  const activityInference = useMemo(
+    () => inferActivityHoursFromTokens(activityBasis),
+    [activityBasis]
+  );
   const acceptance = getAcceptanceCriteria(tokens);
   const [simulatedAmount, setSimulatedAmount] = useState('');
   const [optimizedRevenue, setOptimizedRevenue] = useState(false);
@@ -430,8 +445,43 @@ export function StatsSummary({ tokens, showSimulation = true }: StatsSummaryProp
 
   return (
     <Card>
-      <CardHeader className="pb-4">
+      <CardHeader className="space-y-2 pb-4">
         <CardTitle className="text-xl">Résumé</CardTitle>
+        {activityInference.kind === 'estimate' && (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground/90">
+              Tranche horaire d&apos;activité estimée
+            </span>
+            {' — '}
+            d&apos;après {activityInference.sampleCount} date
+            {activityInference.sampleCount !== 1 ? 's' : ''} d&apos;achat (heure locale), fenêtre typique
+            entre{' '}
+            <span className="tabular-nums text-foreground/90">
+              {activityInference.startHour} h
+            </span>
+            {' et '}
+            <span className="tabular-nums text-foreground/90">
+              {activityInference.endHour} h
+            </span>
+            .
+            {activityInference.wideSpread ? (
+              <span className="mt-1 block text-xs">
+                Achats très dispersés sur la journée — fourchette min.–max. observée sur les données.
+              </span>
+            ) : null}
+          </p>
+        )}
+        {activityInference.kind === 'none' &&
+          activityInference.reason === 'no_dates' &&
+          activityBasis.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground/90">
+                Tranche horaire d&apos;activité
+              </span>
+              {' : '}
+              non estimable sans date d&apos;achat sur les tokens.
+            </p>
+          )}
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid gap-6 sm:gap-8 sm:grid-cols-2 lg:grid-cols-6">
