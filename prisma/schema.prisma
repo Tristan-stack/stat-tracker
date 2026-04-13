@@ -17,7 +17,9 @@ model User {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   accounts      Account[]
-  ruggers       Rugger[]
+  ruggers            Rugger[]
+  fundingChainCache  FundingChainCache[]
+  watchlistWallets   WatchlistWallet[]
 
   @@unique([email])
   @@map("user")
@@ -98,6 +100,7 @@ model Rugger {
   archived      Boolean       @default(false) @map("archived")
   createdAt     DateTime      @default(now()) @map("created_at")
   tokens        RuggerToken[]
+  analyses      WalletAnalysis[]
 
   @@unique([userId, walletAddress])
   @@index([userId])
@@ -125,4 +128,116 @@ model RuggerToken {
   @@index([ruggerId, createdAt])
   @@index([ruggerId, purchasedAt])
   @@map("rugger_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Wallet Network Analysis
+// ---------------------------------------------------------------------------
+
+model WalletAnalysis {
+  id            String    @id @default(dbgenerated("gen_random_uuid()"))
+  ruggerId      String    @map("rugger_id")
+  rugger        Rugger    @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
+  status        String    @default("pending")
+  fundingDepth  Int       @default(5) @map("funding_depth")
+  buyerLimit    Int       @default(200) @map("buyer_limit")
+  tokenCount    Int       @default(0) @map("token_count")
+  buyerCount    Int       @default(0) @map("buyer_count")
+  progress      Int       @default(0)
+  progressLabel String?   @map("progress_label")
+  errorMessage  String?   @map("error_message")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  completedAt   DateTime? @map("completed_at")
+
+  buyerWallets    AnalysisBuyerWallet[]
+  motherAddresses AnalysisMotherAddress[]
+
+  @@index([ruggerId])
+  @@map("wallet_analyses")
+}
+
+model AnalysisBuyerWallet {
+  id              String    @id @default(dbgenerated("gen_random_uuid()"))
+  analysisId      String    @map("analysis_id")
+  analysis        WalletAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  walletAddress   String    @map("wallet_address")
+  motherAddressId String?   @map("mother_address_id")
+  motherAddress   AnalysisMotherAddress? @relation(fields: [motherAddressId], references: [id])
+  tokensBought    Int       @default(0) @map("tokens_bought")
+  totalTokens     Int       @default(0) @map("total_tokens")
+  coveragePercent Float     @default(0) @map("coverage_percent")
+  firstBuyAt      DateTime? @map("first_buy_at")
+  lastBuyAt       DateTime? @map("last_buy_at")
+  activeDays      Int       @default(0) @map("active_days")
+  consistency     Float     @default(0)
+  weight          Float     @default(0)
+  avgHoldDuration Float?    @map("avg_hold_duration_hours")
+  fundingDepth    Int?      @map("funding_depth")
+  fundingChain    String?   @map("funding_chain")
+
+  purchases AnalysisBuyerPurchase[]
+
+  @@unique([analysisId, walletAddress])
+  @@index([analysisId])
+  @@map("analysis_buyer_wallets")
+}
+
+model AnalysisBuyerPurchase {
+  id            String    @id @default(dbgenerated("gen_random_uuid()"))
+  buyerWalletId String    @map("buyer_wallet_id")
+  buyerWallet   AnalysisBuyerWallet @relation(fields: [buyerWalletId], references: [id], onDelete: Cascade)
+  tokenAddress  String    @map("token_address")
+  tokenName     String?   @map("token_name")
+  purchasedAt   DateTime? @map("purchased_at")
+  amountSol     Float?    @map("amount_sol")
+
+  @@unique([buyerWalletId, tokenAddress])
+  @@index([buyerWalletId])
+  @@map("analysis_buyer_purchases")
+}
+
+model AnalysisMotherAddress {
+  id            String    @id @default(dbgenerated("gen_random_uuid()"))
+  analysisId    String    @map("analysis_id")
+  analysis      WalletAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  address       String
+  walletsFunded Int       @default(0) @map("wallets_funded")
+  validated     Boolean   @default(false)
+  validatedAt   DateTime? @map("validated_at")
+
+  buyerWallets AnalysisBuyerWallet[]
+
+  @@unique([analysisId, address])
+  @@index([analysisId])
+  @@map("analysis_mother_addresses")
+}
+
+model FundingChainCache {
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress String   @map("wallet_address")
+  motherAddress String?  @map("mother_address")
+  fundingDepth  Int      @map("funding_depth")
+  chainJson     String   @map("chain_json")
+  resolvedAt    DateTime @default(now()) @map("resolved_at")
+
+  @@unique([userId, walletAddress])
+  @@index([userId])
+  @@map("funding_chain_cache")
+}
+
+model WatchlistWallet {
+  id             String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress  String   @map("wallet_address")
+  label          String?
+  notes          String?
+  sourceRuggerId String?  @map("source_rugger_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, walletAddress])
+  @@index([userId])
+  @@map("watchlist_wallets")
 }
