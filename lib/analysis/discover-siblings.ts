@@ -41,9 +41,11 @@ export async function discoverSiblingWallets(
 
   const result = await findSiblingWallets(ruggerWallet, { maxDepth, siblingLimit });
 
-  if (result.motherAddress) {
-    await storeCachedChain(userId, ruggerWallet, result.motherAddress, result.ruggerChain, maxDepth);
+  if (!result.motherAddress) {
+    return { motherAddress: '', siblings: [], ruggerChain: result.ruggerChain };
   }
+
+  await storeCachedChain(userId, ruggerWallet, result.motherAddress, result.ruggerChain, maxDepth);
 
   return {
     motherAddress: result.motherAddress,

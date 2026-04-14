@@ -95,7 +95,7 @@ describe('discoverSiblingWallets', () => {
 
     const result = await discoverSiblingWallets(RUGGER_WALLET, USER_ID);
 
-    expect(result.motherAddress).toBeNull();
+    expect(result.motherAddress).toBe('');
     expect(result.siblings).toHaveLength(0);
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
@@ -128,6 +128,6 @@ describe('discoverSiblingWallets', () => {
     const result = await discoverSiblingWallets(RUGGER_WALLET, USER_ID);
 
     expect(mockFindSiblings).toHaveBeenCalled();
-    expect(result.motherAddress).toBeNull();
+    expect(result.motherAddress).toBe('');
   });
 });
