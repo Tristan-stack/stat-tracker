@@ -1,8 +1,13 @@
 export type AnalysisStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type AnalysisMode = 'token' | 'funding' | 'combined';
+
+export type WalletSource = 'token' | 'funding' | 'both';
+
 export interface WalletAnalysis {
   id: string;
   ruggerId: string;
+  mode: AnalysisMode;
   status: AnalysisStatus;
   fundingDepth: number;
   buyerLimit: number;
@@ -19,6 +24,7 @@ export interface AnalysisBuyerWallet {
   id: string;
   analysisId: string;
   walletAddress: string;
+  source: WalletSource;
   motherAddressId: string | null;
   tokensBought: number;
   totalTokens: number;
@@ -88,6 +94,19 @@ export interface WalletCombinationStep {
   walletAddress: string;
   newTokensCovered: string[];
   cumulativeCoverage: number;
+}
+
+export interface SiblingWallet {
+  walletAddress: string;
+  motherAddress: string;
+  amountReceived: number | null;
+  receivedAt: string | null;
+}
+
+export interface SiblingDiscoveryResult {
+  motherAddress: string;
+  siblings: SiblingWallet[];
+  ruggerChain: string[];
 }
 
 export interface CrossRuggerMatch {

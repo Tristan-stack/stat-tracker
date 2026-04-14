@@ -138,6 +138,7 @@ model WalletAnalysis {
   id            String    @id @default(dbgenerated("gen_random_uuid()"))
   ruggerId      String    @map("rugger_id")
   rugger        Rugger    @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
+  mode          String    @default("combined") // token | funding | combined
   status        String    @default("pending")
   fundingDepth  Int       @default(5) @map("funding_depth")
   buyerLimit    Int       @default(200) @map("buyer_limit")
@@ -161,6 +162,7 @@ model AnalysisBuyerWallet {
   analysisId      String    @map("analysis_id")
   analysis        WalletAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
   walletAddress   String    @map("wallet_address")
+  source          String    @default("token") // token | funding | both
   motherAddressId String?   @map("mother_address_id")
   motherAddress   AnalysisMotherAddress? @relation(fields: [motherAddressId], references: [id])
   tokensBought    Int       @default(0) @map("tokens_bought")

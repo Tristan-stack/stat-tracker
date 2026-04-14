@@ -1,4 +1,4 @@
-const HELIUS_RPS = Number(process.env.HELIUS_RPS ?? '10');
+const HELIUS_RPS = Number(process.env.HELIUS_RPS ?? '100');
 const MIN_INTERVAL_MS = Math.ceil(1000 / HELIUS_RPS);
 
 let nextSlot = 0;
