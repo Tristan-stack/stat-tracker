@@ -59,3 +59,28 @@ export async function GET(
     completedAt: row.completed_at,
   });
 }
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ id: string; analysisId: string }> }
+) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
+  const { id: ruggerId, analysisId } = await context.params;
+
+  const deleted = await query<{ id: string }>(
+    `DELETE FROM wallet_analyses wa
+     USING ruggers r
+     WHERE wa.id = $1 AND wa.rugger_id = $2 AND r.id = wa.rugger_id AND r.user_id = $3
+     RETURNING wa.id`,
+    [analysisId, ruggerId, userId]
+  );
+
+  if (deleted.length === 0) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
+}

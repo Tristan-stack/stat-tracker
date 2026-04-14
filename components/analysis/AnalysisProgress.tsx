@@ -4,12 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode } from '@/types/analysis';
-import { IconLoader2 } from '@tabler/icons-react';
+import { IconLoader2, IconTerminal2, IconChevronDown, IconChevronUp } from '@tabler/icons-react';
 
 interface SSEProgressEvent {
   percent: number;
   phase: string;
   detail?: string;
+}
+
+interface LogEntry {
+  time: Date;
+  message: string;
 }
 
 interface AnalysisProgressProps {
@@ -22,14 +27,53 @@ interface AnalysisProgressProps {
 
 type ConnectionState = 'connecting' | 'streaming' | 'complete' | 'error';
 
+function formatEta(ms: number): string {
+  if (ms < 1000) return '<1s';
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `~${s}s`;
+  return `~${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function formatLogTime(date: Date): string {
+  return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onComplete, onError }: AnalysisProgressProps) {
   const [percent, setPercent] = useState(0);
   const [phase, setPhase] = useState('Initialisation…');
   const [detail, setDetail] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [eta, setEta] = useState<string | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const hasStartedRef = useRef(false);
+  const analysisIdRef = useRef<string | null>(null);
+  const startedAtRef = useRef<number | null>(null);
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
+
+  const appendLog = useCallback((message: string) => {
+    setLogs((prev) => [...prev, { time: new Date(), message }]);
+  }, []);
+
+  const updateEta = useCallback((currentPercent: number) => {
+    const startedAt = startedAtRef.current;
+    if (!startedAt || currentPercent <= 5) {
+      setEta(null);
+      return;
+    }
+    const elapsed = Date.now() - startedAt;
+    const remaining = (elapsed / currentPercent) * (100 - currentPercent);
+    setEta(formatEta(remaining));
+  }, []);
+
+  useEffect(() => {
+    if (showLogs) logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs, showLogs]);
 
   const startAnalysis = useCallback(async () => {
     if (hasStartedRef.current) return;
@@ -38,7 +82,67 @@ export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onCompl
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const handleEvent = (event: string, data: Record<string, unknown>) => {
+      switch (event) {
+        case 'started':
+          analysisIdRef.current = (data.analysisId as string) ?? null;
+          startedAtRef.current = Date.now();
+          setPhase('Analyse démarrée');
+          setPercent(0);
+          appendLog(`Analyse démarrée (mode: ${mode}, tokens: ${data.tokenCount ?? '?'})`);
+          break;
+        case 'progress': {
+          const p = data as unknown as SSEProgressEvent;
+          const pct = p.percent ?? 0;
+          setPercent(pct);
+          setPhase(p.phase ?? '');
+          setDetail((p.detail as string) ?? null);
+          updateEta(pct);
+          const detailStr = p.detail ? ` — ${p.detail}` : '';
+          appendLog(`[${Math.round(pct)}%] ${p.phase ?? ''}${detailStr}`);
+          break;
+        }
+        case 'buyers_found': {
+          const msg = `${data.buyersFound ?? 0} wallets acheteurs découverts`;
+          setPhase(msg);
+          appendLog(msg + (data.tokenAddress ? ` (${String(data.tokenAddress).slice(0, 8)}…)` : ''));
+          break;
+        }
+        case 'siblings_found': {
+          const msg = `${data.siblingsFound ?? 0} wallets siblings découverts`;
+          setPhase(msg);
+          appendLog(msg);
+          break;
+        }
+        case 'merging':
+          setPhase('Fusion des résultats…');
+          appendLog('Fusion des résultats…');
+          break;
+        case 'complete': {
+          setPercent(100);
+          setPhase('Analyse terminée');
+          setConnectionState('complete');
+          setEta(null);
+          const elapsed = startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0;
+          appendLog(`Analyse terminée — ${data.buyerCount ?? '?'} wallets, ${data.motherCount ?? '?'} mères (${elapsed}s)`);
+          const id = (data.analysisId as string) ?? analysisIdRef.current;
+          if (id) onComplete(id);
+          break;
+        }
+        case 'error': {
+          const errMsg = (data.message as string) ?? 'Erreur inconnue';
+          setErrorMessage(errMsg);
+          setConnectionState('error');
+          setEta(null);
+          appendLog(`ERREUR: ${errMsg}`);
+          onError(errMsg);
+          break;
+        }
+      }
+    };
+
     try {
+      appendLog('Connexion au serveur…');
       const res = await fetch(`/api/ruggers/${ruggerId}/analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,15 +151,17 @@ export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onCompl
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: 'Erreur serveur' }));
-        const msg = (data as { error?: string }).error ?? `HTTP ${res.status}`;
+        const body = await res.json().catch(() => ({ error: 'Erreur serveur' }));
+        const msg = (body as { error?: string }).error ?? `HTTP ${res.status}`;
         setErrorMessage(msg);
         setConnectionState('error');
+        appendLog(`ERREUR: ${msg}`);
         onError(msg);
         return;
       }
 
       setConnectionState('streaming');
+      appendLog('Stream connecté');
       const reader = res.body?.getReader();
       if (!reader) {
         setErrorMessage('Pas de stream disponible');
@@ -80,63 +186,27 @@ export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onCompl
             currentEvent = line.slice(7).trim();
           } else if (line.startsWith('data: ') && currentEvent) {
             try {
-              const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
-              handleSSEEvent(currentEvent, data);
+              const parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              handleEvent(currentEvent, parsed);
             } catch { /* skip malformed */ }
             currentEvent = '';
           }
         }
-      }
-
-      if (connectionState !== 'complete' && connectionState !== 'error') {
-        setConnectionState('complete');
       }
     } catch (err) {
       if (controller.signal.aborted) return;
       const msg = err instanceof Error ? err.message : 'Connexion perdue';
       setErrorMessage(msg);
       setConnectionState('error');
+      appendLog(`ERREUR: ${msg}`);
       onError(msg);
     }
-  }, [ruggerId, mode, fundingDepth, onComplete, onError]);
-
-  const handleSSEEvent = (event: string, data: Record<string, unknown>) => {
-    switch (event) {
-      case 'started':
-        setPhase('Analyse démarrée');
-        setPercent(0);
-        break;
-      case 'progress': {
-        const p = data as unknown as SSEProgressEvent;
-        setPercent(p.percent ?? 0);
-        setPhase(p.phase ?? '');
-        setDetail((p.detail as string) ?? null);
-        break;
-      }
-      case 'buyers_found':
-        setPhase(`${data.count ?? 0} wallets acheteurs découverts`);
-        break;
-      case 'siblings_found':
-        setPhase(`${data.count ?? 0} wallets siblings découverts`);
-        break;
-      case 'merging':
-        setPhase('Fusion des résultats…');
-        break;
-      case 'complete':
-        setPercent(100);
-        setPhase('Analyse terminée');
-        setConnectionState('complete');
-        if (data.analysisId) onComplete(data.analysisId as string);
-        break;
-      case 'error':
-        setErrorMessage((data.message as string) ?? 'Erreur inconnue');
-        setConnectionState('error');
-        onError((data.message as string) ?? 'Erreur inconnue');
-        break;
-    }
-  };
+  }, [ruggerId, mode, fundingDepth, onComplete, onError, appendLog, updateEta]);
 
   useEffect(() => {
+    hasStartedRef.current = false;
+    analysisIdRef.current = null;
+    startedAtRef.current = null;
     void startAnalysis();
     return () => { abortRef.current?.abort(); };
   }, [startAnalysis]);
@@ -162,6 +232,45 @@ export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onCompl
         />
       </div>
 
+      {connectionState === 'streaming' && eta && (
+        <p className="text-xs text-muted-foreground tabular-nums">
+          Temps restant estimé : {eta}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => setShowLogs((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <IconTerminal2 className="size-3.5" />
+          <span>Logs</span>
+          {showLogs ? <IconChevronUp className="size-3" /> : <IconChevronDown className="size-3" />}
+          {logs.length > 0 && (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{logs.length}</span>
+          )}
+        </button>
+
+        {showLogs && (
+          <div className="max-h-48 w-full overflow-y-auto rounded-lg border bg-muted/30 p-2">
+            {logs.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">Aucun log.</p>
+            ) : (
+              <div className="space-y-0.5">
+                {logs.map((entry, i) => (
+                  <p key={i} className="font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="text-muted-foreground/60">{formatLogTime(entry.time)}</span>{' '}
+                    {entry.message}
+                  </p>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {connectionState === 'error' && errorMessage && (
         <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
           <p className="text-sm text-destructive">{errorMessage}</p>
@@ -175,6 +284,8 @@ export default function AnalysisProgress({ ruggerId, mode, fundingDepth, onCompl
               setConnectionState('connecting');
               setPercent(0);
               setPhase('Reconnexion…');
+              setLogs([]);
+              setEta(null);
               void startAnalysis();
             }}
           >

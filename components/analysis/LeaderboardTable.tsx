@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WalletSource, CrossRuggerMatch } from '@/types/analysis';
-import { IconChevronDown, IconChevronUp, IconArrowsSort, IconExternalLink } from '@tabler/icons-react';
+import { IconChevronDown, IconChevronUp, IconArrowsSort, IconExternalLink, IconCopy, IconCheck } from '@tabler/icons-react';
 import CrossRuggerBadge from '@/components/analysis/CrossRuggerBadge';
 import WalletActions from '@/components/analysis/WalletActions';
 
@@ -78,6 +78,13 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [crossMatches, setCrossMatches] = useState<Map<string, CrossRuggerMatch>>(new Map());
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+
+  const handleCopyAddress = useCallback(async (address: string) => {
+    await navigator.clipboard.writeText(address);
+    setCopiedAddress(address);
+    setTimeout(() => setCopiedAddress((prev) => (prev === address ? null : prev)), 1500);
+  }, []);
 
   const fetchLeaderboard = useCallback(async (sort: SortField, pageOffset: number) => {
     setIsLoading(true);
@@ -151,67 +158,132 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
               const isExpanded = expandedId === w.id;
               const crossMatch = crossMatches.get(w.walletAddress);
               return (
-                <tr key={w.id} className={cn('group border-b last:border-0 hover:bg-muted/30 cursor-pointer', crossMatch && 'bg-amber-50/50 dark:bg-amber-950/10')}
-                  onClick={() => onWalletClick?.(w.walletAddress)}>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{rank}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs">{truncateWallet(w.walletAddress)}</span>
-                      {crossMatch && <span className="size-1.5 rounded-full bg-amber-500 shrink-0" title="Multi-rugger" />}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">{sourceBadge(w.source)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{w.tokensBought}/{w.totalTokens}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.coveragePercent)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.consistency)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.weight)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatDuration(w.activeDays)}</td>
-                  <td className="px-3 py-2">
-                    {w.motherAddress && (
-                      <span className="font-mono text-[10px] text-muted-foreground">{truncateWallet(w.motherAddress)}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : w.id); }}
-                      className="rounded p-0.5 hover:bg-muted">
-                      {isExpanded ? <IconChevronUp className="size-4" /> : <IconChevronDown className="size-4" />}
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={w.id}>
+                  <tr className={cn('group border-b hover:bg-muted/30 cursor-pointer', crossMatch && 'bg-amber-50/50 dark:bg-amber-950/10')}
+                    onClick={() => onWalletClick?.(w.walletAddress)}>
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground">{rank}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs">{truncateWallet(w.walletAddress)}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); void handleCopyAddress(w.walletAddress); }}
+                          className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+                          title="Copier l'adresse"
+                        >
+                          {copiedAddress === w.walletAddress
+                            ? <IconCheck className="size-3 text-green-500" />
+                            : <IconCopy className="size-3 text-muted-foreground" />}
+                        </button>
+                        {crossMatch && <span className="size-1.5 rounded-full bg-amber-500 shrink-0" title="Multi-rugger" />}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">{sourceBadge(w.source)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{w.tokensBought}/{w.totalTokens}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.coveragePercent)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.consistency)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.weight)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatDuration(w.activeDays)}</td>
+                    <td className="px-3 py-2">
+                      {w.motherAddress && (
+                        <span className="font-mono text-[10px] text-muted-foreground">{truncateWallet(w.motherAddress)}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : w.id); }}
+                        className="rounded p-0.5 hover:bg-muted">
+                        {isExpanded ? <IconChevronUp className="size-4" /> : <IconChevronDown className="size-4" />}
+                      </button>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr className={cn('border-b bg-muted/20', crossMatch && 'bg-amber-50/30 dark:bg-amber-950/10')}>
+                      <td colSpan={10} className="p-0">
+                        <div
+                          className="border-t border-border/60 px-3 py-3 sm:px-4"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="rounded-lg border bg-background/80 p-3 shadow-sm space-y-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                              <p className="min-w-0 flex-1 font-mono text-[11px] leading-relaxed text-foreground break-all sm:max-w-[min(100%,42rem)]">
+                                {w.walletAddress}
+                              </p>
+                              <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-border/50 pt-3 sm:border-t-0 sm:pt-0">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCopyAddress(w.walletAddress)}
+                                  className="rounded-md border border-border/80 bg-muted/40 p-1.5 hover:bg-muted transition-colors"
+                                  title="Copier l'adresse"
+                                >
+                                  {copiedAddress === w.walletAddress
+                                    ? <IconCheck className="size-3.5 text-green-600 dark:text-green-400" />
+                                    : <IconCopy className="size-3.5 text-muted-foreground" />}
+                                </button>
+                                <a
+                                  href={`https://solscan.io/account/${w.walletAddress}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded-md border border-border/80 bg-muted/40 p-1.5 text-primary hover:bg-muted"
+                                  title="Solscan"
+                                >
+                                  <IconExternalLink className="size-3.5" />
+                                </a>
+                                <a
+                                  href={`https://gmgn.ai/sol/address/${w.walletAddress}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded-md border border-border/80 bg-muted/40 px-2 py-1.5 text-xs font-medium text-primary hover:bg-muted"
+                                  title="GMGN"
+                                >
+                                  GMGN
+                                </a>
+                                <WalletActions walletAddress={w.walletAddress} sourceRuggerId={ruggerId} />
+                                {crossMatch && (
+                                  <CrossRuggerBadge ruggerNames={crossMatch.ruggerNames} ruggerIds={crossMatch.ruggerIds} />
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-3 sm:gap-4">
+                              <div className="min-w-36 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Premier achat</p>
+                                <p className="mt-0.5 text-sm font-medium tabular-nums">
+                                  {w.firstBuyAt ? new Date(w.firstBuyAt).toLocaleDateString('fr-FR') : '—'}
+                                </p>
+                              </div>
+                              <div className="min-w-36 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Dernier achat</p>
+                                <p className="mt-0.5 text-sm font-medium tabular-nums">
+                                  {w.lastBuyAt ? new Date(w.lastBuyAt).toLocaleDateString('fr-FR') : '—'}
+                                </p>
+                              </div>
+                              <div className="min-w-36 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Hold moyen</p>
+                                <p className="mt-0.5 text-sm font-medium tabular-nums">
+                                  {w.avgHoldDuration != null ? `${w.avgHoldDuration.toFixed(1)} h` : '—'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {w.fundingChain && w.fundingChain.length > 0 && (
+                              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs">
+                                <span className="font-medium text-muted-foreground">Funding chain</span>
+                                <p className="mt-1.5 font-mono text-[11px] leading-relaxed break-all">
+                                  {w.fundingChain.map(truncateWallet).join(' → ')}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
-
-      {wallets.length > 0 && expandedId && (() => {
-        const w = wallets.find((x) => x.id === expandedId);
-        if (!w) return null;
-        const cm = crossMatches.get(w.walletAddress);
-        return (
-          <div className="rounded-lg border bg-muted/20 p-4 space-y-2 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs">{w.walletAddress}</span>
-              <a href={`https://solscan.io/account/${w.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
-                <IconExternalLink className="size-3.5" />
-              </a>
-              <WalletActions walletAddress={w.walletAddress} sourceRuggerId={ruggerId} />
-              {cm && <CrossRuggerBadge ruggerNames={cm.ruggerNames} ruggerIds={cm.ruggerIds} />}
-            </div>
-            <div className="grid gap-2 text-xs sm:grid-cols-3">
-              <div><span className="text-muted-foreground">Premier achat :</span> {w.firstBuyAt ? new Date(w.firstBuyAt).toLocaleDateString('fr-FR') : '—'}</div>
-              <div><span className="text-muted-foreground">Dernier achat :</span> {w.lastBuyAt ? new Date(w.lastBuyAt).toLocaleDateString('fr-FR') : '—'}</div>
-              <div><span className="text-muted-foreground">Durée hold moy. :</span> {w.avgHoldDuration != null ? `${w.avgHoldDuration.toFixed(1)}h` : '—'}</div>
-            </div>
-            {w.fundingChain && w.fundingChain.length > 0 && (
-              <div className="text-xs">
-                <span className="text-muted-foreground">Funding chain :</span>{' '}
-                <span className="font-mono">{w.fundingChain.map(truncateWallet).join(' → ')}</span>
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {total > PAGE_SIZE && (
         <div className="flex items-center justify-between">

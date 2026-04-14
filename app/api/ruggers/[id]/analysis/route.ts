@@ -79,13 +79,24 @@ export async function POST(
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
+  let clientDisconnected = false;
+
+  req.signal.addEventListener('abort', () => {
+    clientDisconnected = true;
+    writer.close().catch(() => {});
+  });
 
   const emit = (event: string, data: Record<string, unknown>) => {
-    writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {});
+    if (clientDisconnected) return;
+    writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {
+      clientDisconnected = true;
+    });
   };
 
   runAnalysisPipeline(analysisId, tokens, ruggerWallet, userId, pipelineOpts, emit)
-    .finally(() => writer.close().catch(() => {}));
+    .finally(() => {
+      if (!clientDisconnected) writer.close().catch(() => {});
+    });
 
   return new Response(readable, {
     headers: {

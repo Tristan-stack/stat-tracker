@@ -74,6 +74,7 @@ export async function runAnalysisPipeline(
     await finalizeAnalysis(analysisId, tokens.length, buyerCount);
 
     emit('complete', {
+      analysisId,
       buyerCount,
       motherCount,
       topConsistency: Math.round(topConsistency * 10) / 10,

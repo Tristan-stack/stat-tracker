@@ -11,7 +11,7 @@ import LeaderboardTable from '@/components/analysis/LeaderboardTable';
 import MotherAddressCard from '@/components/analysis/MotherAddressCard';
 import CombinationOptimizer from '@/components/analysis/CombinationOptimizer';
 import WalletDetail from '@/components/analysis/WalletDetail';
-import { IconHistory, IconChevronRight, IconPlus } from '@tabler/icons-react';
+import { IconHistory, IconChevronRight, IconPlus, IconTrash } from '@tabler/icons-react';
 
 type TabView = 'idle' | 'running' | 'results';
 type ResultSection = 'leaderboard' | 'mothers' | 'combinations';
@@ -45,6 +45,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
 
   const [resultSection, setResultSection] = useState<ResultSection>('leaderboard');
   const [walletDetailAddress, setWalletDetailAddress] = useState<string | null>(null);
+  const [deletingAnalysisId, setDeletingAnalysisId] = useState<string | null>(null);
 
   const fetchHistory = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -101,6 +102,38 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     setWalletDetailAddress(null);
     void fetchHistory();
   }, [fetchHistory]);
+
+  const handleDeleteAnalysis = useCallback(
+    async (analysisId: string) => {
+      if (
+        !window.confirm(
+          'Supprimer cette analyse ? Les résultats (wallets, achats, adresses mères) seront effacés définitivement.'
+        )
+      ) {
+        return;
+      }
+      setDeletingAnalysisId(analysisId);
+      try {
+        const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}`, {
+          method: 'DELETE',
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          window.alert(body.error ?? 'Impossible de supprimer l’analyse.');
+          return;
+        }
+        if (activeAnalysisId === analysisId) {
+          setView('idle');
+          setActiveAnalysisId(null);
+          setWalletDetailAddress(null);
+        }
+        await fetchHistory();
+      } finally {
+        setDeletingAnalysisId(null);
+      }
+    },
+    [ruggerId, activeAnalysisId, fetchHistory]
+  );
 
   const handleWalletClick = useCallback((walletAddress: string) => {
     setWalletDetailAddress(walletAddress);
@@ -162,9 +195,22 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
               </div>
             )}
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={handleBackToIdle} className="gap-1">
-            <IconPlus className="size-4" />Nouvelle analyse
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-destructive hover:text-destructive"
+              disabled={deletingAnalysisId === activeAnalysisId}
+              onClick={() => void handleDeleteAnalysis(activeAnalysisId)}
+            >
+              <IconTrash className="size-4" />
+              Supprimer
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleBackToIdle} className="gap-1">
+              <IconPlus className="size-4" />Nouvelle analyse
+            </Button>
+          </div>
         </div>
 
         <nav className="flex gap-1 border-b border-border">
@@ -223,32 +269,60 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
         ) : (
           <div className="space-y-2">
             {analyses.map((a) => (
-              <button
+              <div
                 key={a.id}
-                type="button"
-                onClick={() => a.status === 'completed' ? handleViewResults(a.id) : undefined}
-                disabled={a.status !== 'completed'}
                 className={cn(
-                  'flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors',
-                  a.status === 'completed' ? 'hover:bg-muted/50 cursor-pointer' : 'opacity-60 cursor-default'
+                  'flex w-full items-center gap-0 rounded-lg border transition-colors',
+                  a.status === 'completed' ? 'hover:bg-muted/50' : 'opacity-90'
                 )}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', STATUS_STYLES[a.status])}>
-                    {a.status}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{MODE_LABELS[a.mode]}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {a.buyerCount} wallets · {a.tokenCount} tokens · {new Date(a.createdAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
-                    </p>
+                <button
+                  type="button"
+                  onClick={() => (a.status === 'completed' ? handleViewResults(a.id) : undefined)}
+                  disabled={a.status !== 'completed'}
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center justify-between gap-3 p-3 text-left',
+                    a.status === 'completed' ? 'cursor-pointer' : 'cursor-default'
+                  )}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                        STATUS_STYLES[a.status]
+                      )}
+                    >
+                      {a.status}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{MODE_LABELS[a.mode]}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {a.buyerCount} wallets · {a.tokenCount} tokens ·{' '}
+                        {new Date(a.createdAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                    </div>
                   </div>
+                  {a.status === 'completed' && (
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  {a.status === 'failed' && a.errorMessage && (
+                    <span className="shrink-0 text-xs text-destructive max-w-[200px] truncate">{a.errorMessage}</span>
+                  )}
+                </button>
+                <div className="flex shrink-0 items-center justify-center self-stretch border-l border-border px-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    disabled={deletingAnalysisId === a.id}
+                    aria-label="Supprimer cette analyse"
+                    onClick={() => void handleDeleteAnalysis(a.id)}
+                  >
+                    <IconTrash className="size-4" />
+                  </Button>
                 </div>
-                {a.status === 'completed' && <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />}
-                {a.status === 'failed' && a.errorMessage && (
-                  <span className="shrink-0 text-xs text-destructive max-w-[200px] truncate">{a.errorMessage}</span>
-                )}
-              </button>
+              </div>
             ))}
           </div>
         )}
