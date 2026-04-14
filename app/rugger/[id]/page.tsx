@@ -313,7 +313,7 @@ export default function RuggerDetailPage() {
         <RuggerTokensTab ruggerId={id} rugger={rugger} onRuggerChange={handleRuggerChange} />
       )}
       {activeTab === 'network' && (
-        <RuggerNetworkTab ruggerId={id} />
+        <RuggerNetworkTab ruggerId={id} tokenCount={rugger.tokenCount ?? 0} />
       )}
     </div>
   );
