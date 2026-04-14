@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WalletSource } from '@/types/analysis';
 import { IconArrowLeft, IconExternalLink } from '@tabler/icons-react';
+import WalletActions from '@/components/analysis/WalletActions';
 
 interface WalletPurchase {
   id: string;
@@ -98,6 +99,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
           <a href={`https://solscan.io/account/${wallet.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
             <IconExternalLink className="size-4" />
           </a>
+          <WalletActions walletAddress={wallet.walletAddress} />
         </div>
 
         <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-3 lg:grid-cols-6">

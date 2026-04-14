@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { WalletSource } from '@/types/analysis';
+import type { WalletSource, CrossRuggerMatch } from '@/types/analysis';
 import { IconChevronDown, IconChevronUp, IconArrowsSort, IconExternalLink } from '@tabler/icons-react';
+import CrossRuggerBadge from '@/components/analysis/CrossRuggerBadge';
+import WalletActions from '@/components/analysis/WalletActions';
 
 interface LeaderboardWallet {
   id: string;
@@ -75,6 +77,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
   const [sortBy, setSortBy] = useState<SortField>('consistency');
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [crossMatches, setCrossMatches] = useState<Map<string, CrossRuggerMatch>>(new Map());
 
   const fetchLeaderboard = useCallback(async (sort: SortField, pageOffset: number) => {
     setIsLoading(true);
@@ -88,7 +91,19 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
     } finally { setIsLoading(false); }
   }, [ruggerId, analysisId]);
 
+  const fetchCrossRugger = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/cross-rugger`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { matches: CrossRuggerMatch[] };
+      const map = new Map<string, CrossRuggerMatch>();
+      for (const m of data.matches) map.set(m.walletAddress, m);
+      setCrossMatches(map);
+    } catch { /* ignore */ }
+  }, [ruggerId, analysisId]);
+
   useEffect(() => { void fetchLeaderboard(sortBy, offset); }, [fetchLeaderboard, sortBy, offset]);
+  useEffect(() => { void fetchCrossRugger(); }, [fetchCrossRugger]);
 
   const handleSort = (field: SortField) => {
     setSortBy(field);
@@ -134,12 +149,16 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
             {wallets.map((w, i) => {
               const rank = offset + i + 1;
               const isExpanded = expandedId === w.id;
+              const crossMatch = crossMatches.get(w.walletAddress);
               return (
-                <tr key={w.id} className="group border-b last:border-0 hover:bg-muted/30 cursor-pointer"
+                <tr key={w.id} className={cn('group border-b last:border-0 hover:bg-muted/30 cursor-pointer', crossMatch && 'bg-amber-50/50 dark:bg-amber-950/10')}
                   onClick={() => onWalletClick?.(w.walletAddress)}>
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{rank}</td>
                   <td className="px-3 py-2">
-                    <span className="font-mono text-xs">{truncateWallet(w.walletAddress)}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs">{truncateWallet(w.walletAddress)}</span>
+                      {crossMatch && <span className="size-1.5 rounded-full bg-amber-500 shrink-0" title="Multi-rugger" />}
+                    </div>
                   </td>
                   <td className="px-3 py-2">{sourceBadge(w.source)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{w.tokensBought}/{w.totalTokens}</td>
@@ -168,13 +187,16 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
       {wallets.length > 0 && expandedId && (() => {
         const w = wallets.find((x) => x.id === expandedId);
         if (!w) return null;
+        const cm = crossMatches.get(w.walletAddress);
         return (
           <div className="rounded-lg border bg-muted/20 p-4 space-y-2 text-sm">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs">{w.walletAddress}</span>
               <a href={`https://solscan.io/account/${w.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
                 <IconExternalLink className="size-3.5" />
               </a>
+              <WalletActions walletAddress={w.walletAddress} sourceRuggerId={ruggerId} />
+              {cm && <CrossRuggerBadge ruggerNames={cm.ruggerNames} ruggerIds={cm.ruggerIds} />}
             </div>
             <div className="grid gap-2 text-xs sm:grid-cols-3">
               <div><span className="text-muted-foreground">Premier achat :</span> {w.firstBuyAt ? new Date(w.firstBuyAt).toLocaleDateString('fr-FR') : '—'}</div>

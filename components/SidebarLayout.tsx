@@ -28,12 +28,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IconChartBar, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
+import { IconChartBar, IconEye, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
 import { useSession, signOut } from '@/lib/auth-client';
 
 const links = [
   { href: '/', label: 'Stat tracking', icon: IconChartBar },
   { href: '/rugger', label: 'Ruggers', icon: IconWallet },
+  { href: '/watchlist', label: 'Watchlist', icon: IconEye },
 ];
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
