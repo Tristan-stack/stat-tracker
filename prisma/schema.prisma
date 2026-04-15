@@ -88,7 +88,7 @@ model Rugger {
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String?
   description   String?       @map("description")
-  walletAddress String        @map("wallet_address")
+  walletAddress String?       @map("wallet_address")
   walletType    String        @map("wallet_type")
   volumeMin     Float?        @map("volume_min")
   volumeMax     Float?        @map("volume_max")
@@ -101,10 +101,28 @@ model Rugger {
   createdAt     DateTime      @default(now()) @map("created_at")
   tokens        RuggerToken[]
   analyses      WalletAnalysis[]
+  buyerWallets  RuggerBuyerWallet[]
 
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("ruggers")
+}
+
+model RuggerBuyerWallet {
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  ruggerId      String   @map("rugger_id")
+  rugger        Rugger   @relation(fields: [ruggerId], references: [id], onDelete: Cascade)
+  walletAddress String   @map("wallet_address")
+  label         String?
+  notes         String?
+  origin        String   @default("manual")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([ruggerId, walletAddress])
+  @@index([ruggerId])
+  @@index([walletAddress])
+  @@map("rugger_buyer_wallets")
 }
 
 model RuggerToken {

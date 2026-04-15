@@ -66,7 +66,7 @@ export default function RuggerPage() {
     queueMicrotask(() => {
       setEditName(editingRugger.name ?? '');
       setEditDescription(editingRugger.description ?? '');
-      setEditWalletAddress(editingRugger.walletAddress);
+      setEditWalletAddress(editingRugger.walletAddress ?? '');
       setEditWalletType(editingRugger.walletType);
       setEditVolumeMin(editingRugger.volumeMin != null ? String(editingRugger.volumeMin) : '');
       setEditVolumeMax(editingRugger.volumeMax != null ? String(editingRugger.volumeMax) : '');
@@ -79,7 +79,6 @@ export default function RuggerPage() {
   const handleCreateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      if (walletAddress.trim() === '') return;
       const toNum = (s: string) =>
         s.trim() === '' ? null : (Number(s) !== Number(s) ? null : Number(s));
       const toHour = (s: string): number | null => {
@@ -89,7 +88,7 @@ export default function RuggerPage() {
       const payload: {
         name: string | null;
         description: string | null;
-        walletAddress: string;
+        walletAddress: string | null;
         walletType: WalletType;
         volumeMin?: number | null;
         volumeMax?: number | null;
@@ -99,7 +98,7 @@ export default function RuggerPage() {
       } = {
         name: name.trim() || null,
         description: description.trim() || null,
-        walletAddress: walletAddress.trim(),
+        walletAddress: walletAddress.trim() || null,
         walletType,
         startHour: toHour(startHour) ?? null,
         endHour: toHour(endHour) ?? null,
@@ -131,20 +130,20 @@ export default function RuggerPage() {
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      if (!editingRugger || editWalletAddress.trim() === '') return;
+      if (!editingRugger) return;
       const toNum = (s: string) =>
         s.trim() === '' ? null : (Number(s) !== Number(s) ? null : Number(s));
       const payload: {
         name: string | null;
         description: string | null;
-        walletAddress: string;
+        walletAddress: string | null;
         walletType: WalletType;
         volumeMin?: number | null;
         volumeMax?: number | null;
       } = {
         name: editName.trim() || null,
         description: editDescription.trim() || null,
-        walletAddress: editWalletAddress.trim(),
+        walletAddress: editWalletAddress.trim() || null,
         walletType: editWalletType,
       };
       if (editWalletType === 'exchange' || editWalletType === 'mother') {
@@ -180,7 +179,7 @@ export default function RuggerPage() {
     async (rugger: Rugger, e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress}" ?`)) return;
+      if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress ?? rugger.id}" ?`)) return;
       const response = await fetch(`/api/ruggers/${rugger.id}`, { method: 'DELETE' });
       if (!response.ok) return;
       await loadRuggers();
@@ -257,14 +256,16 @@ export default function RuggerPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rugger-wallet">Adresse du wallet</Label>
+              <Label htmlFor="rugger-wallet">Adresse du wallet (optionnel)</Label>
               <Input
                 id="rugger-wallet"
                 value={walletAddress}
                 onChange={(e) => setWalletAddress(e.target.value)}
                 placeholder="0x..."
-                required
               />
+              <p className="text-xs text-muted-foreground">
+                Tu peux créer un rugger sans wallet principal, puis ajouter des wallets acheteurs dans l&apos;onglet dédié.
+              </p>
             </div>
             {(walletType === 'exchange' || walletType === 'mother') && (
               <div className="space-y-2 sm:col-span-2">
@@ -393,7 +394,7 @@ export default function RuggerPage() {
                     <CardHeader className="min-w-0 w-full overflow-hidden pb-2">
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <span className="min-w-0 truncate font-medium">
-                          {rugger.name ?? rugger.walletAddress.slice(0, 10)}
+                          {rugger.name ?? (rugger.walletAddress ? rugger.walletAddress.slice(0, 10) : `Rugger ${rugger.id.slice(0, 8)}`)}
                         </span>
                         <div className="flex shrink-0 gap-1.5">
                           <StatusBadge statusId={rugger.statusId} />
@@ -420,9 +421,13 @@ export default function RuggerPage() {
                             Volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
                           </p>
                         )}
-                      <p className="rugger-desc truncate break-all text-xs text-muted-foreground font-mono">
-                        {rugger.walletAddress}
-                      </p>
+                      {rugger.walletAddress ? (
+                        <p className="rugger-desc truncate break-all text-xs text-muted-foreground font-mono">
+                          {rugger.walletAddress}
+                        </p>
+                      ) : (
+                        <p className="rugger-desc truncate text-xs text-muted-foreground">Aucun wallet principal défini</p>
+                      )}
                     </CardHeader>
                     <CardContent className="flex gap-4 text-sm">
                       <span className="text-muted-foreground">
@@ -563,13 +568,12 @@ export default function RuggerPage() {
                   </>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="edit-rugger-wallet">Adresse du wallet</Label>
+                  <Label htmlFor="edit-rugger-wallet">Adresse du wallet (optionnel)</Label>
                   <Input
                     id="edit-rugger-wallet"
                     value={editWalletAddress}
                     onChange={(e) => setEditWalletAddress(e.target.value)}
                     placeholder="0x..."
-                    required
                   />
                 </div>
                 <div className="space-y-2">

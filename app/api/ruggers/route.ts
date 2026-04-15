@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     id: string;
     name: string | null;
     description: string | null;
-    wallet_address: string;
+    wallet_address: string | null;
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;
@@ -101,8 +101,9 @@ export async function POST(req: NextRequest) {
     notes?: string | null;
   };
 
-  const walletAddress = body.walletAddress?.trim() ?? '';
-  const walletType = body.walletType;
+  const rawWalletAddress = body.walletAddress?.trim();
+  const walletAddress = rawWalletAddress ? rawWalletAddress : null;
+  const walletType = body.walletType ?? 'simple';
   let name = body.name?.trim() ?? null;
   const description = body.description?.trim() ?? null;
   const toNum = (v: unknown): number | null =>
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
   const endHour = toHour(body.endHour);
   const notes = typeof body.notes === 'string' ? (body.notes.trim() || null) : null;
 
-  if (walletAddress === '' || !walletType || !['exchange', 'mother', 'simple'].includes(walletType)) {
+  if (!['exchange', 'mother', 'simple'].includes(walletType)) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
   }
 
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
     id: string;
     name: string | null;
     description: string | null;
-    wallet_address: string;
+    wallet_address: string | null;
     wallet_type: WalletType;
     volume_min: number | null;
     volume_max: number | null;

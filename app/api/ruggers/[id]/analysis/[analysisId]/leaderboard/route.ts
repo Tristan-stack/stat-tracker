@@ -25,7 +25,29 @@ const VALID_SORT_FIELDS: Record<string, string> = {
   weight: 'bw.weight',
   coverage: 'bw.coverage_percent',
   tokensBought: 'bw.tokens_bought',
+  activeDays: 'bw.active_days',
 };
+
+type SortDirection = 'asc' | 'desc';
+
+function parseSortQuery(url: URL): Array<{ column: string; direction: SortDirection }> {
+  const sortParam = url.searchParams.get('sort')?.trim() ?? '';
+  if (sortParam === '') return [];
+
+  return sortParam
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .map((entry) => {
+      const [fieldRaw, directionRaw] = entry.split(':');
+      const field = fieldRaw?.trim() ?? '';
+      const direction = directionRaw?.trim().toLowerCase() === 'asc' ? 'asc' : 'desc';
+      const column = VALID_SORT_FIELDS[field];
+      if (!column) return null;
+      return { column, direction };
+    })
+    .filter((value): value is { column: string; direction: SortDirection } => value !== null);
+}
 
 export async function GET(
   req: NextRequest,
@@ -48,11 +70,25 @@ export async function GET(
   }
 
   const url = new URL(req.url);
-  const sortBy = url.searchParams.get('sortBy') ?? 'consistency';
+  const sortBy = url.searchParams.get('sortBy') ?? 'coverage';
   const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 200);
   const offset = Number(url.searchParams.get('offset') ?? '0');
+  const search = url.searchParams.get('search')?.trim() ?? '';
+  const parsedSorts = parseSortQuery(url);
+  const fallbackSortColumn = VALID_SORT_FIELDS[sortBy] ?? 'bw.coverage_percent';
+  const orderBy =
+    parsedSorts.length > 0
+      ? parsedSorts.map((s) => `${s.column} ${s.direction.toUpperCase()}`).join(', ')
+      : `${fallbackSortColumn} DESC`;
+  const params: (string | number | boolean | null)[] = [analysisId];
+  const whereClauses: string[] = ['bw.analysis_id = $1'];
 
-  const orderColumn = VALID_SORT_FIELDS[sortBy] ?? 'bw.consistency';
+  if (search !== '') {
+    params.push(`%${search}%`);
+    whereClauses.push(`bw.wallet_address ILIKE $${params.length}`);
+  }
+
+  const whereClause = whereClauses.join(' AND ');
 
   const rows = await query<BuyerWalletRow>(
     `SELECT bw.id, bw.wallet_address, bw.source,
@@ -63,15 +99,17 @@ export async function GET(
             ma.address AS mother_address
      FROM analysis_buyer_wallets bw
      LEFT JOIN analysis_mother_addresses ma ON ma.id = bw.mother_address_id
-     WHERE bw.analysis_id = $1
-     ORDER BY ${orderColumn} DESC
-     LIMIT $2 OFFSET $3`,
-    [analysisId, limit, offset]
+     WHERE ${whereClause}
+     ORDER BY ${orderBy}
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset]
   );
 
   const countRows = await query<{ total: string }>(
-    'SELECT count(*) AS total FROM analysis_buyer_wallets WHERE analysis_id = $1',
-    [analysisId]
+    `SELECT count(*) AS total
+     FROM analysis_buyer_wallets bw
+     WHERE ${whereClause}`,
+    params
   );
   const total = Number(countRows[0]?.total ?? 0);
 

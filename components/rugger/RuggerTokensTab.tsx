@@ -602,6 +602,9 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
     return Math.max(1, Math.ceil(tokensPage.total / tokensPage.pageSize));
   }, [tokensPage]);
 
+  const hasAnyRuggerTokens =
+    (tokensPage?.total ?? 0) > 0 || allTokensForStats.length > 0 || (rugger.tokenCount ?? 0) > 0;
+
   const activeTokens: Token[] = mergeHidden(tokensPage?.tokens ?? []);
   const tokensWithMetrics = activeTokens.map(getTokenWithMetrics);
 
@@ -750,7 +753,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
                 );
               })}
             </div>
-            {allTokensForStats.length > 0 && (
+            {hasAnyRuggerTokens && (
               <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleResetTokens}>
                 <IconTrash className="size-4 mr-1" />Reset les tokens
               </Button>

@@ -2,9 +2,18 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { WalletSource, CrossRuggerMatch } from '@/types/analysis';
-import { IconChevronDown, IconChevronUp, IconArrowsSort, IconExternalLink, IconCopy, IconCheck } from '@tabler/icons-react';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconExternalLink,
+  IconCopy,
+  IconCheck,
+  IconSearch,
+  IconX,
+} from '@tabler/icons-react';
 import CrossRuggerBadge from '@/components/analysis/CrossRuggerBadge';
 import WalletActions from '@/components/analysis/WalletActions';
 
@@ -32,16 +41,50 @@ interface LeaderboardTableProps {
   onWalletClick?: (walletAddress: string) => void;
 }
 
-type SortField = 'consistency' | 'weight' | 'coverage' | 'tokensBought';
+type SortField = 'consistency' | 'weight' | 'coverage' | 'tokensBought' | 'activeDays';
+type SortDirection = 'asc' | 'desc';
 
-const SORT_OPTIONS: { key: SortField; label: string }[] = [
-  { key: 'consistency', label: 'Consistance' },
-  { key: 'weight', label: 'Poids' },
-  { key: 'coverage', label: 'Couverture' },
-  { key: 'tokensBought', label: 'Tokens' },
+interface SortCriterion {
+  field: SortField;
+  direction: SortDirection;
+}
+
+const SORT_OPTIONS: { key: SortField; label: string; description: string }[] = [
+  {
+    key: 'coverage',
+    label: 'Couverture %',
+    description:
+      'Part des tokens du rugger achetés par ce wallet : tokens achetés / total tokens du rugger.',
+  },
+  {
+    key: 'consistency',
+    label: 'Consistance',
+    description:
+      'Régularité des achats dans le temps, pondérée par la couverture. Un wallet peut couvrir beaucoup de tokens mais être moins consistant.',
+  },
+  {
+    key: 'weight',
+    label: 'Poids',
+    description:
+      'Importance relative du wallet dans le cluster (volume SOL si disponible, sinon nombre d’achats), normalisée de 0 à 100.',
+  },
+  {
+    key: 'tokensBought',
+    label: 'Tokens (nb)',
+    description:
+      'Nombre brut de tokens du rugger achetés. Contrairement à la couverture, ce score n’est pas un pourcentage.',
+  },
+  {
+    key: 'activeDays',
+    label: 'Durée (jours actifs)',
+    description:
+      'Nombre de jours d’activité du wallet sur cette analyse. Utilise ce tri pour voir les wallets actifs depuis le plus/moins longtemps.',
+  },
 ];
 
 const PAGE_SIZE = 30;
+const MAX_SORT_CRITERIA = 3;
+const DEFAULT_SORTS: SortCriterion[] = [{ field: 'coverage', direction: 'desc' }];
 
 function sourceBadge(source: WalletSource) {
   const styles: Record<WalletSource, string> = {
@@ -62,7 +105,7 @@ function truncateWallet(address: string) {
 }
 
 function formatPercent(value: number) {
-  return `${(value * 100).toFixed(1)}%`;
+  return `${value.toFixed(1)}%`;
 }
 
 function formatDuration(days: number) {
@@ -70,15 +113,20 @@ function formatDuration(days: number) {
   return `${Math.round(days)}j`;
 }
 
+function buildSortQuery(criteria: SortCriterion[]): string {
+  return criteria.map((c) => `${c.field}:${c.direction}`).join(',');
+}
+
 export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }: LeaderboardTableProps) {
   const [wallets, setWallets] = useState<LeaderboardWallet[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [sortBy, setSortBy] = useState<SortField>('consistency');
+  const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(DEFAULT_SORTS);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [crossMatches, setCrossMatches] = useState<Map<string, CrossRuggerMatch>>(new Map());
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const handleCopyAddress = useCallback(async (address: string) => {
     await navigator.clipboard.writeText(address);
@@ -86,10 +134,18 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
     setTimeout(() => setCopiedAddress((prev) => (prev === address ? null : prev)), 1500);
   }, []);
 
-  const fetchLeaderboard = useCallback(async (sort: SortField, pageOffset: number) => {
+  const fetchLeaderboard = useCallback(async (sorts: SortCriterion[], pageOffset: number, searchTerm: string) => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams({ sortBy: sort, limit: String(PAGE_SIZE), offset: String(pageOffset) });
+      const primarySort = sorts[0]?.field ?? 'coverage';
+      const params = new URLSearchParams({
+        sortBy: primarySort,
+        limit: String(PAGE_SIZE),
+        offset: String(pageOffset),
+      });
+      const sortQuery = buildSortQuery(sorts);
+      if (sortQuery !== '') params.set('sort', sortQuery);
+      if (searchTerm.trim() !== '') params.set('search', searchTerm.trim());
       const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/leaderboard?${params}`);
       if (!res.ok) return;
       const data = (await res.json()) as { wallets: LeaderboardWallet[]; total: number };
@@ -109,32 +165,78 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
     } catch { /* ignore */ }
   }, [ruggerId, analysisId]);
 
-  useEffect(() => { void fetchLeaderboard(sortBy, offset); }, [fetchLeaderboard, sortBy, offset]);
+  useEffect(() => {
+    void fetchLeaderboard(sortCriteria, offset, search);
+  }, [fetchLeaderboard, sortCriteria, offset, search]);
   useEffect(() => { void fetchCrossRugger(); }, [fetchCrossRugger]);
 
-  const handleSort = (field: SortField) => {
-    setSortBy(field);
+  const toggleSortFromColumn = (field: SortField) => {
+    setSortCriteria((prev) => {
+      const existing = prev.find((criterion) => criterion.field === field);
+      if (existing) {
+        // Cycle: desc -> asc -> off
+        if (existing.direction === 'desc') {
+          return prev.map((criterion) => criterion.field === field
+            ? { ...criterion, direction: 'asc' }
+            : criterion
+          );
+        }
+        return prev.filter((criterion) => criterion.field !== field);
+      }
+      return [...prev, { field, direction: 'desc' }].slice(0, MAX_SORT_CRITERIA);
+    });
     setOffset(0);
+  };
+
+  const getSortInfo = (field: SortField) => {
+    const index = sortCriteria.findIndex((criterion) => criterion.field === field);
+    if (index === -1) return null;
+    return { index, direction: sortCriteria[index].direction };
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+  const primarySort = sortCriteria[0];
+  const activeSortOption = primarySort
+    ? SORT_OPTIONS.find((option) => option.key === primarySort.field) ?? null
+    : null;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Leaderboard ({total} wallets)</h3>
-        <div className="flex items-center gap-1">
-          <IconArrowsSort className="size-3.5 text-muted-foreground" />
-          {SORT_OPTIONS.map(({ key, label }) => (
-            <button key={key} type="button" onClick={() => handleSort(key)}
-              className={cn('rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
-                sortBy === key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-muted-foreground">Tri via en-têtes de colonnes</p>
       </div>
+      <div className="relative">
+        <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setOffset(0);
+          }}
+          placeholder="Filtrer par adresse wallet…"
+          className="h-8 pr-8 pl-8 text-xs"
+        />
+        {search.trim() !== '' && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setOffset(0);
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Effacer la recherche"
+          >
+            <IconX className="size-3.5" />
+          </button>
+        )}
+      </div>
+      <p className="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        {activeSortOption
+          ? <>Tri principal : <span className="font-medium text-foreground">{activeSortOption.label}</span> — {activeSortOption.description}. Clic colonne : DESC → ASC → OFF.</>
+          : <>Aucun tri actif. Clique une colonne (Couverture, Consistance, Poids, Durée...) pour activer le tri.</>}
+      </p>
 
       <div className={cn('overflow-x-auto rounded-lg border', isLoading && 'opacity-60 pointer-events-none')}>
         <table className="w-full text-sm">
@@ -143,11 +245,56 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
               <th className="px-3 py-2 font-medium">#</th>
               <th className="px-3 py-2 font-medium">Wallet</th>
               <th className="px-3 py-2 font-medium">Source</th>
-              <th className="px-3 py-2 font-medium text-right">Tokens</th>
-              <th className="px-3 py-2 font-medium text-right">Couverture</th>
-              <th className="px-3 py-2 font-medium text-right">Consistance</th>
-              <th className="px-3 py-2 font-medium text-right">Poids</th>
-              <th className="px-3 py-2 font-medium text-right">Durée</th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('tokensBought')}>
+                  Tokens
+                  {(() => {
+                    const sortInfo = getSortInfo('tokensBought');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('coverage')}>
+                  Couverture
+                  {(() => {
+                    const sortInfo = getSortInfo('coverage');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('consistency')}>
+                  Consistance
+                  {(() => {
+                    const sortInfo = getSortInfo('consistency');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('weight')}>
+                  Poids
+                  {(() => {
+                    const sortInfo = getSortInfo('weight');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('activeDays')}>
+                  Durée
+                  {(() => {
+                    const sortInfo = getSortInfo('activeDays');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
               <th className="px-3 py-2 font-medium">Mère</th>
               <th className="w-8" />
             </tr>

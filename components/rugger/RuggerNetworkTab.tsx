@@ -8,6 +8,7 @@ import type { AnalysisMode, WalletAnalysis } from '@/types/analysis';
 import AnalysisLauncher from '@/components/analysis/AnalysisLauncher';
 import AnalysisProgress from '@/components/analysis/AnalysisProgress';
 import LeaderboardTable from '@/components/analysis/LeaderboardTable';
+import BestWalletLeaderboard from '@/components/analysis/BestWalletLeaderboard';
 import MotherAddressCard from '@/components/analysis/MotherAddressCard';
 import CombinationOptimizer from '@/components/analysis/CombinationOptimizer';
 import WalletDetail from '@/components/analysis/WalletDetail';
@@ -236,7 +237,14 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
         </nav>
 
         {resultSection === 'leaderboard' && (
-          <LeaderboardTable ruggerId={ruggerId} analysisId={activeAnalysisId} onWalletClick={handleWalletClick} />
+          <div className="space-y-3">
+            <BestWalletLeaderboard ruggerId={ruggerId} analysisId={activeAnalysisId} />
+            <LeaderboardTable
+              ruggerId={ruggerId}
+              analysisId={activeAnalysisId}
+              onWalletClick={handleWalletClick}
+            />
+          </div>
         )}
         {resultSection === 'mothers' && (
           <MotherAddressCard ruggerId={ruggerId} analysisId={activeAnalysisId} />

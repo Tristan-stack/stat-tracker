@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { WatchlistWallet } from '@/types/watchlist';
-import { IconExternalLink, IconPencil, IconTrash, IconPlus } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import type { Rugger } from '@/types/rugger';
+import { IconExternalLink, IconPencil, IconTrash, IconPlus, IconWallet } from '@tabler/icons-react';
 
 function truncateAddress(addr: string) {
   if (addr.length <= 14) return addr;
@@ -26,6 +26,9 @@ export default function WatchlistPage() {
   const [editLabel, setEditLabel] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [ruggers, setRuggers] = useState<Rugger[]>([]);
+  const [linkingWallet, setLinkingWallet] = useState<WatchlistWallet | null>(null);
+  const [selectedRuggerId, setSelectedRuggerId] = useState('');
 
   const fetchWallets = useCallback(async () => {
     setIsLoading(true);
@@ -37,7 +40,17 @@ export default function WatchlistPage() {
     } finally { setIsLoading(false); }
   }, []);
 
-  useEffect(() => { void fetchWallets(); }, [fetchWallets]);
+  const fetchRuggers = useCallback(async () => {
+    const res = await fetch('/api/ruggers?pageSize=100');
+    if (!res.ok) return;
+    const data = (await res.json()) as { ruggers: Rugger[] };
+    setRuggers(data.ruggers);
+  }, []);
+
+  useEffect(() => {
+    void fetchWallets();
+    void fetchRuggers();
+  }, [fetchWallets, fetchRuggers]);
 
   const handleAdd = useCallback(async () => {
     setError(null);
@@ -80,6 +93,27 @@ export default function WatchlistPage() {
     setEditLabel(w.label ?? '');
     setEditNotes(w.notes ?? '');
   }, []);
+
+  const handleAttachToRugger = useCallback(async () => {
+    if (!linkingWallet || selectedRuggerId.trim() === '') return;
+    const res = await fetch(`/api/ruggers/${selectedRuggerId}/buyers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        walletAddress: linkingWallet.walletAddress,
+        label: linkingWallet.label ?? null,
+        notes: linkingWallet.notes ?? null,
+        origin: 'watchlist',
+      }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? 'Erreur');
+      return;
+    }
+    setLinkingWallet(null);
+    setSelectedRuggerId('');
+  }, [linkingWallet, selectedRuggerId]);
 
   return (
     <div className="space-y-6 p-6 sm:p-8">
@@ -181,6 +215,19 @@ export default function WatchlistPage() {
                           <button type="button" onClick={() => startEdit(w)} className="rounded p-1 hover:bg-muted" aria-label="Modifier">
                             <IconPencil className="size-3.5 text-muted-foreground" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLinkingWallet(w);
+                              setSelectedRuggerId(w.sourceRuggerId ?? '');
+                              setError(null);
+                            }}
+                            className="rounded p-1 hover:bg-muted"
+                            aria-label="Ajouter à un rugger"
+                            title="Ajouter à un rugger"
+                          >
+                            <IconWallet className="size-3.5 text-primary" />
+                          </button>
                           <button type="button" onClick={() => void handleDelete(w.id)} className="rounded p-1 hover:bg-muted" aria-label="Supprimer">
                             <IconTrash className="size-3.5 text-destructive" />
                           </button>
@@ -192,6 +239,44 @@ export default function WatchlistPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {linkingWallet && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <h2 className="text-lg font-semibold">Ajouter à un rugger</h2>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground break-all">
+                Wallet: <span className="font-mono">{linkingWallet.walletAddress}</span>
+              </p>
+              <div className="space-y-1">
+                <Label className="text-xs">Rugger cible</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={selectedRuggerId}
+                  onChange={(e) => setSelectedRuggerId(e.target.value)}
+                >
+                  <option value="">Choisir un rugger…</option>
+                  {ruggers.map((rugger) => (
+                    <option key={rugger.id} value={rugger.id}>
+                      {rugger.name ?? rugger.walletAddress ?? `Rugger ${rugger.id.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={selectedRuggerId.trim() === ''} onClick={() => void handleAttachToRugger()}>
+                  Ajouter
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setLinkingWallet(null); setSelectedRuggerId(''); }}>
+                  Annuler
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

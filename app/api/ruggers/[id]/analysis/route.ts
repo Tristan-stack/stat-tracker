@@ -39,13 +39,13 @@ export async function POST(
     return NextResponse.json({ error: 'fundingDepth must be between 1 and 5' }, { status: 400 });
   }
 
-  const rugger = await query<{ wallet_address: string }>(
+  const rugger = await query<{ wallet_address: string | null }>(
     'SELECT wallet_address FROM ruggers WHERE id = $1',
     [ruggerId]
   );
   const ruggerWallet = rugger[0]?.wallet_address;
   if (!ruggerWallet) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Rugger has no primary wallet configured' }, { status: 400 });
   }
 
   let tokens: { address: string; name: string | null }[];

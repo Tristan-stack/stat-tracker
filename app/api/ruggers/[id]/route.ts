@@ -9,7 +9,7 @@ interface RuggerRow {
   id: string;
   name: string | null;
   description: string | null;
-  wallet_address: string;
+  wallet_address: string | null;
   wallet_type: WalletType;
   volume_min: number | null;
   volume_max: number | null;
@@ -78,7 +78,7 @@ export async function PATCH(
   const body = (await req.json()) as {
     name?: string | null;
     description?: string | null;
-    walletAddress?: string;
+    walletAddress?: string | null;
     walletType?: WalletType;
     volumeMin?: number | null;
     volumeMax?: number | null;
@@ -122,12 +122,13 @@ export async function PATCH(
     values.push(body.description?.trim() || null);
   }
   if (body.walletAddress !== undefined) {
-    const trimmed = body.walletAddress.trim();
-    if (trimmed === '') {
-      return NextResponse.json({ error: 'walletAddress cannot be empty' }, { status: 400 });
-    }
     updates.push(`wallet_address = $${paramIndex++}`);
-    values.push(trimmed);
+    if (body.walletAddress === null) {
+      values.push(null);
+    } else {
+      const trimmed = body.walletAddress.trim();
+      values.push(trimmed === '' ? null : trimmed);
+    }
   }
   if (body.walletType !== undefined) {
     updates.push(`wallet_type = $${paramIndex++}`);

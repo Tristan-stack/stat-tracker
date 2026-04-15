@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { Rugger } from '@/types/rugger';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IconDotsVertical, IconWallet, IconEye } from '@tabler/icons-react';
+import { IconDotsVertical, IconWallet, IconEye, IconLink } from '@tabler/icons-react';
 
 interface WalletActionsProps {
   walletAddress: string;
@@ -25,6 +26,9 @@ export default function WalletActions({ walletAddress, sourceRuggerId }: WalletA
   const [watchlistNotes, setWatchlistNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [showRuggerPicker, setShowRuggerPicker] = useState(false);
+  const [ruggers, setRuggers] = useState<Rugger[]>([]);
+  const [selectedRuggerId, setSelectedRuggerId] = useState(sourceRuggerId ?? '');
 
   const handleAddAsRugger = useCallback(async () => {
     setFeedback(null);
@@ -71,6 +75,41 @@ export default function WalletActions({ walletAddress, sourceRuggerId }: WalletA
     finally { setIsSubmitting(false); }
   }, [walletAddress, watchlistLabel, watchlistNotes, sourceRuggerId]);
 
+  const openRuggerPicker = useCallback(async () => {
+    setFeedback(null);
+    const res = await fetch('/api/ruggers?pageSize=100');
+    if (!res.ok) {
+      setFeedback('Impossible de charger les ruggers.');
+      return;
+    }
+    const data = (await res.json()) as { ruggers: Rugger[] };
+    setRuggers(data.ruggers);
+    setSelectedRuggerId(sourceRuggerId ?? data.ruggers[0]?.id ?? '');
+    setShowRuggerPicker(true);
+  }, [sourceRuggerId]);
+
+  const handleAddToExistingRugger = useCallback(async () => {
+    if (selectedRuggerId.trim() === '') return;
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/ruggers/${selectedRuggerId}/buyers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, origin: 'analysis' }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setFeedback(data.error ?? 'Erreur');
+        return;
+      }
+      setFeedback('Ajouté au rugger');
+      setShowRuggerPicker(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [selectedRuggerId, walletAddress]);
+
   return (
     <div className="inline-flex items-center gap-1">
       <DropdownMenu>
@@ -82,6 +121,9 @@ export default function WalletActions({ walletAddress, sourceRuggerId }: WalletA
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
           <DropdownMenuItem onClick={() => void handleAddAsRugger()} className="gap-2">
             <IconWallet className="size-4" />Ajouter comme rugger
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void openRuggerPicker()} className="gap-2">
+            <IconLink className="size-4" />Ajouter à un rugger
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowWatchlistForm(true)} className="gap-2">
             <IconEye className="size-4" />Ajouter à la watchlist
@@ -109,6 +151,35 @@ export default function WalletActions({ walletAddress, sourceRuggerId }: WalletA
               {isSubmitting ? '…' : 'Ajouter'}
             </Button>
             <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setShowWatchlistForm(false); setFeedback(null); }}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {showRuggerPicker && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-lg border bg-background p-3 shadow-lg space-y-2" onClick={(e) => e.stopPropagation()}>
+          <div className="space-y-1">
+            <Label className="text-xs">Rugger cible</Label>
+            <select
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+              value={selectedRuggerId}
+              onChange={(e) => setSelectedRuggerId(e.target.value)}
+            >
+              <option value="">Choisir un rugger…</option>
+              {ruggers.map((rugger) => (
+                <option key={rugger.id} value={rugger.id}>
+                  {rugger.name ?? rugger.walletAddress ?? `Rugger ${rugger.id.slice(0, 8)}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          {feedback && <p className="text-[10px] text-destructive">{feedback}</p>}
+          <div className="flex gap-1.5">
+            <Button type="button" size="sm" className="h-7 text-xs" disabled={isSubmitting || selectedRuggerId.trim() === ''} onClick={() => void handleAddToExistingRugger()}>
+              {isSubmitting ? '…' : 'Ajouter'}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setShowRuggerPicker(false); setFeedback(null); }}>
               Annuler
             </Button>
           </div>

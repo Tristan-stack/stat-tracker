@@ -13,8 +13,9 @@ import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft
 import { cn } from '@/lib/utils';
 import RuggerTokensTab from '@/components/rugger/RuggerTokensTab';
 import RuggerNetworkTab from '@/components/rugger/RuggerNetworkTab';
+import RuggerBuyersTab from '@/components/rugger/RuggerBuyersTab';
 
-type RuggerTab = 'tokens' | 'network';
+type RuggerTab = 'tokens' | 'buyers' | 'network';
 
 const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
@@ -67,7 +68,7 @@ export default function RuggerDetailPage() {
     if (rugger && isEditing) {
       setEditName(rugger.name ?? '');
       setEditDescription(rugger.description ?? '');
-      setEditWalletAddress(rugger.walletAddress);
+      setEditWalletAddress(rugger.walletAddress ?? '');
       setEditWalletType(rugger.walletType);
       setEditNotes(rugger.notes ?? '');
     }
@@ -76,14 +77,14 @@ export default function RuggerDetailPage() {
   const handleUpdateRugger = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      if (!id || editWalletAddress.trim() === '') return;
+      if (!id) return;
       const response = await fetch(`/api/ruggers/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editName.trim() || null,
           description: editDescription.trim() || null,
-          walletAddress: editWalletAddress.trim(),
+          walletAddress: editWalletAddress.trim() || null,
           walletType: editWalletType,
           notes: editNotes.trim() || null,
         }),
@@ -125,7 +126,7 @@ export default function RuggerDetailPage() {
 
   const handleDeleteRugger = useCallback(async () => {
     if (!id || !rugger) return;
-    if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress}" ? Les tokens associés seront aussi supprimés.`)) return;
+    if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress ?? rugger.id}" ? Les tokens associés seront aussi supprimés.`)) return;
     const response = await fetch(`/api/ruggers/${id}`, { method: 'DELETE' });
     if (!response.ok) return;
     router.push('/rugger');
@@ -174,7 +175,7 @@ export default function RuggerDetailPage() {
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
-                {rugger.name ?? `${rugger.walletAddress.slice(0, 10)}…`}
+                {rugger.name ?? (rugger.walletAddress ? `${rugger.walletAddress.slice(0, 10)}…` : `Rugger ${rugger.id.slice(0, 8)}`)}
               </h1>
               <div className="flex items-center gap-1.5">
                 <StatusBadge statusId={rugger.statusId} />
@@ -228,7 +229,11 @@ export default function RuggerDetailPage() {
               {rugger.notes?.trim() ? (
                 <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">{rugger.notes}</p>
               ) : null}
-              <p className="mt-2 break-all font-mono text-sm text-muted-foreground">{rugger.walletAddress}</p>
+              {rugger.walletAddress ? (
+                <p className="mt-2 break-all font-mono text-sm text-muted-foreground">{rugger.walletAddress}</p>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">Aucun wallet principal défini</p>
+              )}
             </div>
             <Button type="button" variant="ghost" size="sm" className="mt-1 sm:hidden" onClick={() => setIsHeaderExpanded((v) => !v)}>
               {isHeaderExpanded ? 'Voir moins' : 'Voir plus'}
@@ -263,8 +268,8 @@ export default function RuggerDetailPage() {
                   <Input id="edit-detail-description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="ex. Wallet principal CEX" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-detail-wallet">Adresse du wallet</Label>
-                  <Input id="edit-detail-wallet" value={editWalletAddress} onChange={(e) => setEditWalletAddress(e.target.value)} placeholder="0x..." required />
+                  <Label htmlFor="edit-detail-wallet">Adresse du wallet (optionnel)</Label>
+                  <Input id="edit-detail-wallet" value={editWalletAddress} onChange={(e) => setEditWalletAddress(e.target.value)} placeholder="0x..." />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-detail-type">Type de wallet</Label>
@@ -291,6 +296,7 @@ export default function RuggerDetailPage() {
       <nav className="flex gap-1 border-b border-border">
         {([
           { key: 'tokens' as const, label: 'Tokens' },
+          { key: 'buyers' as const, label: 'Wallets acheteurs' },
           { key: 'network' as const, label: 'Network Analysis' },
         ]).map(({ key, label }) => (
           <button
@@ -311,6 +317,9 @@ export default function RuggerDetailPage() {
 
       {activeTab === 'tokens' && (
         <RuggerTokensTab ruggerId={id} rugger={rugger} onRuggerChange={handleRuggerChange} />
+      )}
+      {activeTab === 'buyers' && (
+        <RuggerBuyersTab ruggerId={id} onRuggerChange={handleRuggerChange} />
       )}
       {activeTab === 'network' && (
         <RuggerNetworkTab ruggerId={id} tokenCount={rugger.tokenCount ?? 0} />

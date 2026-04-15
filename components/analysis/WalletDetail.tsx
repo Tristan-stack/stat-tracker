@@ -74,7 +74,7 @@ function truncateAddress(addr: string) {
 }
 
 function formatPercent(v: number) {
-  return `${(v * 100).toFixed(1)}%`;
+  return `${v.toFixed(1)}%`;
 }
 
 function formatGainLoss(pct: number) {

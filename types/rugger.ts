@@ -51,7 +51,7 @@ export interface Rugger {
   id: string;
   name: string | null;
   description: string | null;
-  walletAddress: string;
+  walletAddress: string | null;
   walletType: WalletType;
   volumeMin: number | null;
   volumeMax: number | null;

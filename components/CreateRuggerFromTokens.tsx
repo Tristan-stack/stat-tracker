@@ -44,7 +44,6 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (walletAddress.trim() === '') return;
       setIsSubmitting(true);
       setError('');
 
@@ -54,14 +53,14 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
         const payload: {
           name: string | null;
           description: string | null;
-          walletAddress: string;
+          walletAddress: string | null;
           walletType: WalletType;
           volumeMin?: number | null;
           volumeMax?: number | null;
         } = {
           name: name.trim() || null,
           description: description.trim() || null,
-          walletAddress: walletAddress.trim(),
+          walletAddress: walletAddress.trim() || null,
           walletType,
         };
         if (walletType === 'exchange' || walletType === 'mother') {
@@ -249,13 +248,12 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="create-rugger-wallet">Adresse du wallet</Label>
+                  <Label htmlFor="create-rugger-wallet">Adresse du wallet (optionnel)</Label>
                   <Input
                     id="create-rugger-wallet"
                     value={walletAddress}
                     onChange={(e) => setWalletAddress(e.target.value)}
                     placeholder="0x..."
-                    required
                     disabled={isSubmitting}
                   />
                 </div>
