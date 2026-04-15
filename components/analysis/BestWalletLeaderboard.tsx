@@ -16,6 +16,7 @@ interface BestWalletItem {
   tpHitCount: number;
   tpHitRate: number;
   entryQualityScore: number;
+  entryQualityNormalized: number;
   compositeScore: number;
 }
 
@@ -265,7 +266,7 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
       {data && (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            Classement: couverture d’abord, puis hit TP, puis qualité d’entrée.
+            Classement: score final sur 100 (65% couverture, 25% hit TP, 10% qualité d’entrée).
           </p>
           <p className="text-xs text-muted-foreground">
             {data.meta.selectedTokenCount} token(s) top couverture analysés avec TP min {formatPercent(data.meta.tpMinPercent)}.
@@ -338,7 +339,7 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
                         {wallet.tpHitCount}/{wallet.matchedTokenCount} ({formatPercent(wallet.tpHitRate)})
                       </td>
                       <td className="px-3 py-2 text-right">{formatPercent(wallet.entryQualityScore)}</td>
-                      <td className="px-3 py-2 text-right">{wallet.compositeScore.toFixed(0)}</td>
+                      <td className="px-3 py-2 text-right">{wallet.compositeScore.toFixed(1)}/100</td>
                     </tr>
                   ))}
                 </tbody>

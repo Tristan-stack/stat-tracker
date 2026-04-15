@@ -17,6 +17,7 @@ export interface BestWalletResult {
   tpHitCount: number;
   tpHitRate: number;
   entryQualityScore: number;
+  entryQualityNormalized: number;
   compositeScore: number;
 }
 
@@ -55,12 +56,12 @@ export function rankBestWallets(
         : (wallet.analysisCoveragePercent ?? 0);
     const tpHitRate = matchedTokenCount > 0 ? (tpHitCount / matchedTokenCount) * 100 : 0;
     const entryQualityScore = matchedTokenCount > 0 ? gainSum / matchedTokenCount : 0;
-    // coverage first, then tp hit rate/count, then entry quality as tiebreaker
-    const compositeScore =
-      coveragePercent * 1_000_000 +
-      tpHitRate * 10_000 +
-      tpHitCount * 100 +
-      entryQualityScore;
+    // Normalize entry quality into [0,100] then blend into a final score out of 100.
+    // 300% max-gain avg is treated as "full" entry quality score.
+    const entryQualityNormalized = Math.max(0, Math.min((entryQualityScore / 300) * 100, 100));
+    const blendedScore =
+      coveragePercent * 0.65 + tpHitRate * 0.25 + entryQualityNormalized * 0.1;
+    const compositeScore = Math.max(0, Math.min(blendedScore, 100));
 
     return {
       walletAddress: wallet.walletAddress,
@@ -69,12 +70,14 @@ export function rankBestWallets(
       tpHitCount,
       tpHitRate,
       entryQualityScore,
+      entryQualityNormalized,
       compositeScore,
     };
   });
 
   return results.sort(
     (a, b) =>
+      b.compositeScore - a.compositeScore ||
       b.coveragePercent - a.coveragePercent ||
       b.tpHitRate - a.tpHitRate ||
       b.tpHitCount - a.tpHitCount ||

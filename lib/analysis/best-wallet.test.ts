@@ -30,8 +30,26 @@ describe('best-wallet ranking', () => {
 
     expect(ranked[0]?.walletAddress).toBe('A');
     expect(ranked[0]?.tpHitCount).toBe(1);
+    expect(ranked[0]?.compositeScore).toBeLessThanOrEqual(100);
     expect(ranked[1]?.walletAddress).toBe('B');
     expect(ranked[1]?.tpHitCount).toBe(1);
+    expect(ranked[1]?.compositeScore).toBeLessThanOrEqual(100);
+  });
+
+  it('normalizes final score to 0..100', () => {
+    const ranked = rankBestWallets(
+      [
+        {
+          walletAddress: 'A',
+          previews: [{ tokenAddress: 'T1', entryPrice: 1, high: 20 }],
+        },
+      ],
+      ['T1'],
+      80
+    );
+    expect(ranked[0]?.compositeScore).toBeGreaterThanOrEqual(0);
+    expect(ranked[0]?.compositeScore).toBeLessThanOrEqual(100);
+    expect(ranked[0]?.entryQualityNormalized).toBeLessThanOrEqual(100);
   });
 
   it('returns empty result when no top tokens', () => {
