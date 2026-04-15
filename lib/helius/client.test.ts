@@ -4,7 +4,14 @@ const FAKE_KEY = 'test-api-key-123';
 
 describe('helius client', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.stubEnv('HELIUS_API_KEY', FAKE_KEY);
+    vi.stubEnv('HELIUS_MAX_RETRIES', '0');
+    vi.stubEnv('HELIUS_RPS', '1000');
+    vi.stubEnv('HELIUS_RETRY_BASE_MS', '1');
+    vi.stubEnv('HELIUS_RATE_LIMIT_MIN_WAIT_MS', '1');
+    vi.stubEnv('HELIUS_RATE_LIMIT_MAX_WAIT_MS', '2');
+    vi.stubEnv('HELIUS_PARSE_BATCH_SIZE', '50');
   });
 
   afterEach(() => {
@@ -60,11 +67,35 @@ describe('helius client', () => {
 
     it('throws on HTTP error', async () => {
       const { heliusRest } = await import('./client');
-      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response('Rate limited', { status: 429 })
       );
 
       await expect(heliusRest('/v0/transactions', {})).rejects.toThrow('HTTP 429');
+    });
+
+    it('retries transient 502 and succeeds', async () => {
+      vi.stubEnv('HELIUS_MAX_RETRIES', '1');
+      const { heliusRest } = await import('./client');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('<html>Bad gateway</html>', { status: 502 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([{ type: 'SWAP', signature: 'ok' }]), { status: 200 }));
+
+      const result = await heliusRest('/v0/transactions', { transactions: ['tx1'] });
+      expect(Array.isArray(result)).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries network error and succeeds', async () => {
+      vi.stubEnv('HELIUS_MAX_RETRIES', '1');
+      const { heliusRest } = await import('./client');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new Error('ECONNRESET'))
+        .mockResolvedValueOnce(new Response(JSON.stringify([{ type: 'SWAP', signature: 'ok' }]), { status: 200 }));
+
+      const result = await heliusRest('/v0/transactions', { transactions: ['tx2'] });
+      expect(Array.isArray(result)).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -101,21 +132,24 @@ describe('helius client', () => {
       expect(result).toEqual([]);
     });
 
-    it('batches signatures into groups of 100', async () => {
+    it('batches signatures using configured/default batch size', async () => {
       const { parseTransactions } = await import('./client');
       const sigs = Array.from({ length: 150 }, (_, i) => `sig${i}`);
       const fetchSpy = vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(new Response(JSON.stringify([{ type: 'SWAP' }]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([{ type: 'TRANSFER' }]), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify([{ type: 'TRANSFER' }]), { status: 200 }));
 
       const result = await parseTransactions(sigs);
-      expect(result).toHaveLength(2);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(3);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
 
       const firstBody = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
-      expect(firstBody.transactions).toHaveLength(100);
+      expect(firstBody.transactions).toHaveLength(50);
       const secondBody = JSON.parse(fetchSpy.mock.calls[1][1]?.body as string);
       expect(secondBody.transactions).toHaveLength(50);
+      const thirdBody = JSON.parse(fetchSpy.mock.calls[2][1]?.body as string);
+      expect(thirdBody.transactions).toHaveLength(50);
     });
   });
 });

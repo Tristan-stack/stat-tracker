@@ -27,12 +27,20 @@ interface LeaderboardWallet {
   firstBuyAt: string | null;
   lastBuyAt: string | null;
   activeDays: number;
+  spanDaysInScope: number;
   consistency: number;
   weight: number;
   avgHoldDuration: number | null;
   fundingDepth: number | null;
   fundingChain: string[] | null;
   motherAddress: string | null;
+  motherChildCount: number;
+  hasHighFanoutMother: boolean;
+  matchingConfidence: number;
+  inclusionDecision: 'included' | 'excluded' | 'included_with_risk';
+  riskFlag: string | null;
+  riskLevel: 'low' | 'medium' | 'high' | null;
+  decisionReasons: string[];
 }
 
 interface LeaderboardTableProps {
@@ -41,7 +49,7 @@ interface LeaderboardTableProps {
   onWalletClick?: (walletAddress: string) => void;
 }
 
-type SortField = 'consistency' | 'weight' | 'coverage' | 'tokensBought' | 'activeDays';
+type SortField = 'consistency' | 'weight' | 'coverage' | 'tokensBought' | 'activeDays' | 'spanDays' | 'confidence';
 type SortDirection = 'asc' | 'desc';
 
 interface SortCriterion {
@@ -76,9 +84,21 @@ const SORT_OPTIONS: { key: SortField; label: string; description: string }[] = [
   },
   {
     key: 'activeDays',
-    label: 'Durée (jours actifs)',
+    label: 'Jours actifs',
     description:
-      'Nombre de jours d’activité du wallet sur cette analyse. Utilise ce tri pour voir les wallets actifs depuis le plus/moins longtemps.',
+      'Nombre de jours d’activité du wallet sur cette analyse (fréquence, pas durée réelle).',
+  },
+  {
+    key: 'spanDays',
+    label: 'Durée (span)',
+    description:
+      'Durée réelle entre premier et dernier achat observé dans le scope de l’analyse.',
+  },
+  {
+    key: 'confidence',
+    label: 'Confiance',
+    description:
+      'Score de matching sur 100 (couverture, cohérence temporelle, proximité funding, poids).',
   },
 ];
 
@@ -111,6 +131,13 @@ function formatPercent(value: number) {
 function formatDuration(days: number) {
   if (days < 1) return '<1j';
   return `${Math.round(days)}j`;
+}
+
+function getRiskBadgeClass(level: 'low' | 'medium' | 'high' | null): string {
+  if (level === 'high') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
+  if (level === 'medium') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+  if (level === 'low') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+  return 'bg-muted text-muted-foreground';
 }
 
 function buildSortQuery(criteria: SortCriterion[]): string {
@@ -286,8 +313,18 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                 </button>
               </th>
               <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('confidence')}>
+                  Confiance
+                  {(() => {
+                    const sortInfo = getSortInfo('confidence');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium text-right">
                 <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('activeDays')}>
-                  Durée
+                  Jours actifs
                   {(() => {
                     const sortInfo = getSortInfo('activeDays');
                     if (!sortInfo) return null;
@@ -295,6 +332,18 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                   })()}
                 </button>
               </th>
+              <th className="px-3 py-2 font-medium text-right">
+                <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => toggleSortFromColumn('spanDays')}>
+                  Durée span
+                  {(() => {
+                    const sortInfo = getSortInfo('spanDays');
+                    if (!sortInfo) return null;
+                    return <span className="text-[10px]">{sortInfo.direction === 'desc' ? '↓' : '↑'}{sortInfo.index + 1}</span>;
+                  })()}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-medium">Risque</th>
+              <th className="px-3 py-2 font-medium">Raison</th>
               <th className="px-3 py-2 font-medium">Mère</th>
               <th className="w-8" />
             </tr>
@@ -330,7 +379,21 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                     <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.coveragePercent)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.consistency)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.weight)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatPercent(w.matchingConfidence)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatDuration(w.activeDays)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatDuration(w.spanDaysInScope)}</td>
+                    <td className="px-3 py-2">
+                      {w.riskLevel
+                        ? (
+                          <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', getRiskBadgeClass(w.riskLevel))}>
+                            {w.riskLevel}
+                          </span>
+                        )
+                        : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {w.decisionReasons[0] ?? '—'}
+                    </td>
                     <td className="px-3 py-2">
                       {w.motherAddress && (
                         <span className="font-mono text-[10px] text-muted-foreground">{truncateWallet(w.motherAddress)}</span>
@@ -345,7 +408,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                   </tr>
                   {isExpanded && (
                     <tr className={cn('border-b bg-muted/20', crossMatch && 'bg-amber-50/30 dark:bg-amber-950/10')}>
-                      <td colSpan={10} className="p-0">
+                      <td colSpan={14} className="p-0">
                         <div
                           className="border-t border-border/60 px-3 py-3 sm:px-4"
                           onClick={(e) => e.stopPropagation()}

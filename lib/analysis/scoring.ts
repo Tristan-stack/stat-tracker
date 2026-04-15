@@ -17,7 +17,8 @@ export interface ScoringResult {
   coveragePercent: number;
   consistency: number;
   weight: number;
-  activeDays: number;
+  activeDaysInScope: number;
+  spanDaysInScope: number;
   firstBuyAt: string | null;
   lastBuyAt: string | null;
   avgHoldDurationHours: number | null;
@@ -73,26 +74,29 @@ export function computeWeights(inputs: ScoringInput[]): Map<string, number> {
 
   if (!hasSolData) {
     const counts = new Map<string, number>();
-    let maxCount = 0;
+    let maxLogCount = 0;
     for (const input of inputs) {
-      counts.set(input.walletAddress, input.purchases.length);
-      maxCount = Math.max(maxCount, input.purchases.length);
+      const count = input.purchases.length;
+      counts.set(input.walletAddress, count);
+      maxLogCount = Math.max(maxLogCount, Math.log1p(count));
     }
     const result = new Map<string, number>();
     for (const [addr, count] of counts) {
-      result.set(addr, maxCount > 0 ? (count / maxCount) * 100 : 0);
+      const normalized = maxLogCount > 0 ? (Math.log1p(count) / maxLogCount) * 100 : 0;
+      result.set(addr, normalized);
     }
     return result;
   }
 
-  let maxTotal = 0;
+  let maxLogTotal = 0;
   for (const total of totals.values()) {
-    maxTotal = Math.max(maxTotal, total);
+    maxLogTotal = Math.max(maxLogTotal, Math.log1p(total));
   }
 
   const result = new Map<string, number>();
   for (const [addr, total] of totals) {
-    result.set(addr, maxTotal > 0 ? (total / maxTotal) * 100 : 0);
+    const normalized = maxLogTotal > 0 ? (Math.log1p(total) / maxLogTotal) * 100 : 0;
+    result.set(addr, normalized);
   }
   return result;
 }
@@ -143,7 +147,8 @@ export function scoreWallets(inputs: ScoringInput[]): ScoringResult[] {
       coveragePercent: computeCoverage(uniqueTokens, input.totalRuggerTokens),
       consistency: computeConsistency(input.purchases, input.totalRuggerTokens),
       weight: weights.get(input.walletAddress) ?? 0,
-      activeDays: computeActiveDays(input.purchases),
+      activeDaysInScope: computeActiveDays(input.purchases),
+      spanDaysInScope: computeDurationDays(input.purchases),
       firstBuyAt: first,
       lastBuyAt: last,
       avgHoldDurationHours: null,

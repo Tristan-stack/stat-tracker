@@ -12,12 +12,20 @@ interface BuyerWalletRow {
   first_buy_at: string | null;
   last_buy_at: string | null;
   active_days: number;
+  span_days_in_scope: number;
   consistency: number;
   weight: number;
   avg_hold_duration_hours: number | null;
   funding_depth: number | null;
   funding_chain: string | null;
   mother_address: string | null;
+  mother_child_count: number;
+  has_high_fanout_mother: boolean;
+  matching_confidence: number;
+  inclusion_decision: 'included' | 'excluded' | 'included_with_risk';
+  risk_flag: string | null;
+  risk_level: 'low' | 'medium' | 'high' | null;
+  decision_reasons: unknown;
 }
 
 const VALID_SORT_FIELDS: Record<string, string> = {
@@ -26,6 +34,8 @@ const VALID_SORT_FIELDS: Record<string, string> = {
   coverage: 'bw.coverage_percent',
   tokensBought: 'bw.tokens_bought',
   activeDays: 'bw.active_days',
+  spanDays: 'bw.span_days_in_scope',
+  confidence: 'bw.matching_confidence',
 };
 
 type SortDirection = 'asc' | 'desc';
@@ -93,10 +103,12 @@ export async function GET(
   const rows = await query<BuyerWalletRow>(
     `SELECT bw.id, bw.wallet_address, bw.source,
             bw.tokens_bought, bw.total_tokens, bw.coverage_percent,
-            bw.first_buy_at, bw.last_buy_at, bw.active_days,
+            bw.first_buy_at, bw.last_buy_at, bw.active_days, bw.span_days_in_scope,
             bw.consistency, bw.weight, bw.avg_hold_duration_hours,
             bw.funding_depth, bw.funding_chain,
-            ma.address AS mother_address
+            ma.address AS mother_address,
+            bw.mother_child_count, bw.has_high_fanout_mother,
+            bw.matching_confidence, bw.inclusion_decision, bw.risk_flag, bw.risk_level, bw.decision_reasons
      FROM analysis_buyer_wallets bw
      LEFT JOIN analysis_mother_addresses ma ON ma.id = bw.mother_address_id
      WHERE ${whereClause}
@@ -123,12 +135,20 @@ export async function GET(
     firstBuyAt: r.first_buy_at,
     lastBuyAt: r.last_buy_at,
     activeDays: r.active_days,
+    spanDaysInScope: r.span_days_in_scope,
     consistency: r.consistency,
     weight: r.weight,
     avgHoldDuration: r.avg_hold_duration_hours,
     fundingDepth: r.funding_depth,
     fundingChain: r.funding_chain ? JSON.parse(r.funding_chain) : null,
     motherAddress: r.mother_address,
+    motherChildCount: r.mother_child_count,
+    hasHighFanoutMother: r.has_high_fanout_mother,
+    matchingConfidence: r.matching_confidence,
+    inclusionDecision: r.inclusion_decision,
+    riskFlag: r.risk_flag,
+    riskLevel: r.risk_level,
+    decisionReasons: Array.isArray(r.decision_reasons) ? (r.decision_reasons as string[]) : [],
   }));
 
   return NextResponse.json({ wallets, total, limit, offset });

@@ -42,12 +42,20 @@ interface WalletData {
   firstBuyAt: string | null;
   lastBuyAt: string | null;
   activeDays: number;
+  spanDaysInScope: number;
   consistency: number;
   weight: number;
   avgHoldDuration: number | null;
   fundingDepth: number | null;
   fundingChain: string[] | null;
   motherAddress: string | null;
+  motherChildCount: number;
+  hasHighFanoutMother: boolean;
+  matchingConfidence: number;
+  inclusionDecision: 'included' | 'excluded' | 'included_with_risk';
+  riskFlag: string | null;
+  riskLevel: 'low' | 'medium' | 'high' | null;
+  decisionReasons: string[];
   purchases: WalletPurchase[];
 }
 
@@ -222,7 +230,16 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
           <StatItem label="Consistance" value={formatPercent(wallet.consistency)} />
           <StatItem label="Poids" value={formatPercent(wallet.weight)} />
           <StatItem label="Jours actifs" value={`${wallet.activeDays}j`} />
+          <StatItem label="Durée (span)" value={`${wallet.spanDaysInScope.toFixed(1)}j`} />
+          <StatItem label="Confiance matching" value={formatPercent(wallet.matchingConfidence)} />
           <StatItem label="Hold moyen" value={wallet.avgHoldDuration != null ? `${wallet.avgHoldDuration.toFixed(1)}h` : '—'} />
+        </div>
+
+        <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatItem label="Décision" value={wallet.inclusionDecision} />
+          <StatItem label="Risque" value={wallet.riskLevel ?? '—'} />
+          <StatItem label="Flag risque" value={wallet.riskFlag ?? '—'} />
+          <StatItem label="Raison principale" value={wallet.decisionReasons[0] ?? '—'} />
         </div>
 
         <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">

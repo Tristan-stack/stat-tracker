@@ -32,11 +32,19 @@ export interface AnalysisBuyerWallet {
   firstBuyAt: string | null;
   lastBuyAt: string | null;
   activeDays: number;
+  spanDaysInScope: number;
   consistency: number;
   weight: number;
   avgHoldDuration: number | null;
   fundingDepth: number | null;
   fundingChain: string[] | null;
+  motherChildCount: number;
+  hasHighFanoutMother: boolean;
+  matchingConfidence: number;
+  inclusionDecision: 'included' | 'excluded' | 'included_with_risk';
+  riskFlag: string | null;
+  riskLevel: 'low' | 'medium' | 'high' | null;
+  decisionReasons: string[];
   purchases: AnalysisBuyerPurchase[];
 }
 
@@ -107,6 +115,8 @@ export interface SiblingDiscoveryResult {
   motherAddress: string;
   siblings: SiblingWallet[];
   ruggerChain: string[];
+  motherChildCount: number;
+  hasHighFanoutMother: boolean;
 }
 
 export interface CrossRuggerMatch {

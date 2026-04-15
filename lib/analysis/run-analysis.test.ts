@@ -96,7 +96,8 @@ function setupDefaultMocks() {
       coveragePercent: 100,
       consistency: 85.5,
       weight: 100,
-      activeDays: 2,
+      activeDaysInScope: 2,
+      spanDaysInScope: 1,
       firstBuyAt: '2025-01-01T00:00:00Z',
       lastBuyAt: '2025-01-02T00:00:00Z',
       avgHoldDurationHours: null,
@@ -277,6 +278,47 @@ describe('runAnalysisPipeline', () => {
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('analysis_mother_addresses'),
         expect.arrayContaining([ANALYSIS_ID, 'MotherAddr'])
+      );
+    });
+
+    it('persists exclusion decision for low coverage token wallet', async () => {
+      mockDiscoverBuyers.mockResolvedValue({
+        buyers: [
+          {
+            walletAddress: 'LowCoverage',
+            tokensBought: 1,
+            totalTokens: 2,
+            coveragePercent: 50,
+            purchases: [
+              { walletAddress: 'LowCoverage', tokenAddress: 'TokenA', tokenName: 'Token A', purchasedAt: '2025-01-01T00:00:00Z', amountSol: 1.0 },
+            ],
+          },
+        ],
+        tokenCount: 2,
+        totalUniqueBuyers: 1,
+      });
+      mockScoreWallets.mockReturnValue([
+        {
+          walletAddress: 'LowCoverage',
+          tokensBought: 1,
+          totalTokens: 2,
+          coveragePercent: 30,
+          consistency: 20,
+          weight: 10,
+          activeDaysInScope: 1,
+          spanDaysInScope: 0,
+          firstBuyAt: '2025-01-01T00:00:00Z',
+          lastBuyAt: '2025-01-01T00:00:00Z',
+          avgHoldDurationHours: null,
+        },
+      ]);
+
+      const { emit } = makeEmitSpy();
+      await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'token' }, emit);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('inclusion_decision'),
+        expect.arrayContaining(['excluded'])
       );
     });
   });

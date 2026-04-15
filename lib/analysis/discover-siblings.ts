@@ -6,6 +6,7 @@ interface DiscoverSiblingsOpts {
   maxDepth?: number;
   siblingLimit?: number;
   forceRefresh?: boolean;
+  motherFanoutLimit?: number;
 }
 
 /**
@@ -25,16 +26,24 @@ export async function discoverSiblingWallets(
   const maxDepth = opts?.maxDepth ?? 5;
   const siblingLimit = opts?.siblingLimit ?? 200;
   const forceRefresh = opts?.forceRefresh ?? false;
+  const motherFanoutLimit = opts?.motherFanoutLimit ?? Number(process.env.MOTHER_FANOUT_LIMIT ?? '100');
 
   if (!forceRefresh) {
     const cached = await loadCachedMotherForWallet(userId, ruggerWallet);
     if (cached) {
       const { getChildWallets } = await import('@/lib/helius/sibling-wallets');
       const siblings = await getChildWallets(cached.motherAddress, ruggerWallet, siblingLimit);
+      const motherChildCount = await estimateMotherChildCount(
+        cached.motherAddress,
+        ruggerWallet,
+        motherFanoutLimit
+      );
       return {
         motherAddress: cached.motherAddress,
         siblings,
         ruggerChain: cached.chain,
+        motherChildCount,
+        hasHighFanoutMother: motherChildCount > motherFanoutLimit,
       };
     }
   }
@@ -42,16 +51,40 @@ export async function discoverSiblingWallets(
   const result = await findSiblingWallets(ruggerWallet, { maxDepth, siblingLimit });
 
   if (!result.motherAddress) {
-    return { motherAddress: '', siblings: [], ruggerChain: result.ruggerChain };
+    return {
+      motherAddress: '',
+      siblings: [],
+      ruggerChain: result.ruggerChain,
+      motherChildCount: 0,
+      hasHighFanoutMother: false,
+    };
   }
 
   await storeCachedChain(userId, ruggerWallet, result.motherAddress, result.ruggerChain, maxDepth);
+  const motherChildCount = await estimateMotherChildCount(
+    result.motherAddress,
+    ruggerWallet,
+    motherFanoutLimit
+  );
 
   return {
     motherAddress: result.motherAddress,
     siblings: result.siblings,
     ruggerChain: result.ruggerChain,
+    motherChildCount,
+    hasHighFanoutMother: motherChildCount > motherFanoutLimit,
   };
+}
+
+async function estimateMotherChildCount(
+  motherAddress: string,
+  excludeWallet: string,
+  motherFanoutLimit: number
+): Promise<number> {
+  const { getChildWallets } = await import('@/lib/helius/sibling-wallets');
+  const probeLimit = Math.max(1, motherFanoutLimit + 1);
+  const probeSiblings = await getChildWallets(motherAddress, excludeWallet, probeLimit);
+  return probeSiblings.length;
 }
 
 interface CachedMother {

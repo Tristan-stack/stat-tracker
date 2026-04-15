@@ -94,7 +94,7 @@ describe('computeWeights', () => {
     ];
     const weights = computeWeights(inputs);
     expect(weights.get('W1')).toBe(100);
-    expect(weights.get('W2')).toBe(50);
+    expect(weights.get('W2')).toBeCloseTo(74.72, 1);
   });
 
   it('falls back to tx count when no SOL data', () => {
@@ -112,7 +112,7 @@ describe('computeWeights', () => {
     ];
     const weights = computeWeights(inputs);
     expect(weights.get('W1')).toBe(100);
-    expect(weights.get('W2')).toBeCloseTo(33.33, 0);
+    expect(weights.get('W2')).toBeCloseTo(50, 0);
   });
 
   it('handles empty inputs', () => {
@@ -188,13 +188,14 @@ describe('scoreWallets', () => {
     expect(w1.coveragePercent).toBe(60);
     expect(w1.consistency).toBeGreaterThan(0);
     expect(w1.weight).toBe(100);
-    expect(w1.activeDays).toBe(3);
+    expect(w1.activeDaysInScope).toBe(3);
+    expect(w1.spanDaysInScope).toBe(6);
     expect(w1.firstBuyAt).toBe('2024-01-01T00:00:00Z');
     expect(w1.lastBuyAt).toBe('2024-01-07T00:00:00Z');
 
     const w2 = results.find((r) => r.walletAddress === 'W2')!;
     expect(w2.tokensBought).toBe(1);
-    expect(w2.weight).toBe(10);
+    expect(w2.weight).toBeCloseTo(28.9, 1);
   });
 
   it('handles empty input', () => {

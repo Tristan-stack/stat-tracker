@@ -112,6 +112,19 @@ describe('discoverBuyers', () => {
     expect(result.buyers[0].walletAddress).toBe('WalletA');
   });
 
+  it('filters known exchange wallets automatically', async () => {
+    const knownExchange = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+    mockGetTokenBuyers
+      .mockResolvedValueOnce([makeBuyer(knownExchange, 'Token1'), makeBuyer('WalletA', 'Token1')])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const result = await discoverBuyers(TOKENS);
+
+    expect(result.buyers).toHaveLength(1);
+    expect(result.buyers[0].walletAddress).toBe('WalletA');
+  });
+
   it('enriches purchases with token name', async () => {
     mockGetTokenBuyers
       .mockResolvedValueOnce([makeBuyer('WalletA', 'Token1')])

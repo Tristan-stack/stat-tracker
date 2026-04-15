@@ -12,12 +12,20 @@ interface WalletRow {
   first_buy_at: string | null;
   last_buy_at: string | null;
   active_days: number;
+  span_days_in_scope: number;
   consistency: number;
   weight: number;
   avg_hold_duration_hours: number | null;
   funding_depth: number | null;
   funding_chain: string | null;
   mother_address: string | null;
+  mother_child_count: number;
+  has_high_fanout_mother: boolean;
+  matching_confidence: number;
+  inclusion_decision: 'included' | 'excluded' | 'included_with_risk';
+  risk_flag: string | null;
+  risk_level: 'low' | 'medium' | 'high' | null;
+  decision_reasons: unknown;
 }
 
 interface PurchaseRow {
@@ -41,10 +49,12 @@ export async function GET(
   const walletRows = await query<WalletRow>(
     `SELECT bw.id, bw.wallet_address, bw.source,
             bw.tokens_bought, bw.total_tokens, bw.coverage_percent,
-            bw.first_buy_at, bw.last_buy_at, bw.active_days,
+            bw.first_buy_at, bw.last_buy_at, bw.active_days, bw.span_days_in_scope,
             bw.consistency, bw.weight, bw.avg_hold_duration_hours,
             bw.funding_depth, bw.funding_chain,
-            ma.address AS mother_address
+            ma.address AS mother_address,
+            bw.mother_child_count, bw.has_high_fanout_mother,
+            bw.matching_confidence, bw.inclusion_decision, bw.risk_flag, bw.risk_level, bw.decision_reasons
      FROM analysis_buyer_wallets bw
      JOIN wallet_analyses wa ON wa.id = bw.analysis_id
      JOIN ruggers r ON r.id = wa.rugger_id
@@ -85,12 +95,20 @@ export async function GET(
     firstBuyAt: row.first_buy_at,
     lastBuyAt: row.last_buy_at,
     activeDays: row.active_days,
+    spanDaysInScope: row.span_days_in_scope,
     consistency: row.consistency,
     weight: row.weight,
     avgHoldDuration: row.avg_hold_duration_hours,
     fundingDepth: row.funding_depth,
     fundingChain: row.funding_chain ? JSON.parse(row.funding_chain) : null,
     motherAddress: row.mother_address,
+    motherChildCount: row.mother_child_count,
+    hasHighFanoutMother: row.has_high_fanout_mother,
+    matchingConfidence: row.matching_confidence,
+    inclusionDecision: row.inclusion_decision,
+    riskFlag: row.risk_flag,
+    riskLevel: row.risk_level,
+    decisionReasons: Array.isArray(row.decision_reasons) ? (row.decision_reasons as string[]) : [],
     purchases,
   });
 }

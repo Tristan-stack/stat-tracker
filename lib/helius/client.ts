@@ -1,6 +1,10 @@
 import { throttleHelius } from '@/lib/helius/throttle';
 
 const HELIUS_BASE = 'https://api.helius.xyz';
+const HELIUS_MAX_RETRIES = Number(process.env.HELIUS_MAX_RETRIES ?? '3');
+const HELIUS_RETRY_BASE_MS = Number(process.env.HELIUS_RETRY_BASE_MS ?? '300');
+const HELIUS_RATE_LIMIT_MIN_WAIT_MS = Number(process.env.HELIUS_RATE_LIMIT_MIN_WAIT_MS ?? '2000');
+const HELIUS_RATE_LIMIT_MAX_WAIT_MS = Number(process.env.HELIUS_RATE_LIMIT_MAX_WAIT_MS ?? '10000');
 
 function getApiKey(): string {
   const key = process.env.HELIUS_API_KEY;
@@ -82,25 +86,76 @@ interface RpcResponse<T> {
   error?: { code: number; message: string };
 }
 
+function isRetryableHeliusFailure(status: number, message: string): boolean {
+  if (status === 429) return true;
+  if (status >= 500) return true;
+  return /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|timeout|aborted/i.test(message);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterHeader(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const dateMs = Date.parse(value);
+  if (Number.isNaN(dateMs)) return null;
+  return Math.max(0, dateMs - Date.now());
+}
+
+function getBackoffMs(attempt: number, status: number, retryAfterMs?: number | null): number {
+  if (retryAfterMs != null && retryAfterMs > 0) return retryAfterMs;
+  if (status === 429) {
+    const jitter = Math.floor(Math.random() * 400);
+    const delay = HELIUS_RATE_LIMIT_MIN_WAIT_MS * Math.pow(2, attempt) + jitter;
+    return Math.min(delay, HELIUS_RATE_LIMIT_MAX_WAIT_MS);
+  }
+  return HELIUS_RETRY_BASE_MS * Math.pow(2, attempt);
+}
+
 export async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
-  await throttleHelius();
   const url = buildRpcUrl();
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
+  let lastError: unknown = null;
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Helius RPC ${method}: HTTP ${res.status} — ${text.slice(0, 300)}`);
+  for (let attempt = 0; attempt <= HELIUS_MAX_RETRIES; attempt += 1) {
+    try {
+      await throttleHelius();
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const message = `Helius RPC ${method}: HTTP ${res.status} — ${text.slice(0, 300)}`;
+        if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(res.status, message)) {
+          const retryAfterMs = parseRetryAfterHeader(res.headers.get('retry-after'));
+          await sleep(getBackoffMs(attempt, res.status, retryAfterMs));
+          continue;
+        }
+        throw new Error(message);
+      }
+
+      const json = (await res.json()) as RpcResponse<T>;
+      if (json.error) {
+        throw new Error(`Helius RPC ${method}: ${json.error.message} (code ${json.error.code})`);
+      }
+      return json.result;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(0, message)) {
+        await sleep(HELIUS_RETRY_BASE_MS * Math.pow(2, attempt));
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const json = (await res.json()) as RpcResponse<T>;
-  if (json.error) {
-    throw new Error(`Helius RPC ${method}: ${json.error.message} (code ${json.error.code})`);
-  }
-  return json.result;
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,20 +163,42 @@ export async function heliusRpc<T>(method: string, params: unknown[]): Promise<T
 // ---------------------------------------------------------------------------
 
 export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
-  await throttleHelius();
   const url = buildRestUrl(path);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let lastError: unknown = null;
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Helius REST ${path}: HTTP ${res.status} — ${text.slice(0, 300)}`);
+  for (let attempt = 0; attempt <= HELIUS_MAX_RETRIES; attempt += 1) {
+    try {
+      await throttleHelius();
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const message = `Helius REST ${path}: HTTP ${res.status} — ${text.slice(0, 300)}`;
+        if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(res.status, message)) {
+          const retryAfterMs = parseRetryAfterHeader(res.headers.get('retry-after'));
+          await sleep(getBackoffMs(attempt, res.status, retryAfterMs));
+          continue;
+        }
+        throw new Error(message);
+      }
+
+      return (await res.json()) as T;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(0, message)) {
+        await sleep(HELIUS_RETRY_BASE_MS * Math.pow(2, attempt));
+        continue;
+      }
+      throw error;
+    }
   }
 
-  return (await res.json()) as T;
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +227,8 @@ export async function parseTransactions(
   signatures: string[]
 ): Promise<HeliusEnhancedTransaction[]> {
   if (signatures.length === 0) return [];
-  const batchSize = 100;
+  const configuredBatchSize = Number(process.env.HELIUS_PARSE_BATCH_SIZE ?? '50');
+  const batchSize = Math.max(10, Math.min(configuredBatchSize, 100));
   const results: HeliusEnhancedTransaction[] = [];
   for (let i = 0; i < signatures.length; i += batchSize) {
     const batch = signatures.slice(i, i + batchSize);

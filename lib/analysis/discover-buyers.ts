@@ -1,5 +1,6 @@
 import type { TokenBuyer } from '@/types/analysis';
 import { getTokenBuyers } from '@/lib/helius/token-buyers';
+import { isKnownExchange } from '@/lib/helius/exchange-addresses';
 
 export interface DiscoveredBuyer {
   walletAddress: string;
@@ -12,6 +13,7 @@ export interface DiscoveredBuyer {
 interface DiscoverBuyersOpts {
   buyerLimit?: number;
   excludeWallets?: string[];
+  globalCandidateLimit?: number;
 }
 
 export interface DiscoverBuyersResult {
@@ -44,6 +46,7 @@ export async function discoverBuyers(
     for (const buyer of buyers) {
       const addr = buyer.walletAddress;
       if (excludeSet.has(addr.toLowerCase())) continue;
+      if (isKnownExchange(addr)) continue;
 
       const enriched: TokenBuyer = { ...buyer, tokenName: token.name };
 
@@ -68,10 +71,24 @@ export async function discoverBuyers(
   );
 
   buyers.sort((a, b) => b.tokensBought - a.tokensBought || b.coveragePercent - a.coveragePercent);
+  const cappedBuyers = applyGlobalCandidateCap(
+    buyers,
+    opts?.globalCandidateLimit ?? null
+  );
 
   return {
-    buyers,
+    buyers: cappedBuyers,
     tokenCount: totalTokens,
-    totalUniqueBuyers: buyers.length,
+    totalUniqueBuyers: cappedBuyers.length,
   };
+}
+
+function applyGlobalCandidateCap(
+  buyers: DiscoveredBuyer[],
+  globalCandidateLimit: number | null
+): DiscoveredBuyer[] {
+  if (globalCandidateLimit == null || !Number.isFinite(globalCandidateLimit) || globalCandidateLimit <= 0) {
+    return buyers;
+  }
+  return buyers.slice(0, globalCandidateLimit);
 }

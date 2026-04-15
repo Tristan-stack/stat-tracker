@@ -189,11 +189,19 @@ model AnalysisBuyerWallet {
   firstBuyAt      DateTime? @map("first_buy_at")
   lastBuyAt       DateTime? @map("last_buy_at")
   activeDays      Int       @default(0) @map("active_days")
+  spanDaysInScope Float     @default(0) @map("span_days_in_scope")
   consistency     Float     @default(0)
   weight          Float     @default(0)
   avgHoldDuration Float?    @map("avg_hold_duration_hours")
   fundingDepth    Int?      @map("funding_depth")
   fundingChain    String?   @map("funding_chain")
+  motherChildCount Int      @default(0) @map("mother_child_count")
+  hasHighFanoutMother Boolean @default(false) @map("has_high_fanout_mother")
+  matchingConfidence Float   @default(0) @map("matching_confidence")
+  inclusionDecision String   @default("included") @map("inclusion_decision")
+  riskFlag         String?   @map("risk_flag")
+  riskLevel        String?   @map("risk_level")
+  decisionReasons  Json      @default("[]") @map("decision_reasons")
 
   purchases AnalysisBuyerPurchase[]
 

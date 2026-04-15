@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench:best-wallet": "node scripts/benchmark-best-wallet.mjs"
+    "bench:best-wallet": "node scripts/benchmark-best-wallet.mjs",
+    "bench:matching-v2": "node scripts/benchmark-matching-v2.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

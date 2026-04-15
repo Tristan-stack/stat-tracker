@@ -8,6 +8,9 @@ import { query } from '@/lib/db';
 
 const ANALYSIS_CONCURRENCY = Number(process.env.ANALYSIS_CONCURRENCY ?? '3');
 const FUNDING_BATCH_SIZE = 10;
+const GLOBAL_CANDIDATE_FACTOR = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_FACTOR ?? '50');
+const GLOBAL_CANDIDATE_MAX = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_MAX ?? '600');
+const STRICT_COVERAGE_THRESHOLD = Number(process.env.STRICT_COVERAGE_THRESHOLD ?? '40');
 
 export type EmitFn = (event: string, data: Record<string, unknown>) => void;
 
@@ -29,6 +32,20 @@ interface MergedWallet {
   fundingChain: string[] | null;
   fundingDepth: number | null;
   motherAddress: string | null;
+  hasHighFanoutMother: boolean;
+  motherChildCount: number;
+}
+
+type InclusionDecision = 'included' | 'excluded' | 'included_with_risk';
+type RiskLevel = 'low' | 'medium' | 'high';
+
+interface WalletDecision {
+  walletAddress: string;
+  matchingConfidence: number;
+  inclusionDecision: InclusionDecision;
+  riskFlag: string | null;
+  riskLevel: RiskLevel | null;
+  decisionReasons: string[];
 }
 
 export async function runAnalysisPipeline(
@@ -59,11 +76,12 @@ export async function runAnalysisPipeline(
     await updateAnalysisStatus(analysisId, 'running', 90, 'Computing scores...');
 
     const { scoredWallets, combinations } = computeScoresAndCombinations(mergedWallets, tokens);
+    const decisions = buildWalletDecisions(mergedWallets, scoredWallets);
 
     emit('progress', { phase: 'persisting', percent: 95 });
     await updateAnalysisStatus(analysisId, 'running', 95, 'Saving results...');
 
-    const motherCount = await persistResults(analysisId, mergedWallets, scoredWallets, combinations);
+    const motherCount = await persistResults(analysisId, mergedWallets, scoredWallets, decisions);
 
     const buyerCount = mergedWallets.length;
     const overlapCount = mergedWallets.filter((w) => w.source === 'both').length;
@@ -108,6 +126,8 @@ async function runTokenMode(
     fundingChain: null,
     fundingDepth: null,
     motherAddress: null,
+    hasHighFanoutMother: false,
+    motherChildCount: 0,
   }));
 }
 
@@ -129,6 +149,8 @@ async function runFundingMode(
   emit('siblings_found', {
     motherAddress: siblingResult.motherAddress,
     siblingsFound: siblingResult.siblings.length,
+    motherChildCount: siblingResult.motherChildCount,
+    highFanoutMother: siblingResult.hasHighFanoutMother,
   });
 
   emit('progress', { phase: 'siblings', percent: 70 });
@@ -140,6 +162,8 @@ async function runFundingMode(
     fundingChain: siblingResult.ruggerChain,
     fundingDepth: siblingResult.ruggerChain.length - 1,
     motherAddress: s.motherAddress,
+    hasHighFanoutMother: siblingResult.hasHighFanoutMother,
+    motherChildCount: siblingResult.motherChildCount,
   }));
 }
 
@@ -164,6 +188,8 @@ async function runCombinedMode(
   emit('siblings_found', {
     motherAddress: siblingResult.motherAddress,
     siblingsFound: siblingResult.siblings.length,
+    motherChildCount: siblingResult.motherChildCount,
+    highFanoutMother: siblingResult.hasHighFanoutMother,
   });
 
   emit('progress', { phase: 'merging', percent: 55 });
@@ -186,6 +212,8 @@ async function runCombinedMode(
       fundingChain: null,
       fundingDepth: null,
       motherAddress: inBoth ? siblingResult.motherAddress : null,
+      hasHighFanoutMother: inBoth ? siblingResult.hasHighFanoutMother : false,
+      motherChildCount: inBoth ? siblingResult.motherChildCount : 0,
     });
   }
 
@@ -198,6 +226,8 @@ async function runCombinedMode(
         fundingChain: siblingResult.ruggerChain,
         fundingDepth: siblingResult.ruggerChain.length - 1,
         motherAddress: s.motherAddress,
+        hasHighFanoutMother: siblingResult.hasHighFanoutMother,
+        motherChildCount: siblingResult.motherChildCount,
       });
     }
   }
@@ -246,6 +276,8 @@ async function discoverBuyersParallel(
 ): Promise<DiscoveredBuyer[]> {
   let processedTokens = 0;
   const allBuyers = new Map<string, DiscoveredBuyer>();
+  const totalTokens = tokens.length;
+  const globalCandidateLimit = computeGlobalCandidateLimit(totalTokens);
 
   for (let i = 0; i < tokens.length; i += ANALYSIS_CONCURRENCY) {
     const batch = tokens.slice(i, i + ANALYSIS_CONCURRENCY);
@@ -293,8 +325,41 @@ async function discoverBuyersParallel(
   }
 
   const buyers = Array.from(allBuyers.values());
-  buyers.sort((a, b) => b.tokensBought - a.tokensBought);
-  return buyers;
+  const filteredBuyers = buyers.filter((buyer) => !isLikelyAggregatorWallet(buyer, totalTokens));
+  const removedAsLikelyBots = buyers.length - filteredBuyers.length;
+  if (removedAsLikelyBots > 0) {
+    emit('buyers_filtered', {
+      reason: 'exchange_or_bot',
+      removedCount: removedAsLikelyBots,
+    });
+  }
+  filteredBuyers.sort((a, b) => b.tokensBought - a.tokensBought);
+  const cappedBuyers = filteredBuyers.slice(0, globalCandidateLimit);
+  if (cappedBuyers.length < filteredBuyers.length) {
+    emit('buyers_capped', {
+      totalAfterFiltering: filteredBuyers.length,
+      kept: cappedBuyers.length,
+      cap: globalCandidateLimit,
+    });
+  }
+  return cappedBuyers;
+}
+
+function computeGlobalCandidateLimit(totalTokens: number): number {
+  const dynamicLimit = Math.max(totalTokens * GLOBAL_CANDIDATE_FACTOR, totalTokens * 5, 50);
+  return Math.max(1, Math.min(dynamicLimit, GLOBAL_CANDIDATE_MAX));
+}
+
+function isLikelyAggregatorWallet(buyer: DiscoveredBuyer, totalTokens: number): boolean {
+  if (totalTokens < 5) return false;
+  const coverageRatio = buyer.tokensBought / totalTokens;
+  if (coverageRatio < 0.9) return false;
+  const amountSolValues = buyer.purchases
+    .map((purchase) => purchase.amountSol)
+    .filter((amount): amount is number => amount != null && amount > 0);
+  if (amountSolValues.length === 0) return false;
+  const avgAmountSol = amountSolValues.reduce((sum, amount) => sum + amount, 0) / amountSolValues.length;
+  return avgAmountSol < 0.03;
 }
 
 function computeScoresAndCombinations(
@@ -328,11 +393,83 @@ function computeScoresAndCombinations(
   return { scoredWallets, combinations };
 }
 
+function buildWalletDecisions(
+  mergedWallets: MergedWallet[],
+  scoredWallets: ScoringResult[]
+): Map<string, WalletDecision> {
+  const scoreMap = new Map(scoredWallets.map((score) => [score.walletAddress, score]));
+  const decisions = new Map<string, WalletDecision>();
+
+  for (const wallet of mergedWallets) {
+    const score = scoreMap.get(wallet.walletAddress);
+    const coverage = score?.coveragePercent ?? 0;
+    const temporalCoherence = score?.consistency ?? 0;
+    const executionWeight = score?.weight ?? 0;
+    const fundingProximity = wallet.fundingDepth == null
+      ? wallet.source === 'token' ? 50 : 0
+      : Math.max(0, 100 - wallet.fundingDepth * 10);
+
+    const blended =
+      coverage * 0.55 +
+      temporalCoherence * 0.20 +
+      fundingProximity * 0.15 +
+      executionWeight * 0.10;
+    let matchingConfidence = Math.max(0, Math.min(100, blended));
+
+    const decisionReasons: string[] = [];
+    let inclusionDecision: InclusionDecision = 'included';
+    let riskFlag: string | null = null;
+    let riskLevel: RiskLevel | null = null;
+
+    if ((wallet.source === 'token' || wallet.source === 'both') && coverage < STRICT_COVERAGE_THRESHOLD) {
+      inclusionDecision = 'excluded';
+      decisionReasons.push('low_coverage');
+    } else if (coverage >= STRICT_COVERAGE_THRESHOLD) {
+      decisionReasons.push('high_coverage');
+    }
+
+    if (wallet.source === 'both') decisionReasons.push('both_source_bonus');
+    if (wallet.source === 'funding') {
+      inclusionDecision = 'included_with_risk';
+      riskFlag = 'funding_only';
+      riskLevel = 'medium';
+      decisionReasons.push('funding_only');
+      matchingConfidence = Math.max(0, matchingConfidence - 15);
+    }
+
+    if (executionWeight < 20) decisionReasons.push('weak_execution_weight');
+    if (wallet.fundingDepth != null && wallet.fundingDepth >= 8) decisionReasons.push('deep_funding_path');
+
+    if (wallet.hasHighFanoutMother) {
+      inclusionDecision = inclusionDecision === 'excluded' ? 'excluded' : 'included_with_risk';
+      riskFlag = 'high_fanout_mother';
+      riskLevel = 'high';
+      decisionReasons.push('high_fanout_mother');
+      matchingConfidence = Math.max(0, matchingConfidence - 20);
+    }
+
+    if (decisionReasons.length === 0) {
+      decisionReasons.push('high_coverage');
+    }
+
+    decisions.set(wallet.walletAddress, {
+      walletAddress: wallet.walletAddress,
+      matchingConfidence,
+      inclusionDecision,
+      riskFlag,
+      riskLevel,
+      decisionReasons,
+    });
+  }
+
+  return decisions;
+}
+
 async function persistResults(
   analysisId: string,
   mergedWallets: MergedWallet[],
   scoredWallets: ScoringResult[],
-  combinations: { walletAddress: string; newTokensCovered: string[]; cumulativeCoverage: number }[]
+  decisions: Map<string, WalletDecision>
 ): Promise<number> {
   const scoreMap = new Map(scoredWallets.map((s) => [s.walletAddress, s]));
 
@@ -362,21 +499,25 @@ async function persistResults(
 
   for (const w of mergedWallets) {
     const score = scoreMap.get(w.walletAddress);
+    const decision = decisions.get(w.walletAddress);
     const motherId = w.motherAddress ? motherIdMap.get(w.motherAddress) ?? null : null;
 
     await query(
       `INSERT INTO analysis_buyer_wallets
        (id, analysis_id, wallet_address, source, mother_address_id,
         tokens_bought, total_tokens, coverage_percent,
-        first_buy_at, last_buy_at, active_days, consistency, weight,
-        avg_hold_duration_hours, funding_depth, funding_chain)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        first_buy_at, last_buy_at, active_days, span_days_in_scope, consistency, weight,
+        avg_hold_duration_hours, funding_depth, funding_chain, mother_child_count, has_high_fanout_mother,
+        matching_confidence, inclusion_decision, risk_flag, risk_level, decision_reasons)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
        ON CONFLICT (analysis_id, wallet_address) DO UPDATE SET
          source = $3, mother_address_id = $4,
          tokens_bought = $5, total_tokens = $6, coverage_percent = $7,
-         first_buy_at = $8, last_buy_at = $9, active_days = $10,
-         consistency = $11, weight = $12,
-         avg_hold_duration_hours = $13, funding_depth = $14, funding_chain = $15`,
+         first_buy_at = $8, last_buy_at = $9, active_days = $10, span_days_in_scope = $11,
+         consistency = $12, weight = $13,
+         avg_hold_duration_hours = $14, funding_depth = $15, funding_chain = $16,
+         mother_child_count = $17, has_high_fanout_mother = $18,
+         matching_confidence = $19, inclusion_decision = $20, risk_flag = $21, risk_level = $22, decision_reasons = $23`,
       [
         analysisId,
         w.walletAddress,
@@ -387,12 +528,20 @@ async function persistResults(
         score?.coveragePercent ?? 0,
         score?.firstBuyAt ?? null,
         score?.lastBuyAt ?? null,
-        score?.activeDays ?? 0,
+        score?.activeDaysInScope ?? 0,
+        score?.spanDaysInScope ?? 0,
         score?.consistency ?? 0,
         score?.weight ?? 0,
         score?.avgHoldDurationHours ?? null,
         w.fundingDepth,
         w.fundingChain ? JSON.stringify(w.fundingChain) : null,
+        w.motherChildCount,
+        w.hasHighFanoutMother,
+        decision?.matchingConfidence ?? 0,
+        decision?.inclusionDecision ?? 'included',
+        decision?.riskFlag ?? null,
+        decision?.riskLevel ?? null,
+        JSON.stringify(decision?.decisionReasons ?? ['high_coverage']),
       ]
     );
 
