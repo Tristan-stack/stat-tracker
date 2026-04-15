@@ -5,10 +5,16 @@ vi.mock('@/lib/helius/token-buyers', () => ({
   getTokenBuyers: vi.fn(),
 }));
 
+vi.mock('@/lib/gmgn/wallet-purchases', () => ({
+  collectSolanaBuysInRange: vi.fn(),
+}));
+
 import { getTokenBuyers } from '@/lib/helius/token-buyers';
-import { discoverBuyers } from './discover-buyers';
+import { collectSolanaBuysInRange } from '@/lib/gmgn/wallet-purchases';
+import { discoverBuyers, recoverWalletCentricBuyers } from './discover-buyers';
 
 const mockGetTokenBuyers = vi.mocked(getTokenBuyers);
+const mockCollectSolanaBuysInRange = vi.mocked(collectSolanaBuysInRange);
 
 function makeBuyer(wallet: string, tokenAddr: string, timestamp = '2024-01-01T00:00:00.000Z'): TokenBuyer {
   return {
@@ -159,5 +165,29 @@ describe('discoverBuyers', () => {
     expect(result.buyers).toHaveLength(1);
     expect(result.buyers[0].tokensBought).toBe(1);
     expect(result.buyers[0].purchases).toHaveLength(1);
+  });
+});
+
+describe('recoverWalletCentricBuyers', () => {
+  it('recovers candidate wallets that match rugger tokens', async () => {
+    mockCollectSolanaBuysInRange
+      .mockResolvedValueOnce([
+        { token: { address: 'Token1' }, timestamp: 1_710_000_000, event_type: 'buy' },
+        { token: { address: 'Token3' }, timestamp: 1_710_000_100, event_type: 'buy' },
+      ] as never)
+      .mockResolvedValueOnce([
+        { token: { address: 'OtherToken' }, timestamp: 1_710_000_000, event_type: 'buy' },
+      ] as never);
+
+    const result = await recoverWalletCentricBuyers(
+      TOKENS,
+      ['WalletRecovered', 'WalletMiss'],
+      { minCoveragePercent: 10, concurrency: 1 }
+    );
+
+    expect(result.totalUniqueBuyers).toBe(1);
+    expect(result.buyers[0].walletAddress).toBe('WalletRecovered');
+    expect(result.buyers[0].tokensBought).toBe(2);
+    expect(result.buyers[0].coveragePercent).toBeCloseTo(66.6, 0);
   });
 });

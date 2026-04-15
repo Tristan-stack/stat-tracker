@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -43,10 +43,17 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
   const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
   const [runningMode, setRunningMode] = useState<AnalysisMode>('combined');
   const [runningDepth, setRunningDepth] = useState(5);
+  const [runningWalletCentricRecovery, setRunningWalletCentricRecovery] = useState(15);
+  const [runningResumeAnalysisId, setRunningResumeAnalysisId] = useState<string | null>(null);
+  const [launchNonce, setLaunchNonce] = useState(0);
 
   const [resultSection, setResultSection] = useState<ResultSection>('leaderboard');
   const [walletDetailAddress, setWalletDetailAddress] = useState<string | null>(null);
   const [deletingAnalysisId, setDeletingAnalysisId] = useState<string | null>(null);
+  const [cancellingAnalysisId, setCancellingAnalysisId] = useState<string | null>(null);
+
+  const activeAnalysisIdRef = useRef<string | null>(null);
+  const userCancelledRef = useRef(false);
 
   const fetchHistory = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -60,26 +67,37 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
 
   useEffect(() => { void fetchHistory(); }, [fetchHistory]);
 
-  useEffect(() => {
-    if (analyses.length === 0) return;
-    const running = analyses.find((a) => a.status === 'running' || a.status === 'pending');
-    if (running && view === 'idle') {
-      setActiveAnalysisId(running.id);
-      setRunningMode(running.mode);
-      setRunningDepth(running.fundingDepth);
-      setView('running');
-    }
-  }, [analyses, view]);
+  // NOTE:
+  // We intentionally avoid auto-resuming "running/pending" analyses from history.
+  // In unstable network conditions this can reopen a stale running state and
+  // trigger confusing retries. Starting an analysis should only happen on user action.
 
-  const handleLaunch = useCallback(({ mode, fundingDepth }: { mode: AnalysisMode; fundingDepth: number }) => {
-    setRunningMode(mode);
-    setRunningDepth(fundingDepth);
-    setView('running');
-    setActiveAnalysisId(null);
-  }, []);
+  const handleLaunch = useCallback(
+    ({
+      mode,
+      fundingDepth,
+      walletCentricRecoveryLimit,
+    }: {
+      mode: AnalysisMode;
+      fundingDepth: number;
+      walletCentricRecoveryLimit: number;
+    }) => {
+      userCancelledRef.current = false;
+      setRunningMode(mode);
+      setRunningDepth(fundingDepth);
+      setRunningWalletCentricRecovery(walletCentricRecoveryLimit);
+      setRunningResumeAnalysisId(null);
+      setLaunchNonce((n) => n + 1);
+      setView('running');
+      setActiveAnalysisId(null);
+      activeAnalysisIdRef.current = null;
+    },
+    []
+  );
 
   const handleAnalysisComplete = useCallback((analysisId: string) => {
     setActiveAnalysisId(analysisId);
+    activeAnalysisIdRef.current = analysisId;
     setView('results');
     setResultSection('leaderboard');
     setWalletDetailAddress(null);
@@ -90,19 +108,73 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     void fetchHistory();
   }, [fetchHistory]);
 
+  const handleAnalysisStarted = useCallback((analysisId: string) => {
+    setActiveAnalysisId(analysisId);
+    activeAnalysisIdRef.current = analysisId;
+  }, []);
+
   const handleViewResults = useCallback((analysisId: string) => {
     setActiveAnalysisId(analysisId);
+    activeAnalysisIdRef.current = analysisId;
     setView('results');
     setResultSection('leaderboard');
     setWalletDetailAddress(null);
   }, []);
 
+  const handleResumeRunningAnalysis = useCallback((a: WalletAnalysis) => {
+    if (a.status !== 'running' && a.status !== 'pending') return;
+    userCancelledRef.current = false;
+    setRunningMode(a.mode);
+    setRunningDepth(a.fundingDepth);
+    setRunningWalletCentricRecovery(15);
+    setRunningResumeAnalysisId(a.id);
+    setLaunchNonce((n) => n + 1);
+    setView('running');
+    setActiveAnalysisId(a.id);
+    activeAnalysisIdRef.current = a.id;
+  }, []);
+
   const handleBackToIdle = useCallback(() => {
     setView('idle');
     setActiveAnalysisId(null);
+    activeAnalysisIdRef.current = null;
     setWalletDetailAddress(null);
     void fetchHistory();
   }, [fetchHistory]);
+
+  const handleCancelRunningAnalysis = useCallback(async () => {
+    userCancelledRef.current = true;
+
+    const shouldCancel = window.confirm(
+      'Annuler cette analyse en cours ? Les résultats partiels seront supprimés.'
+    );
+    if (!shouldCancel) {
+      userCancelledRef.current = false;
+      return;
+    }
+
+    const runningId = activeAnalysisIdRef.current;
+
+    setCancellingAnalysisId(runningId);
+    try {
+      if (runningId) {
+        const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${runningId}`, {
+          method: 'DELETE',
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          window.alert(body.error ?? "Impossible d'annuler l'analyse.");
+        }
+      }
+      setView('idle');
+      setActiveAnalysisId(null);
+      activeAnalysisIdRef.current = null;
+      setWalletDetailAddress(null);
+      await fetchHistory();
+    } finally {
+      setCancellingAnalysisId(null);
+    }
+  }, [ruggerId, fetchHistory]);
 
   const handleDeleteAnalysis = useCallback(
     async (analysisId: string) => {
@@ -136,6 +208,36 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     [ruggerId, activeAnalysisId, fetchHistory]
   );
 
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const handleDeleteAllAnalyses = useCallback(async () => {
+    if (analyses.length === 0) return;
+    if (
+      !window.confirm(
+        `Supprimer les ${analyses.length} analyses ? Toutes les données seront effacées définitivement.`
+      )
+    ) {
+      return;
+    }
+    setIsDeletingAll(true);
+    try {
+      const res = await fetch(`/api/ruggers/${ruggerId}/analysis`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        window.alert(body.error ?? 'Impossible de supprimer les analyses.');
+        return;
+      }
+      userCancelledRef.current = true;
+      setView('idle');
+      setActiveAnalysisId(null);
+      activeAnalysisIdRef.current = null;
+      setWalletDetailAddress(null);
+      await fetchHistory();
+    } finally {
+      setIsDeletingAll(false);
+    }
+  }, [analyses.length, ruggerId, fetchHistory]);
+
   const handleWalletClick = useCallback((walletAddress: string) => {
     setWalletDetailAddress(walletAddress);
   }, []);
@@ -145,14 +247,26 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Analyse en cours</h2>
-          <Button type="button" variant="ghost" size="sm" onClick={handleBackToIdle}>Annuler</Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleCancelRunningAnalysis()}
+            disabled={cancellingAnalysisId !== null}
+          >
+            {cancellingAnalysisId !== null ? 'Annulation…' : 'Annuler'}
+          </Button>
         </div>
         <Card>
           <CardContent className="pt-6">
             <AnalysisProgress
+              key={`${ruggerId}-${runningMode}-${runningDepth}-${runningWalletCentricRecovery}-${runningResumeAnalysisId ?? 'new'}-${launchNonce}`}
               ruggerId={ruggerId}
               mode={runningMode}
               fundingDepth={runningDepth}
+              walletCentricRecoveryLimit={runningWalletCentricRecovery}
+              resumeAnalysisId={runningResumeAnalysisId}
+              onStarted={handleAnalysisStarted}
               onComplete={handleAnalysisComplete}
               onError={handleAnalysisError}
             />
@@ -265,9 +379,24 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       </Card>
 
       <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <IconHistory className="size-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">Analyses précédentes</h3>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <IconHistory className="size-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Analyses précédentes</h3>
+          </div>
+          {analyses.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-destructive hover:text-destructive"
+              disabled={isDeletingAll}
+              onClick={() => void handleDeleteAllAnalyses()}
+            >
+              <IconTrash className="size-3.5" />
+              {isDeletingAll ? 'Suppression…' : 'Tout supprimer'}
+            </Button>
+          )}
         </div>
 
         {isLoadingHistory ? (
@@ -276,21 +405,28 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
           <p className="text-xs text-muted-foreground">Aucune analyse précédente pour ce rugger.</p>
         ) : (
           <div className="space-y-2">
-            {analyses.map((a) => (
+            {analyses.map((a) => {
+              const canOpenResults = a.status === 'completed';
+              const canResumeProgress = a.status === 'running' || a.status === 'pending';
+              const rowClickable = canOpenResults || canResumeProgress;
+              return (
               <div
                 key={a.id}
                 className={cn(
                   'flex w-full items-center gap-0 rounded-lg border transition-colors',
-                  a.status === 'completed' ? 'hover:bg-muted/50' : 'opacity-90'
+                  rowClickable ? 'hover:bg-muted/50' : 'opacity-90'
                 )}
               >
                 <button
                   type="button"
-                  onClick={() => (a.status === 'completed' ? handleViewResults(a.id) : undefined)}
-                  disabled={a.status !== 'completed'}
+                  onClick={() => {
+                    if (canOpenResults) handleViewResults(a.id);
+                    else if (canResumeProgress) handleResumeRunningAnalysis(a);
+                  }}
+                  disabled={!rowClickable}
                   className={cn(
                     'flex min-w-0 flex-1 items-center justify-between gap-3 p-3 text-left',
-                    a.status === 'completed' ? 'cursor-pointer' : 'cursor-default'
+                    rowClickable ? 'cursor-pointer' : 'cursor-default'
                   )}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -307,10 +443,13 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
                       <p className="text-xs text-muted-foreground">
                         {a.buyerCount} wallets · {a.tokenCount} tokens ·{' '}
                         {new Date(a.createdAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+                        {canResumeProgress && (
+                          <span className="text-primary"> · cliquer pour suivre la progression</span>
+                        )}
                       </p>
                     </div>
                   </div>
-                  {a.status === 'completed' && (
+                  {rowClickable && (
                     <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   )}
                   {a.status === 'failed' && a.errorMessage && (
@@ -331,7 +470,8 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
                   </Button>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>

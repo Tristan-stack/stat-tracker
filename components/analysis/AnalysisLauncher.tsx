@@ -2,14 +2,23 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode } from '@/types/analysis';
 import { IconSearch, IconLink, IconLayersIntersect } from '@tabler/icons-react';
 
+const WALLET_RECOVERY_MIN = 0;
+const WALLET_RECOVERY_MAX = 120;
+const WALLET_RECOVERY_DEFAULT = 15;
+
 interface AnalysisLauncherProps {
   tokenCount: number;
-  onLaunch: (opts: { mode: AnalysisMode; fundingDepth: number }) => void;
+  onLaunch: (opts: {
+    mode: AnalysisMode;
+    fundingDepth: number;
+    walletCentricRecoveryLimit: number;
+  }) => void;
   isDisabled?: boolean;
 }
 
@@ -24,6 +33,7 @@ const DEPTH_OPTIONS = [1, 2, 3, 4, 5] as const;
 export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: AnalysisLauncherProps) {
   const [mode, setMode] = useState<AnalysisMode>('combined');
   const [fundingDepth, setFundingDepth] = useState(5);
+  const [walletCentricRecoveryLimit, setWalletCentricRecoveryLimit] = useState(WALLET_RECOVERY_DEFAULT);
 
   const needsTokens = mode === 'token' || mode === 'combined';
   const showDepth = mode === 'funding' || mode === 'combined';
@@ -31,7 +41,16 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
 
   const handleLaunch = () => {
     if (!canLaunch) return;
-    onLaunch({ mode, fundingDepth });
+    const clamped = needsTokens
+      ? Math.max(
+          WALLET_RECOVERY_MIN,
+          Math.min(
+            WALLET_RECOVERY_MAX,
+            Math.floor(Number(walletCentricRecoveryLimit) || WALLET_RECOVERY_DEFAULT)
+          )
+        )
+      : WALLET_RECOVERY_DEFAULT;
+    onLaunch({ mode, fundingDepth, walletCentricRecoveryLimit: clamped });
   };
 
   return (
@@ -95,6 +114,28 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
         <p className="text-xs text-muted-foreground">
           {tokenCount} token{tokenCount !== 1 ? 's' : ''} enregistré{tokenCount !== 1 ? 's' : ''} seront analysés.
         </p>
+      )}
+
+      {needsTokens && (
+        <div className="space-y-2">
+          <Label htmlFor="wallet-recovery-limit" className="text-sm font-medium">
+            Recovery wallet-centric (GMGN)
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Nombre de wallets candidats retenus par meilleure couverture (0 = désactivé). Max {WALLET_RECOVERY_MAX}.
+          </p>
+          <Input
+            id="wallet-recovery-limit"
+            type="number"
+            min={WALLET_RECOVERY_MIN}
+            max={WALLET_RECOVERY_MAX}
+            step={1}
+            value={walletCentricRecoveryLimit}
+            onChange={(e) => setWalletCentricRecoveryLimit(Number(e.target.value))}
+            className="max-w-[120px]"
+            disabled={!canLaunch}
+          />
+        </div>
       )}
 
       <Button type="button" onClick={handleLaunch} disabled={!canLaunch} className="gap-2">

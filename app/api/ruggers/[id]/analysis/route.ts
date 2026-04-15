@@ -27,6 +27,8 @@ export async function POST(
     mode?: AnalysisMode;
     tokenAddresses?: string[];
     fundingDepth?: number;
+    /** 0–120 : nombre de wallets candidats (top coverage) pour la recovery GMGN ; 0 = désactivé. */
+    walletCentricRecoveryLimit?: number;
   };
 
   const mode = body.mode ?? 'combined';
@@ -66,6 +68,18 @@ export async function POST(
     );
   }
 
+  let walletCentricRecoveryLimit: number | undefined;
+  if (body.walletCentricRecoveryLimit !== undefined && body.walletCentricRecoveryLimit !== null) {
+    const n = Number(body.walletCentricRecoveryLimit);
+    if (!Number.isFinite(n)) {
+      return NextResponse.json(
+        { error: 'walletCentricRecoveryLimit must be a finite number' },
+        { status: 400 }
+      );
+    }
+    walletCentricRecoveryLimit = n;
+  }
+
   const analysisRows = await query<{ id: string }>(
     `INSERT INTO wallet_analyses (id, rugger_id, mode, status, funding_depth, buyer_limit, token_count)
      VALUES (gen_random_uuid(), $1, $2, 'pending', $3, 200, $4)
@@ -74,37 +88,86 @@ export async function POST(
   );
   const analysisId = analysisRows[0].id;
 
-  const pipelineOpts: PipelineOpts = { mode, fundingDepth, buyerLimit: 200 };
-
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-  let clientDisconnected = false;
-
-  req.signal.addEventListener('abort', () => {
-    clientDisconnected = true;
-    writer.close().catch(() => {});
-  });
-
-  const emit = (event: string, data: Record<string, unknown>) => {
-    if (clientDisconnected) return;
-    writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {
-      clientDisconnected = true;
-    });
+  const pipelineOpts: PipelineOpts = {
+    mode,
+    fundingDepth,
+    buyerLimit: 200,
+    walletCentricRecoveryLimit,
   };
 
-  runAnalysisPipeline(analysisId, tokens, ruggerWallet, userId, pipelineOpts, emit)
-    .finally(() => {
-      if (!clientDisconnected) writer.close().catch(() => {});
-    });
+  const encoder = new TextEncoder();
+  let clientDisconnected = false;
+  let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
 
-  return new Response(readable, {
+  const markDisconnected = () => {
+    if (clientDisconnected) return;
+    clientDisconnected = true;
+  };
+
+  req.signal.addEventListener('abort', markDisconnected);
+
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (clientDisconnected || !streamController) return;
+    try {
+      streamController.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+    } catch {
+      markDisconnected();
+    }
+  };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      streamController = controller;
+
+      emit('ping', { analysisId });
+
+      runAnalysisPipeline(analysisId, tokens, ruggerWallet, userId, pipelineOpts, emit)
+        .catch((error) => {
+          if (clientDisconnected) return;
+          const message =
+            error instanceof Error ? error.message : 'Erreur inconnue pendant le pipeline';
+          emit('error', { analysisId, message });
+          console.error('Analysis pipeline failed', { analysisId, message });
+        })
+        .finally(() => {
+          if (!clientDisconnected) {
+            try { controller.close(); } catch { /* stream already closed */ }
+          }
+        });
+    },
+    cancel() {
+      markDisconnected();
+    },
+  });
+
+  return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
     },
   });
+}
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
+  const { id: ruggerId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+  }
+
+  const deleted = await query<{ id: string }>(
+    `DELETE FROM wallet_analyses WHERE rugger_id = $1 RETURNING id`,
+    [ruggerId]
+  );
+
+  return NextResponse.json({ ok: true, deletedCount: deleted.length });
 }
 
 interface AnalysisRow {

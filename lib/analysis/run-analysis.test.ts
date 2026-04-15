@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/analysis/discover-buyers', () => ({
   discoverBuyers: vi.fn(),
+  recoverWalletCentricBuyers: vi.fn(),
 }));
 
 vi.mock('@/lib/analysis/discover-siblings', () => ({
@@ -24,20 +25,31 @@ vi.mock('@/lib/db', () => ({
   query: vi.fn(),
 }));
 
-import { discoverBuyers } from '@/lib/analysis/discover-buyers';
+vi.mock('@/lib/analysis/discover-rugger-tokens', () => ({
+  discoverRuggerTokens: vi.fn(),
+  validateTokensByCrossReference: vi.fn(),
+}));
+
+import { recoverWalletCentricBuyers } from '@/lib/analysis/discover-buyers';
 import { discoverSiblingWallets } from '@/lib/analysis/discover-siblings';
 import { traceFundingForWallets } from '@/lib/analysis/trace-funding';
 import { scoreWallets } from '@/lib/analysis/scoring';
 import { solveCombinations } from '@/lib/analysis/combinations';
 import { query } from '@/lib/db';
+import {
+  discoverRuggerTokens,
+  validateTokensByCrossReference,
+} from '@/lib/analysis/discover-rugger-tokens';
 import { runAnalysisPipeline, type EmitFn } from './run-analysis';
 
-const mockDiscoverBuyers = vi.mocked(discoverBuyers);
+const mockRecoverWalletCentricBuyers = vi.mocked(recoverWalletCentricBuyers);
 const mockDiscoverSiblings = vi.mocked(discoverSiblingWallets);
 const mockTraceFunding = vi.mocked(traceFundingForWallets);
 const mockScoreWallets = vi.mocked(scoreWallets);
 const mockSolveCombinations = vi.mocked(solveCombinations);
 const mockQuery = vi.mocked(query);
+const mockDiscoverRuggerTokens = vi.mocked(discoverRuggerTokens);
+const mockValidateTokens = vi.mocked(validateTokensByCrossReference);
 
 const ANALYSIS_ID = 'analysis-1';
 const RUGGER_WALLET = 'RuggerWallet';
@@ -55,8 +67,9 @@ function makeEmitSpy(): { emit: EmitFn; events: { event: string; data: Record<st
 
 function setupDefaultMocks() {
   mockQuery.mockResolvedValue([]);
-
-  mockDiscoverBuyers.mockResolvedValue({
+  mockDiscoverRuggerTokens.mockResolvedValue([...TOKENS]);
+  mockValidateTokens.mockResolvedValue({
+    validatedTokens: [...TOKENS],
     buyers: [
       {
         walletAddress: 'BuyerA',
@@ -69,8 +82,18 @@ function setupDefaultMocks() {
         ],
       },
     ],
+    stats: {
+      candidateCount: 2,
+      validatedCount: 2,
+      discardedCount: 0,
+      multiTokenWalletCount: 1,
+    },
+  });
+
+  mockRecoverWalletCentricBuyers.mockResolvedValue({
+    buyers: [],
     tokenCount: 2,
-    totalUniqueBuyers: 1,
+    totalUniqueBuyers: 0,
   });
 
   mockDiscoverSiblings.mockResolvedValue({
@@ -79,6 +102,8 @@ function setupDefaultMocks() {
       { walletAddress: 'SiblingA', motherAddress: 'MotherAddr', amountReceived: 1.0, receivedAt: '2025-01-01T00:00:00Z' },
     ],
     ruggerChain: ['RuggerWallet', 'MotherAddr'],
+    motherChildCount: 1,
+    hasHighFanoutMother: false,
   });
 
   mockTraceFunding.mockResolvedValue({
@@ -121,7 +146,7 @@ describe('runAnalysisPipeline', () => {
 
       await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'token' }, emit);
 
-      expect(mockDiscoverBuyers).toHaveBeenCalled();
+      expect(mockValidateTokens).toHaveBeenCalled();
       expect(mockDiscoverSiblings).not.toHaveBeenCalled();
       expect(mockTraceFunding).not.toHaveBeenCalled();
       expect(mockScoreWallets).toHaveBeenCalled();
@@ -141,6 +166,29 @@ describe('runAnalysisPipeline', () => {
       const started = events.find((e) => e.event === 'started');
       expect(started?.data).toEqual({ analysisId: ANALYSIS_ID, mode: 'token', tokenCount: 2 });
     });
+
+    it('does not call GMGN recovery when walletCentricRecoveryLimit is 0', async () => {
+      const { emit, events } = makeEmitSpy();
+
+      await runAnalysisPipeline(
+        ANALYSIS_ID,
+        TOKENS,
+        RUGGER_WALLET,
+        USER_ID,
+        { mode: 'token', walletCentricRecoveryLimit: 0 },
+        emit
+      );
+
+      expect(mockRecoverWalletCentricBuyers).not.toHaveBeenCalled();
+      expect(
+        events.some(
+          (e) =>
+            e.event === 'progress' &&
+            typeof e.data.detail === 'string' &&
+            e.data.detail.includes('désactivée')
+        )
+      ).toBe(true);
+    });
   });
 
   describe('funding mode', () => {
@@ -153,7 +201,7 @@ describe('runAnalysisPipeline', () => {
         maxDepth: 5,
         siblingLimit: 200,
       });
-      expect(mockDiscoverBuyers).not.toHaveBeenCalled();
+      expect(mockValidateTokens).not.toHaveBeenCalled();
       expect(mockTraceFunding).not.toHaveBeenCalled();
 
       const eventNames = events.map((e) => e.event);
@@ -168,7 +216,12 @@ describe('runAnalysisPipeline', () => {
       await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'funding' }, emit);
 
       const siblingsFound = events.find((e) => e.event === 'siblings_found');
-      expect(siblingsFound?.data).toEqual({ motherAddress: 'MotherAddr', siblingsFound: 1 });
+      expect(siblingsFound?.data).toEqual({
+        motherAddress: 'MotherAddr',
+        siblingsFound: 1,
+        motherChildCount: 1,
+        highFanoutMother: false,
+      });
     });
   });
 
@@ -178,7 +231,7 @@ describe('runAnalysisPipeline', () => {
 
       await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'combined' }, emit);
 
-      expect(mockDiscoverBuyers).toHaveBeenCalled();
+      expect(mockValidateTokens).toHaveBeenCalled();
       expect(mockDiscoverSiblings).toHaveBeenCalled();
       expect(mockTraceFunding).toHaveBeenCalled();
       expect(mockScoreWallets).toHaveBeenCalled();
@@ -190,7 +243,8 @@ describe('runAnalysisPipeline', () => {
     });
 
     it('marks wallets in both lists as source "both"', async () => {
-      mockDiscoverBuyers.mockResolvedValue({
+      mockValidateTokens.mockResolvedValue({
+        validatedTokens: [...TOKENS],
         buyers: [
           {
             walletAddress: 'OverlapWallet',
@@ -200,8 +254,12 @@ describe('runAnalysisPipeline', () => {
             purchases: [{ walletAddress: 'OverlapWallet', tokenAddress: 'TokenA', tokenName: 'Token A', purchasedAt: '2025-01-01T00:00:00Z', amountSol: 1.0 }],
           },
         ],
-        tokenCount: 2,
-        totalUniqueBuyers: 1,
+        stats: {
+          candidateCount: 2,
+          validatedCount: 2,
+          discardedCount: 0,
+          multiTokenWalletCount: 1,
+        },
       });
 
       mockDiscoverSiblings.mockResolvedValue({
@@ -211,6 +269,8 @@ describe('runAnalysisPipeline', () => {
           { walletAddress: 'FundingOnly', motherAddress: 'MotherAddr', amountReceived: 2.0, receivedAt: '2025-01-01T00:00:00Z' },
         ],
         ruggerChain: ['RuggerWallet', 'MotherAddr'],
+        motherChildCount: 2,
+        hasHighFanoutMother: false,
       });
 
       mockTraceFunding.mockResolvedValue({ chains: [], mothers: [] });
@@ -226,7 +286,7 @@ describe('runAnalysisPipeline', () => {
 
   describe('error handling', () => {
     it('emits error event and marks analysis as failed', async () => {
-      mockDiscoverBuyers.mockRejectedValue(new Error('Helius API rate limited'));
+      mockValidateTokens.mockRejectedValue(new Error('Helius API rate limited'));
 
       const { emit, events } = makeEmitSpy();
 
@@ -282,7 +342,8 @@ describe('runAnalysisPipeline', () => {
     });
 
     it('persists exclusion decision for low coverage token wallet', async () => {
-      mockDiscoverBuyers.mockResolvedValue({
+      mockValidateTokens.mockResolvedValue({
+        validatedTokens: [...TOKENS],
         buyers: [
           {
             walletAddress: 'LowCoverage',
@@ -294,8 +355,12 @@ describe('runAnalysisPipeline', () => {
             ],
           },
         ],
-        tokenCount: 2,
-        totalUniqueBuyers: 1,
+        stats: {
+          candidateCount: 2,
+          validatedCount: 2,
+          discardedCount: 0,
+          multiTokenWalletCount: 1,
+        },
       });
       mockScoreWallets.mockReturnValue([
         {
@@ -319,6 +384,32 @@ describe('runAnalysisPipeline', () => {
       expect(mockQuery).toHaveBeenCalledWith(
         expect.stringContaining('inclusion_decision'),
         expect.arrayContaining(['excluded'])
+      );
+    });
+
+    it('adds wallet_centric_recovered reason when wallet is recovered', async () => {
+      mockRecoverWalletCentricBuyers.mockResolvedValueOnce({
+        buyers: [
+          {
+            walletAddress: 'RecoveredWallet',
+            tokensBought: 1,
+            totalTokens: 2,
+            coveragePercent: 50,
+            purchases: [
+              { walletAddress: 'RecoveredWallet', tokenAddress: 'TokenA', tokenName: 'Token A', purchasedAt: '2025-01-01T00:00:00Z', amountSol: null },
+            ],
+          },
+        ],
+        tokenCount: 2,
+        totalUniqueBuyers: 1,
+      });
+
+      const { emit } = makeEmitSpy();
+      await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'token' }, emit);
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('decision_reasons'),
+        expect.arrayContaining([expect.stringContaining('wallet_centric_recovered')])
       );
     });
   });

@@ -1,9 +1,16 @@
 import type { AnalysisMode, WalletSource } from '@/types/analysis';
-import { discoverBuyers, type DiscoveredBuyer } from '@/lib/analysis/discover-buyers';
+import {
+  recoverWalletCentricBuyers,
+  type DiscoveredBuyer,
+} from '@/lib/analysis/discover-buyers';
 import { discoverSiblingWallets } from '@/lib/analysis/discover-siblings';
 import { traceFundingForWallets } from '@/lib/analysis/trace-funding';
 import { scoreWallets, type ScoringInput, type ScoringResult } from '@/lib/analysis/scoring';
 import { solveCombinations, type WalletTokenSet } from '@/lib/analysis/combinations';
+import {
+  discoverRuggerTokens,
+  validateTokensByCrossReference,
+} from '@/lib/analysis/discover-rugger-tokens';
 import { query } from '@/lib/db';
 
 const ANALYSIS_CONCURRENCY = Number(process.env.ANALYSIS_CONCURRENCY ?? '3');
@@ -11,8 +18,20 @@ const FUNDING_BATCH_SIZE = 10;
 const GLOBAL_CANDIDATE_FACTOR = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_FACTOR ?? '50');
 const GLOBAL_CANDIDATE_MAX = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_MAX ?? '600');
 const STRICT_COVERAGE_THRESHOLD = Number(process.env.STRICT_COVERAGE_THRESHOLD ?? '40');
+const WALLET_CENTRIC_LOOKBACK_DAYS = Number(process.env.WALLET_CENTRIC_LOOKBACK_DAYS ?? '90');
+const WALLET_CENTRIC_RECOVERY_MAX = Number(process.env.WALLET_CENTRIC_RECOVERY_MAX ?? '120');
 
 export type EmitFn = (event: string, data: Record<string, unknown>) => void;
+
+function resolveWalletCentricRecoveryLimit(opts: PipelineOpts): number {
+  const cap = Math.max(0, WALLET_CENTRIC_RECOVERY_MAX);
+  const envDefault = Math.max(0, Number(process.env.WALLET_CENTRIC_MAX_CANDIDATES ?? '15'));
+  const raw = opts.walletCentricRecoveryLimit;
+  if (raw === undefined || raw === null || Number.isNaN(Number(raw))) {
+    return Math.min(envDefault, cap);
+  }
+  return Math.max(0, Math.min(Math.floor(Number(raw)), cap));
+}
 
 interface TokenInput {
   address: string;
@@ -23,6 +42,8 @@ export interface PipelineOpts {
   mode: AnalysisMode;
   fundingDepth?: number;
   buyerLimit?: number;
+  /** 0 = skip GMGN wallet-centric recovery; défaut serveur via WALLET_CENTRIC_MAX_CANDIDATES (15). */
+  walletCentricRecoveryLimit?: number;
 }
 
 interface MergedWallet {
@@ -34,6 +55,12 @@ interface MergedWallet {
   motherAddress: string | null;
   hasHighFanoutMother: boolean;
   motherChildCount: number;
+  recoveredByWalletCentric: boolean;
+}
+
+interface ModeRunResult {
+  mergedWallets: MergedWallet[];
+  effectiveTokens: TokenInput[];
 }
 
 type InclusionDecision = 'included' | 'excluded' | 'included_with_risk';
@@ -57,25 +84,43 @@ export async function runAnalysisPipeline(
   emit: EmitFn
 ): Promise<void> {
   const { mode, fundingDepth = 5, buyerLimit = 200 } = opts;
+  const walletCentricRecoveryLimit = resolveWalletCentricRecoveryLimit(opts);
 
   try {
     await updateAnalysisStatus(analysisId, 'running', 0, 'Starting analysis...');
     emit('started', { analysisId, mode, tokenCount: tokens.length });
 
-    let mergedWallets: MergedWallet[];
+    let modeRun: ModeRunResult;
 
     if (mode === 'token') {
-      mergedWallets = await runTokenMode(analysisId, tokens, ruggerWallet, buyerLimit, emit);
+      modeRun = await runTokenMode(
+        analysisId,
+        tokens,
+        ruggerWallet,
+        buyerLimit,
+        walletCentricRecoveryLimit,
+        emit
+      );
     } else if (mode === 'funding') {
-      mergedWallets = await runFundingMode(analysisId, ruggerWallet, userId, fundingDepth, buyerLimit, emit);
+      modeRun = await runFundingMode(tokens, ruggerWallet, userId, fundingDepth, buyerLimit, emit);
     } else {
-      mergedWallets = await runCombinedMode(analysisId, tokens, ruggerWallet, userId, fundingDepth, buyerLimit, emit);
+      modeRun = await runCombinedMode(
+        analysisId,
+        tokens,
+        ruggerWallet,
+        userId,
+        fundingDepth,
+        buyerLimit,
+        walletCentricRecoveryLimit,
+        emit
+      );
     }
+    const { mergedWallets, effectiveTokens } = modeRun;
 
     emit('progress', { phase: 'scoring', percent: 90 });
     await updateAnalysisStatus(analysisId, 'running', 90, 'Computing scores...');
 
-    const { scoredWallets, combinations } = computeScoresAndCombinations(mergedWallets, tokens);
+    const { scoredWallets } = computeScoresAndCombinations(mergedWallets, effectiveTokens);
     const decisions = buildWalletDecisions(mergedWallets, scoredWallets);
 
     emit('progress', { phase: 'persisting', percent: 95 });
@@ -89,7 +134,7 @@ export async function runAnalysisPipeline(
       ? Math.max(...scoredWallets.map((s) => s.consistency))
       : 0;
 
-    await finalizeAnalysis(analysisId, tokens.length, buyerCount);
+    await finalizeAnalysis(analysisId, effectiveTokens.length, buyerCount);
 
     emit('complete', {
       analysisId,
@@ -110,35 +155,99 @@ async function runTokenMode(
   tokens: TokenInput[],
   ruggerWallet: string,
   buyerLimit: number,
+  walletCentricRecoveryLimit: number,
   emit: EmitFn
-): Promise<MergedWallet[]> {
-  const buyers = await discoverBuyersParallel(tokens, ruggerWallet, buyerLimit, emit);
+): Promise<ModeRunResult> {
+  const { buyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
+    tokens,
+    ruggerWallet,
+    buyerLimit,
+    emit
+  );
 
-  return buyers.map((b) => ({
-    walletAddress: b.walletAddress,
-    source: 'token' as WalletSource,
-    purchases: b.purchases.map((p) => ({
-      tokenAddress: p.tokenAddress,
-      tokenName: p.tokenName,
-      purchasedAt: p.purchasedAt,
-      amountSol: p.amountSol,
+  let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
+
+  if (walletCentricRecoveryLimit === 0) {
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 55,
+      detail: 'Recovery wallet-centric désactivée (0 wallet)',
+    });
+    recoveredResult = {
+      buyers: [],
+      tokenCount: effectiveTokens.length,
+      totalUniqueBuyers: 0,
+    };
+  } else {
+    emit('progress', { phase: 'wallet_centric_recovery', percent: 45, detail: 'Chargement des candidats…' });
+    const candidateWallets = await loadWalletCentricCandidates(analysisId);
+    const historicalCoverage = await loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId);
+    const rankedWallets = selectTopCandidatesByCoverage(
+      candidateWallets,
+      buyers,
+      historicalCoverage,
+      walletCentricRecoveryLimit
+    );
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 48,
+      detail: `${candidateWallets.length} en base → ${rankedWallets.length} retenus (meilleure couverture, N=${walletCentricRecoveryLimit})`,
+    });
+
+    recoveredResult = await recoverWalletCentricBuyers(effectiveTokens, rankedWallets, {
+      excludeWallets: [ruggerWallet],
+      fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+      toMs: Date.now(),
+      maxCandidates: Math.max(1, rankedWallets.length || 1),
+      onProgress: (current, total) => {
+        const pct = 48 + Math.round((current / Math.max(1, total)) * 20);
+        emit('progress', {
+          phase: 'wallet_centric_recovery',
+          percent: pct,
+          detail: `${current}/${total} wallets analysés`,
+        });
+      },
+    });
+  }
+
+  emit('progress', { phase: 'wallet_centric_recovery', percent: 70, detail: 'Fusion des résultats…' });
+  const { mergedBuyers, recoveredWalletAddresses } = mergeRecoveredBuyers(
+    buyers,
+    recoveredResult.buyers
+  );
+  if (recoveredWalletAddresses.size > 0) {
+    emit('wallet_centric_recovered', { recoveredCount: recoveredWalletAddresses.size });
+  }
+
+  return {
+    mergedWallets: mergedBuyers.map((b) => ({
+      walletAddress: b.walletAddress,
+      source: 'token' as WalletSource,
+      purchases: b.purchases.map((p) => ({
+        tokenAddress: p.tokenAddress,
+        tokenName: p.tokenName,
+        purchasedAt: p.purchasedAt,
+        amountSol: p.amountSol,
+      })),
+      fundingChain: null,
+      fundingDepth: null,
+      motherAddress: null,
+      hasHighFanoutMother: false,
+      motherChildCount: 0,
+      recoveredByWalletCentric: recoveredWalletAddresses.has(b.walletAddress),
     })),
-    fundingChain: null,
-    fundingDepth: null,
-    motherAddress: null,
-    hasHighFanoutMother: false,
-    motherChildCount: 0,
-  }));
+    effectiveTokens,
+  };
 }
 
 async function runFundingMode(
-  _analysisId: string,
+  tokens: TokenInput[],
   ruggerWallet: string,
   userId: string,
   fundingDepth: number,
   siblingLimit: number,
   emit: EmitFn
-): Promise<MergedWallet[]> {
+): Promise<ModeRunResult> {
   emit('progress', { phase: 'siblings', percent: 10 });
 
   const siblingResult = await discoverSiblingWallets(ruggerWallet, userId, {
@@ -155,16 +264,20 @@ async function runFundingMode(
 
   emit('progress', { phase: 'siblings', percent: 70 });
 
-  return siblingResult.siblings.map((s) => ({
-    walletAddress: s.walletAddress,
-    source: 'funding' as WalletSource,
-    purchases: [],
-    fundingChain: siblingResult.ruggerChain,
-    fundingDepth: siblingResult.ruggerChain.length - 1,
-    motherAddress: s.motherAddress,
-    hasHighFanoutMother: siblingResult.hasHighFanoutMother,
-    motherChildCount: siblingResult.motherChildCount,
-  }));
+  return {
+    mergedWallets: siblingResult.siblings.map((s) => ({
+      walletAddress: s.walletAddress,
+      source: 'funding' as WalletSource,
+      purchases: [],
+      fundingChain: siblingResult.ruggerChain,
+      fundingDepth: siblingResult.ruggerChain.length - 1,
+      motherAddress: s.motherAddress,
+      hasHighFanoutMother: siblingResult.hasHighFanoutMother,
+      motherChildCount: siblingResult.motherChildCount,
+      recoveredByWalletCentric: false,
+    })),
+    effectiveTokens: tokens,
+  };
 }
 
 async function runCombinedMode(
@@ -174,11 +287,69 @@ async function runCombinedMode(
   userId: string,
   fundingDepth: number,
   buyerLimit: number,
+  walletCentricRecoveryLimit: number,
   emit: EmitFn
-): Promise<MergedWallet[]> {
-  const tokenBuyers = await discoverBuyersParallel(tokens, ruggerWallet, buyerLimit, emit);
+): Promise<ModeRunResult> {
+  const {
+    buyers: tokenBuyersInitial,
+    tokens: effectiveTokens,
+  } = await discoverAndValidateTokenUniverse(tokens, ruggerWallet, buyerLimit, emit);
 
-  emit('progress', { phase: 'siblings', percent: 50 });
+  let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
+
+  if (walletCentricRecoveryLimit === 0) {
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 50,
+      detail: 'Recovery wallet-centric désactivée (0 wallet)',
+    });
+    recoveredResult = {
+      buyers: [],
+      tokenCount: effectiveTokens.length,
+      totalUniqueBuyers: 0,
+    };
+  } else {
+    emit('progress', { phase: 'wallet_centric_recovery', percent: 45, detail: 'Chargement des candidats…' });
+    const candidateWallets = await loadWalletCentricCandidates(analysisId);
+    const historicalCoverage = await loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId);
+    const rankedWallets = selectTopCandidatesByCoverage(
+      candidateWallets,
+      tokenBuyersInitial,
+      historicalCoverage,
+      walletCentricRecoveryLimit
+    );
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 48,
+      detail: `${candidateWallets.length} en base → ${rankedWallets.length} retenus (meilleure couverture, N=${walletCentricRecoveryLimit})`,
+    });
+
+    recoveredResult = await recoverWalletCentricBuyers(effectiveTokens, rankedWallets, {
+      excludeWallets: [ruggerWallet],
+      fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+      toMs: Date.now(),
+      maxCandidates: Math.max(1, rankedWallets.length || 1),
+      onProgress: (current, total) => {
+        const pct = 48 + Math.round((current / Math.max(1, total)) * 4);
+        emit('progress', {
+          phase: 'wallet_centric_recovery',
+          percent: pct,
+          detail: `${current}/${total} wallets analysés`,
+        });
+      },
+    });
+  }
+
+  emit('progress', { phase: 'wallet_centric_recovery', percent: 52, detail: 'Fusion des résultats…' });
+  const { mergedBuyers: tokenBuyers, recoveredWalletAddresses } = mergeRecoveredBuyers(
+    tokenBuyersInitial,
+    recoveredResult.buyers
+  );
+  if (recoveredWalletAddresses.size > 0) {
+    emit('wallet_centric_recovered', { recoveredCount: recoveredWalletAddresses.size });
+  }
+
+  emit('progress', { phase: 'siblings', percent: 52 });
 
   const siblingResult = await discoverSiblingWallets(ruggerWallet, userId, {
     maxDepth: fundingDepth,
@@ -214,6 +385,7 @@ async function runCombinedMode(
       motherAddress: inBoth ? siblingResult.motherAddress : null,
       hasHighFanoutMother: inBoth ? siblingResult.hasHighFanoutMother : false,
       motherChildCount: inBoth ? siblingResult.motherChildCount : 0,
+      recoveredByWalletCentric: recoveredWalletAddresses.has(b.walletAddress),
     });
   }
 
@@ -228,6 +400,7 @@ async function runCombinedMode(
         motherAddress: s.motherAddress,
         hasHighFanoutMother: siblingResult.hasHighFanoutMother,
         motherChildCount: siblingResult.motherChildCount,
+        recoveredByWalletCentric: false,
       });
     }
   }
@@ -265,76 +438,79 @@ async function runCombinedMode(
     }
   }
 
-  return Array.from(allWallets.values());
+  return {
+    mergedWallets: Array.from(allWallets.values()),
+    effectiveTokens,
+  };
 }
 
-async function discoverBuyersParallel(
-  tokens: TokenInput[],
+async function discoverAndValidateTokenUniverse(
+  registeredTokens: TokenInput[],
   ruggerWallet: string,
   buyerLimit: number,
   emit: EmitFn
-): Promise<DiscoveredBuyer[]> {
-  let processedTokens = 0;
-  const allBuyers = new Map<string, DiscoveredBuyer>();
-  const totalTokens = tokens.length;
-  const globalCandidateLimit = computeGlobalCandidateLimit(totalTokens);
+): Promise<{ tokens: TokenInput[]; buyers: DiscoveredBuyer[] }> {
+  emit('progress', { phase: 'discovering_rugger_tokens', percent: 5 });
+  const allCandidateTokens = await discoverRuggerTokens(ruggerWallet, registeredTokens);
+  emit('tokens_discovered', {
+    candidateCount: allCandidateTokens.length,
+    registeredCount: registeredTokens.length,
+  });
 
-  for (let i = 0; i < tokens.length; i += ANALYSIS_CONCURRENCY) {
-    const batch = tokens.slice(i, i + ANALYSIS_CONCURRENCY);
-
-    const results = await Promise.all(
-      batch.map((token) =>
-        discoverBuyers([token], {
-          buyerLimit,
-          excludeWallets: [ruggerWallet],
-        })
-      )
-    );
-
-    for (let j = 0; j < results.length; j++) {
-      const result = results[j];
-      const token = batch[j];
-
-      for (const buyer of result.buyers) {
-        const existing = allBuyers.get(buyer.walletAddress);
-        if (existing) {
-          const newPurchases = buyer.purchases.filter(
-            (p) => !existing.purchases.some((ep) => ep.tokenAddress === p.tokenAddress)
-          );
-          existing.purchases.push(...newPurchases);
-          existing.tokensBought = existing.purchases.length;
-          existing.coveragePercent = (existing.purchases.length / tokens.length) * 100;
-        } else {
-          allBuyers.set(buyer.walletAddress, {
-            ...buyer,
-            totalTokens: tokens.length,
-            coveragePercent: (buyer.tokensBought / tokens.length) * 100,
-          });
-        }
-      }
-
-      processedTokens++;
-      emit('buyers_found', { tokenAddress: token.address, buyersFound: result.totalUniqueBuyers });
-      emit('progress', {
-        phase: 'discovering',
-        current: processedTokens,
-        total: tokens.length,
-        percent: Math.round((processedTokens / tokens.length) * 45),
-      });
+  emit('progress', { phase: 'cross_validating', percent: 10 });
+  const validated = await validateTokensByCrossReference(
+    allCandidateTokens,
+    new Set(registeredTokens.map((token) => token.address)),
+    {
+      buyerLimit,
+      excludeWallets: [ruggerWallet],
+      concurrency: ANALYSIS_CONCURRENCY,
+      onProgress: (current, total) => {
+        const pct = 10 + Math.round((current / total) * 30);
+        emit('progress', {
+          phase: 'cross_validating',
+          percent: pct,
+          detail: `${current}/${total} tokens analysés`,
+        });
+      },
+    }
+  );
+  emit('tokens_validated', {
+    validatedCount: validated.stats.validatedCount,
+    discardedCount: validated.stats.discardedCount,
+    multiTokenWalletCount: validated.stats.multiTokenWalletCount,
+  });
+  const buyersFoundByToken = new Map<string, number>();
+  for (const buyer of validated.buyers) {
+    for (const purchase of buyer.purchases) {
+      buyersFoundByToken.set(
+        purchase.tokenAddress,
+        (buyersFoundByToken.get(purchase.tokenAddress) ?? 0) + 1
+      );
     }
   }
+  for (const token of validated.validatedTokens) {
+    emit('buyers_found', {
+      tokenAddress: token.address,
+      buyersFound: buyersFoundByToken.get(token.address) ?? 0,
+    });
+  }
 
-  const buyers = Array.from(allBuyers.values());
-  const filteredBuyers = buyers.filter((buyer) => !isLikelyAggregatorWallet(buyer, totalTokens));
-  const removedAsLikelyBots = buyers.length - filteredBuyers.length;
+  const filteredBuyers = validated.buyers.filter(
+    (buyer) => !isLikelyAggregatorWallet(buyer, validated.validatedTokens.length)
+  );
+  const removedAsLikelyBots = validated.buyers.length - filteredBuyers.length;
   if (removedAsLikelyBots > 0) {
     emit('buyers_filtered', {
       reason: 'exchange_or_bot',
       removedCount: removedAsLikelyBots,
     });
   }
-  filteredBuyers.sort((a, b) => b.tokensBought - a.tokensBought);
-  const cappedBuyers = filteredBuyers.slice(0, globalCandidateLimit);
+
+  const globalCandidateLimit = computeGlobalCandidateLimit(validated.validatedTokens.length);
+  const cappedBuyers = filteredBuyers
+    .sort((a, b) => b.tokensBought - a.tokensBought || b.coveragePercent - a.coveragePercent)
+    .slice(0, globalCandidateLimit);
   if (cappedBuyers.length < filteredBuyers.length) {
     emit('buyers_capped', {
       totalAfterFiltering: filteredBuyers.length,
@@ -342,7 +518,11 @@ async function discoverBuyersParallel(
       cap: globalCandidateLimit,
     });
   }
-  return cappedBuyers;
+
+  return {
+    tokens: validated.validatedTokens,
+    buyers: cappedBuyers,
+  };
 }
 
 function computeGlobalCandidateLimit(totalTokens: number): number {
@@ -353,13 +533,130 @@ function computeGlobalCandidateLimit(totalTokens: number): number {
 function isLikelyAggregatorWallet(buyer: DiscoveredBuyer, totalTokens: number): boolean {
   if (totalTokens < 5) return false;
   const coverageRatio = buyer.tokensBought / totalTokens;
-  if (coverageRatio < 0.9) return false;
+  if (coverageRatio < 0.95) return false;
   const amountSolValues = buyer.purchases
     .map((purchase) => purchase.amountSol)
     .filter((amount): amount is number => amount != null && amount > 0);
   if (amountSolValues.length === 0) return false;
   const avgAmountSol = amountSolValues.reduce((sum, amount) => sum + amount, 0) / amountSolValues.length;
-  return avgAmountSol < 0.03;
+  const threshold = Number(process.env.AGGREGATOR_AVG_SOL_THRESHOLD ?? '0.012');
+  return avgAmountSol < threshold;
+}
+
+function mergeRecoveredBuyers(
+  baseBuyers: DiscoveredBuyer[],
+  recoveredBuyers: DiscoveredBuyer[]
+): {
+  mergedBuyers: DiscoveredBuyer[];
+  recoveredWalletAddresses: Set<string>;
+} {
+  const buyerMap = new Map<string, DiscoveredBuyer>(
+    baseBuyers.map((buyer) => [buyer.walletAddress, { ...buyer, purchases: [...buyer.purchases] }])
+  );
+  const recoveredWalletAddresses = new Set<string>();
+
+  for (const recovered of recoveredBuyers) {
+    const existing = buyerMap.get(recovered.walletAddress);
+    if (!existing) {
+      buyerMap.set(recovered.walletAddress, { ...recovered, purchases: [...recovered.purchases] });
+      recoveredWalletAddresses.add(recovered.walletAddress);
+      continue;
+    }
+
+    const existingTokens = new Set(existing.purchases.map((purchase) => purchase.tokenAddress));
+    let merged = false;
+    for (const purchase of recovered.purchases) {
+      if (existingTokens.has(purchase.tokenAddress)) continue;
+      existing.purchases.push(purchase);
+      existingTokens.add(purchase.tokenAddress);
+      merged = true;
+    }
+    if (merged) {
+      existing.tokensBought = existing.purchases.length;
+      existing.coveragePercent = (existing.tokensBought / existing.totalTokens) * 100;
+      recoveredWalletAddresses.add(recovered.walletAddress);
+    }
+  }
+
+  const mergedBuyers = Array.from(buyerMap.values()).sort(
+    (a, b) => b.tokensBought - a.tokensBought || b.coveragePercent - a.coveragePercent
+  );
+  return { mergedBuyers, recoveredWalletAddresses };
+}
+
+async function loadWalletCentricCandidates(analysisId: string): Promise<string[]> {
+  const rows = await query<{ wallet_address: string }>(
+    `WITH target_rugger AS (
+       SELECT rugger_id
+       FROM wallet_analyses
+       WHERE id = $1
+     )
+     SELECT DISTINCT wallet_address
+     FROM (
+       SELECT rbw.wallet_address
+       FROM rugger_buyer_wallets rbw
+       JOIN target_rugger tr ON tr.rugger_id = rbw.rugger_id
+       UNION ALL
+       SELECT bw.wallet_address
+       FROM analysis_buyer_wallets bw
+       JOIN wallet_analyses wa ON wa.id = bw.analysis_id
+       JOIN target_rugger tr ON tr.rugger_id = wa.rugger_id
+       UNION ALL
+       SELECT ww.wallet_address
+       FROM watchlist_wallets ww
+       JOIN target_rugger tr ON tr.rugger_id = ww.source_rugger_id
+     ) candidate_wallets`,
+    [analysisId]
+  );
+  return rows.map((row) => row.wallet_address);
+}
+
+async function loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId: string): Promise<Map<string, number>> {
+  const rows = await query<{ wallet_address: string; max_coverage: string | number }>(
+    `WITH target_rugger AS (
+       SELECT rugger_id
+       FROM wallet_analyses
+       WHERE id = $1
+     )
+     SELECT bw.wallet_address, MAX(bw.coverage_percent) AS max_coverage
+     FROM analysis_buyer_wallets bw
+     JOIN wallet_analyses wa ON wa.id = bw.analysis_id
+     JOIN target_rugger tr ON tr.rugger_id = wa.rugger_id
+     GROUP BY bw.wallet_address`,
+    [analysisId]
+  );
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    const n = typeof row.max_coverage === 'number' ? row.max_coverage : Number(row.max_coverage);
+    if (!Number.isFinite(n)) continue;
+    out.set(row.wallet_address.toLowerCase(), n);
+  }
+  return out;
+}
+
+function selectTopCandidatesByCoverage(
+  candidateWallets: string[],
+  currentBuyers: DiscoveredBuyer[],
+  historicalCoverage: Map<string, number>,
+  limit: number
+): string[] {
+  if (limit <= 0) return [];
+  const currentByWallet = new Map(
+    currentBuyers.map((b) => [b.walletAddress.toLowerCase(), b.coveragePercent])
+  );
+  const seen = new Set<string>();
+  const scored: { wallet: string; score: number }[] = [];
+  for (const raw of candidateWallets) {
+    const trimmed = raw.trim();
+    if (trimmed === '') continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const score = currentByWallet.get(key) ?? historicalCoverage.get(key) ?? 0;
+    scored.push({ wallet: trimmed, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.wallet.localeCompare(b.wallet));
+  return scored.slice(0, limit).map((s) => s.wallet);
 }
 
 function computeScoresAndCombinations(
@@ -429,6 +726,7 @@ function buildWalletDecisions(
     }
 
     if (wallet.source === 'both') decisionReasons.push('both_source_bonus');
+    if (wallet.recoveredByWalletCentric) decisionReasons.push('wallet_centric_recovered');
     if (wallet.source === 'funding') {
       inclusionDecision = 'included_with_risk';
       riskFlag = 'funding_only';

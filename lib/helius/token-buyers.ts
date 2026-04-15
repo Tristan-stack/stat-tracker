@@ -8,10 +8,12 @@ import {
 } from '@/lib/helius/client';
 
 const DEFAULT_BUYER_LIMIT = 200;
+const MAX_PAGES = Number(process.env.HELIUS_TOKEN_BUYER_MAX_PAGES ?? '12');
 const PUMPFUN_SOURCE = 'PUMP_FUN';
 
 interface GetTokenBuyersOpts {
   buyerLimit?: number;
+  maxPages?: number;
   beforeSignature?: string;
 }
 
@@ -29,10 +31,13 @@ export async function getTokenBuyers(
   opts?: GetTokenBuyersOpts
 ): Promise<TokenBuyer[]> {
   const limit = opts?.buyerLimit ?? DEFAULT_BUYER_LIMIT;
+  const maxPages = Math.max(1, opts?.maxPages ?? MAX_PAGES);
   const seenWallets = new Map<string, TokenBuyer>();
   let beforeSig = opts?.beforeSignature;
+  let page = 0;
 
-  while (seenWallets.size < limit) {
+  while (seenWallets.size < limit && page < maxPages) {
+    page += 1;
     const sigs: SignatureInfo[] = await getSignaturesForAddress(tokenMint, {
       limit: 1000,
       before: beforeSig,
@@ -68,7 +73,7 @@ function extractBuyers(
   for (const tx of txs) {
     if (seen.size >= limit) return;
 
-    if (!isPumpfunSwap(tx)) continue;
+    if (!isSwapWithTokenPurchase(tx, tokenMint)) continue;
 
     const buyer = extractBuyerFromSwap(tx, tokenMint);
     if (!buyer) continue;
@@ -81,6 +86,14 @@ function extractBuyers(
 
 function isPumpfunSwap(tx: HeliusEnhancedTransaction): boolean {
   return tx.source === PUMPFUN_SOURCE || (tx.type === 'SWAP' && tx.source === PUMPFUN_SOURCE);
+}
+
+/** Pump.fun ou tout SWAP enrichi où le mint cible sort vers un wallet (Raydium, Jupiter, etc.). */
+function isSwapWithTokenPurchase(tx: HeliusEnhancedTransaction, tokenMint: string): boolean {
+  if (isPumpfunSwap(tx)) return true;
+  if (tx.type !== 'SWAP' || !tx.events?.swap) return false;
+  const outs = tx.events.swap.tokenOutputs ?? [];
+  return outs.some((o) => o.mint === tokenMint && Boolean(o.userAccount));
 }
 
 function extractBuyerFromSwap(
@@ -109,7 +122,7 @@ function extractBuyerFromSwap(
   const tokenTransfer = tx.tokenTransfers?.find(
     (t) => t.mint === tokenMint && t.tokenAmount > 0 && t.toUserAccount
   );
-  if (tokenTransfer && tx.source === PUMPFUN_SOURCE) {
+  if (tokenTransfer && (tx.source === PUMPFUN_SOURCE || tx.type === 'SWAP')) {
     return {
       walletAddress: tokenTransfer.toUserAccount,
       tokenAddress: tokenMint,

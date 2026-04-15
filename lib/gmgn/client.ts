@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { throttleGmgn } from '@/lib/gmgn/throttle';
+import { throttleGmgn, penalizeGmgnSlot } from '@/lib/gmgn/throttle';
 import { gmgnFetchHttps } from '@/lib/gmgn/ipv4-fetch';
 
 const DEFAULT_HOST = 'https://openapi.gmgn.ai';
@@ -47,49 +47,64 @@ function httpErrorDetail(path: string, status: number, body: string): Error {
   return new Error(`GMGN ${path}: HTTP ${status} — ${snippet}`);
 }
 
+const MAX_RETRIES = 3;
+const RETRY_BACKOFF_MS = [2000, 5000, 10000];
+
 export async function gmgnGet<T = unknown>(
   path: string,
   query: Record<string, string | number | string[] | undefined>
 ): Promise<T> {
-  await throttleGmgn();
   const apiKey = process.env.GMGN_API_KEY;
   if (!apiKey) {
     throw new Error('GMGN_API_KEY is not configured');
   }
-  const url = buildUrl(path, query);
-  const res = await gmgnFetchHttps(url, {
-    'X-APIKEY': apiKey,
-    Accept: 'application/json',
-    'User-Agent': 'StatTracker/1.0 (Next.js; GMGN OpenAPI)',
-  });
-  const text = await res.text();
 
-  if (!res.ok) {
-    try {
-      const errJson = JSON.parse(text) as GmgnEnvelope<unknown>;
-      const apiMsg = [errJson.error, errJson.message].filter(Boolean).join(' — ');
-      if (apiMsg) {
-        throw new Error(`GMGN ${path}: HTTP ${res.status} — ${apiMsg}`);
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith(`GMGN ${path}: HTTP`)) throw e;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    await throttleGmgn();
+    const url = buildUrl(path, query);
+    const res = await gmgnFetchHttps(url, {
+      'X-APIKEY': apiKey,
+      Accept: 'application/json',
+      'User-Agent': 'StatTracker/1.0 (Next.js; GMGN OpenAPI)',
+    });
+    const text = await res.text();
+
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const backoff = RETRY_BACKOFF_MS[attempt] ?? 10000;
+      penalizeGmgnSlot(backoff);
+      await new Promise((r) => setTimeout(r, backoff));
+      continue;
     }
-    throw httpErrorDetail(path, res.status, text);
+
+    if (!res.ok) {
+      try {
+        const errJson = JSON.parse(text) as GmgnEnvelope<unknown>;
+        const apiMsg = [errJson.error, errJson.message].filter(Boolean).join(' — ');
+        if (apiMsg) {
+          throw new Error(`GMGN ${path}: HTTP ${res.status} — ${apiMsg}`);
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith(`GMGN ${path}: HTTP`)) throw e;
+      }
+      throw httpErrorDetail(path, res.status, text);
+    }
+
+    let json: GmgnEnvelope<T>;
+    try {
+      json = JSON.parse(text) as GmgnEnvelope<T>;
+    } catch {
+      throw new Error(
+        `GMGN ${path}: réponse non-JSON (HTTP ${res.status}) — ${truncateResponseBody(text)}`
+      );
+    }
+    if (json.code !== 0) {
+      const msg = [json.error, json.message].filter(Boolean).join(' — ') || `code ${json.code}`;
+      throw new Error(`GMGN ${path}: ${msg}`);
+    }
+    return json.data as T;
   }
 
-  let json: GmgnEnvelope<T>;
-  try {
-    json = JSON.parse(text) as GmgnEnvelope<T>;
-  } catch {
-    throw new Error(
-      `GMGN ${path}: réponse non-JSON (HTTP ${res.status}) — ${truncateResponseBody(text)}`
-    );
-  }
-  if (json.code !== 0) {
-    const msg = [json.error, json.message].filter(Boolean).join(' — ') || `code ${json.code}`;
-    throw new Error(`GMGN ${path}: ${msg}`);
-  }
-  return json.data as T;
+  throw new Error(`GMGN ${path}: rate-limited after ${MAX_RETRIES} retries`);
 }
 
 export interface WalletActivityRow {

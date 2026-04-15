@@ -140,6 +140,21 @@ function getRiskBadgeClass(level: 'low' | 'medium' | 'high' | null): string {
   return 'bg-muted text-muted-foreground';
 }
 
+function formatDecisionReason(reason: string | undefined): string {
+  if (!reason) return '—';
+  const labels: Record<string, string> = {
+    wallet_centric_recovered: 'Wallet récupéré (passe ciblée)',
+    high_coverage: 'Bonne couverture',
+    low_coverage: 'Couverture faible',
+    funding_only: 'Funding only',
+    high_fanout_mother: 'Mère à haut fanout',
+    weak_execution_weight: 'Poids faible',
+    deep_funding_path: 'Funding profond',
+    both_source_bonus: 'Signal token+funding',
+  };
+  return labels[reason] ?? reason;
+}
+
 function buildSortQuery(criteria: SortCriterion[]): string {
   return criteria.map((c) => `${c.field}:${c.direction}`).join(',');
 }
@@ -392,7 +407,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                         : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {w.decisionReasons[0] ?? '—'}
+                      {formatDecisionReason(w.decisionReasons[0])}
                     </td>
                     <td className="px-3 py-2">
                       {w.motherAddress && (

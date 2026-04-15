@@ -45,6 +45,9 @@ async function run() {
       throw new Error(`Run ${index + 1} failed: HTTP ${response.status} ${await response.text()}`);
     }
     const body = await response.json();
+    const recoveredCount = Array.isArray(body.wallets)
+      ? body.wallets.filter((wallet) => Array.isArray(wallet.decisionReasons) && wallet.decisionReasons.includes('wallet_centric_recovered')).length
+      : 0;
     timings.push(elapsedMs);
     console.log(
       JSON.stringify(
@@ -53,6 +56,7 @@ async function run() {
           elapsedMs,
           wallets: body.wallets?.length ?? 0,
           total: body.total ?? 0,
+          recoveredCount,
         },
         null,
         2

@@ -156,7 +156,7 @@ describe('getTokenBuyers', () => {
     expect(buyers).toHaveLength(3);
   });
 
-  it('ignores non-Pump.fun swap transactions (e.g. Raydium)', async () => {
+  it('extracts buyers from non-Pump DEX swaps when SWAP has token output (e.g. Raydium)', async () => {
     mockGetSigs.mockResolvedValueOnce([makeSig('sig1'), makeSig('sig2'), makeSig('sig3')]);
     mockParseTxs.mockResolvedValueOnce([
       makeNonPumpfunSwapTx('BuyerRay', TOKEN_MINT, 1700000000),
@@ -165,8 +165,8 @@ describe('getTokenBuyers', () => {
     ]);
 
     const buyers = await getTokenBuyers(TOKEN_MINT);
-    expect(buyers).toHaveLength(1);
-    expect(buyers[0].walletAddress).toBe('BuyerPF');
+    expect(buyers).toHaveLength(2);
+    expect(buyers.map((b) => b.walletAddress)).toEqual(['BuyerRay', 'BuyerPF']);
   });
 
   it('ignores plain transfer transactions', async () => {
