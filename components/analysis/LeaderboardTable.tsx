@@ -213,19 +213,20 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
   useEffect(() => { void fetchCrossRugger(); }, [fetchCrossRugger]);
 
   const toggleSortFromColumn = (field: SortField) => {
-    setSortCriteria((prev) => {
+    setSortCriteria((prev): SortCriterion[] => {
       const existing = prev.find((criterion) => criterion.field === field);
       if (existing) {
         // Cycle: desc -> asc -> off
         if (existing.direction === 'desc') {
-          return prev.map((criterion) => criterion.field === field
-            ? { ...criterion, direction: 'asc' }
-            : criterion
+          return prev.map((criterion): SortCriterion =>
+            criterion.field === field
+              ? { field: criterion.field, direction: 'asc' }
+              : criterion
           );
         }
         return prev.filter((criterion) => criterion.field !== field);
       }
-      return [...prev, { field, direction: 'desc' }].slice(0, MAX_SORT_CRITERIA);
+      return [...prev, { field, direction: 'desc' as const }].slice(0, MAX_SORT_CRITERIA);
     });
     setOffset(0);
   };
