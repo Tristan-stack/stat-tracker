@@ -18,6 +18,7 @@ interface AnalysisLauncherProps {
     mode: AnalysisMode;
     fundingDepth: number;
     walletCentricRecoveryLimit: number;
+    excludeInactiveOver24h: boolean;
   }) => void;
   isDisabled?: boolean;
 }
@@ -34,6 +35,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
   const [mode, setMode] = useState<AnalysisMode>('combined');
   const [fundingDepth, setFundingDepth] = useState(5);
   const [walletCentricRecoveryLimit, setWalletCentricRecoveryLimit] = useState(WALLET_RECOVERY_DEFAULT);
+  const [excludeInactiveOver24h, setExcludeInactiveOver24h] = useState(false);
 
   const needsTokens = mode === 'token' || mode === 'combined';
   const showDepth = mode === 'funding' || mode === 'combined';
@@ -50,7 +52,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
           )
         )
       : WALLET_RECOVERY_DEFAULT;
-    onLaunch({ mode, fundingDepth, walletCentricRecoveryLimit: clamped });
+    onLaunch({ mode, fundingDepth, walletCentricRecoveryLimit: clamped, excludeInactiveOver24h });
   };
 
   return (
@@ -137,6 +139,36 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
           />
         </div>
       )}
+
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Filtres pré-analyse</Label>
+        <label
+          htmlFor="exclude-inactive-24h"
+          className={cn(
+            'flex items-start gap-3 rounded-lg border p-3 transition-colors cursor-pointer',
+            excludeInactiveOver24h
+              ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+              : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
+          )}
+        >
+          <input
+            id="exclude-inactive-24h"
+            type="checkbox"
+            checked={excludeInactiveOver24h}
+            onChange={(e) => setExcludeInactiveOver24h(e.target.checked)}
+            className="mt-0.5 size-4 rounded border-border accent-primary"
+            disabled={!canLaunch}
+          />
+          <div className="flex-1 space-y-0.5">
+            <span className="block text-sm font-medium">
+              Exclure les wallets inactifs depuis plus de 24h
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              Filtre les acheteurs via Helius avant l&apos;analyse profonde. Gain de temps et d&apos;appels API sur les wallets morts.
+            </span>
+          </div>
+        </label>
+      </div>
 
       <Button type="button" onClick={handleLaunch} disabled={!canLaunch} className="gap-2">
         <IconSearch className="size-4" />

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth-session';
 import { query } from '@/lib/db';
 import { ruggerExistsForUser } from '@/lib/rugger-access';
+import { mergeWalletPreviewsToBestBuyPerMint, type BestBuyPerMint } from '@/lib/gmgn/merge-best-buy-per-mint';
 import { buildPurchasePreviews } from '@/lib/gmgn/wallet-purchases';
 import type { StatusId } from '@/types/rugger';
 
@@ -18,14 +19,7 @@ interface ExistingTokenRow {
   name: string;
 }
 
-interface AggregatedPreview {
-  tokenAddress: string;
-  tokenName: string | null;
-  purchasedAt: string;
-  entryPrice: number;
-  high: number;
-  low: number;
-}
+type AggregatedPreview = BestBuyPerMint;
 
 interface WalletRankRow {
   walletAddress: string;
@@ -72,36 +66,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const allMints = new Set<string>();
   for (const walletAddress of buyerWallets) {
     const previews = await buildPurchasePreviews(walletAddress, fromMs, toMs);
-    const tokenMap = new Map<string, AggregatedPreview>();
-    for (const preview of previews) {
-      const mint = preview.tokenAddress.trim();
-      if (mint === '') continue;
-      const existing = tokenMap.get(mint);
-      if (!existing) {
-        tokenMap.set(mint, {
-          tokenAddress: mint,
-          tokenName: preview.name?.trim() || null,
-          purchasedAt: preview.purchasedAt,
-          entryPrice: preview.entryPrice,
-          high: preview.high,
-          low: preview.low,
-        });
-        continue;
-      }
-      const betterEntry = preview.entryPrice < existing.entryPrice;
-      const sameEntry = preview.entryPrice === existing.entryPrice;
-      const olderBuy = new Date(preview.purchasedAt).getTime() < new Date(existing.purchasedAt).getTime();
-      if (betterEntry || (sameEntry && olderBuy)) {
-        tokenMap.set(mint, {
-          tokenAddress: mint,
-          tokenName: preview.name?.trim() || null,
-          purchasedAt: preview.purchasedAt,
-          entryPrice: preview.entryPrice,
-          high: preview.high,
-          low: preview.low,
-        });
-      }
-    }
+    const tokenMap = mergeWalletPreviewsToBestBuyPerMint(previews);
     if (tokenMap.size > 0) {
       walletTokenMaps.set(walletAddress, tokenMap);
       for (const mint of tokenMap.keys()) allMints.add(mint);

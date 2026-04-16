@@ -23,6 +23,8 @@ interface AnalysisProgressProps {
   fundingDepth: number;
   /** Nombre de wallets (top coverage) pour recovery GMGN ; 0 = désactivé. */
   walletCentricRecoveryLimit?: number;
+  /** Si true : éliminer les buyers dont la dernière activité on-chain est > 24h avant l'analyse profonde. */
+  excludeInactiveOver24h?: boolean;
   /** Si défini : ne pas relancer l’analyse, poller le statut jusqu’à completed/failed. */
   resumeAnalysisId?: string | null;
   onStarted?: (analysisId: string) => void;
@@ -51,6 +53,7 @@ export default function AnalysisProgress({
   mode,
   fundingDepth,
   walletCentricRecoveryLimit = 15,
+  excludeInactiveOver24h = false,
   resumeAnalysisId = null,
   onStarted,
   onComplete,
@@ -137,6 +140,15 @@ export default function AnalysisProgress({
           appendLog(msg + (data.tokenAddress ? ` (${String(data.tokenAddress).slice(0, 8)}…)` : ''));
           break;
         }
+        case 'buyers_filtered_inactive': {
+          const removed = data.removedCount ?? 0;
+          const kept = data.keptCount ?? 0;
+          const threshold = data.thresholdHours ?? 24;
+          const msg = `Filtre activité : ${removed} wallets éliminés (inactifs > ${threshold}h) · ${kept} conservés`;
+          setPhase(msg);
+          appendLog(msg);
+          break;
+        }
         case 'tokens_discovered': {
           const msg =
             `${data.candidateCount ?? 0} tokens découverts via Helius` +
@@ -191,7 +203,7 @@ export default function AnalysisProgress({
       const res = await fetch(`/api/ruggers/${ruggerId}/analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, fundingDepth, walletCentricRecoveryLimit }),
+        body: JSON.stringify({ mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h }),
         signal: controller.signal,
       });
       if (connectTimeoutRef.current) {
@@ -264,7 +276,7 @@ export default function AnalysisProgress({
         connectTimeoutRef.current = null;
       }
     }
-  }, [ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, appendLog, updateEta]);
+  }, [ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h, appendLog, updateEta]);
 
   useEffect(() => {
     if (!resumeAnalysisId) return;
@@ -356,7 +368,7 @@ export default function AnalysisProgress({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- startAnalysis regroupe déjà les deps du flux SSE
-  }, [resumeAnalysisId, ruggerId, mode, fundingDepth, walletCentricRecoveryLimit]);
+  }, [resumeAnalysisId, ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h]);
 
   return (
     <div className="space-y-4">

@@ -55,10 +55,9 @@ export function makeBestWalletResponseCacheKey(input: {
   analysisId: string;
   tpMinPercent: number;
   tokenLimit: number;
-  walletLimit: number;
-  candidateLimit: number;
+  maxTieWallets: number;
 }): string {
-  return `analysis:${input.analysisId}:tp:${input.tpMinPercent}:tokens:${input.tokenLimit}:wallets:${input.walletLimit}:candidates:${input.candidateLimit}`;
+  return `analysis:${input.analysisId}:tp:${input.tpMinPercent}:tokens:${input.tokenLimit}:tieMax:${input.maxTieWallets}:v2`;
 }
 
 export function getWalletPreviewCache<T>(key: string): T | null {

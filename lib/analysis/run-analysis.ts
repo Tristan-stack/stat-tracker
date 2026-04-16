@@ -5,6 +5,7 @@ import {
 } from '@/lib/analysis/discover-buyers';
 import { discoverSiblingWallets } from '@/lib/analysis/discover-siblings';
 import { traceFundingForWallets } from '@/lib/analysis/trace-funding';
+import { filterBuyersByLastActivity } from '@/lib/analysis/filter-active-buyers';
 import { scoreWallets, type ScoringInput, type ScoringResult } from '@/lib/analysis/scoring';
 import { solveCombinations, type WalletTokenSet } from '@/lib/analysis/combinations';
 import {
@@ -33,6 +34,45 @@ function resolveWalletCentricRecoveryLimit(opts: PipelineOpts): number {
   return Math.max(0, Math.min(Math.floor(Number(raw)), cap));
 }
 
+async function applyInactiveFilter(
+  buyers: DiscoveredBuyer[],
+  thresholdHours: number,
+  emit: EmitFn
+): Promise<DiscoveredBuyer[]> {
+  if (buyers.length === 0) return buyers;
+
+  emit('progress', {
+    phase: 'filter_inactive',
+    percent: 42,
+    detail: `Vérification de l'activité on-chain de ${buyers.length} wallets (seuil ${thresholdHours}h)…`,
+  });
+
+  const result = await filterBuyersByLastActivity(buyers, {
+    thresholdHours,
+    onProgress: (current, total) => {
+      emit('progress', {
+        phase: 'filter_inactive',
+        percent: 42,
+        detail: `${current}/${total} wallets vérifiés`,
+      });
+    },
+  });
+
+  emit('progress', {
+    phase: 'filter_inactive',
+    percent: 44,
+    detail: `${result.removedCount} wallets éliminés (inactifs > ${thresholdHours}h) · ${result.keptBuyers.length} conservés`,
+  });
+  emit('buyers_filtered_inactive', {
+    removedCount: result.removedCount,
+    keptCount: result.keptBuyers.length,
+    thresholdHours,
+    unknownCount: result.unknownWallets.length,
+  });
+
+  return result.keptBuyers;
+}
+
 interface TokenInput {
   address: string;
   name: string | null;
@@ -44,6 +84,10 @@ export interface PipelineOpts {
   buyerLimit?: number;
   /** 0 = skip GMGN wallet-centric recovery; défaut serveur via WALLET_CENTRIC_MAX_CANDIDATES (15). */
   walletCentricRecoveryLimit?: number;
+  /** Si true : éliminer les buyers dont la dernière activité on-chain Helius est > `inactiveThresholdHours` (défaut 24h) avant siblings/funding/recovery. */
+  excludeInactiveOver24h?: boolean;
+  /** Seuil d'inactivité en heures. Défaut 24. Utilisé uniquement si `excludeInactiveOver24h` est true. */
+  inactiveThresholdHours?: number;
 }
 
 interface MergedWallet {
@@ -85,6 +129,8 @@ export async function runAnalysisPipeline(
 ): Promise<void> {
   const { mode, fundingDepth = 5, buyerLimit = 200 } = opts;
   const walletCentricRecoveryLimit = resolveWalletCentricRecoveryLimit(opts);
+  const excludeInactiveOver24h = Boolean(opts.excludeInactiveOver24h);
+  const inactiveThresholdHours = Math.max(1, opts.inactiveThresholdHours ?? 24);
 
   try {
     await updateAnalysisStatus(analysisId, 'running', 0, 'Starting analysis...');
@@ -99,6 +145,8 @@ export async function runAnalysisPipeline(
         ruggerWallet,
         buyerLimit,
         walletCentricRecoveryLimit,
+        excludeInactiveOver24h,
+        inactiveThresholdHours,
         emit
       );
     } else if (mode === 'funding') {
@@ -112,6 +160,8 @@ export async function runAnalysisPipeline(
         fundingDepth,
         buyerLimit,
         walletCentricRecoveryLimit,
+        excludeInactiveOver24h,
+        inactiveThresholdHours,
         emit
       );
     }
@@ -156,14 +206,20 @@ async function runTokenMode(
   ruggerWallet: string,
   buyerLimit: number,
   walletCentricRecoveryLimit: number,
+  excludeInactiveOver24h: boolean,
+  inactiveThresholdHours: number,
   emit: EmitFn
 ): Promise<ModeRunResult> {
-  const { buyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
+  const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
     tokens,
     ruggerWallet,
     buyerLimit,
     emit
   );
+
+  const buyers = excludeInactiveOver24h
+    ? await applyInactiveFilter(initialBuyers, inactiveThresholdHours, emit)
+    : initialBuyers;
 
   let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
 
@@ -288,12 +344,18 @@ async function runCombinedMode(
   fundingDepth: number,
   buyerLimit: number,
   walletCentricRecoveryLimit: number,
+  excludeInactiveOver24h: boolean,
+  inactiveThresholdHours: number,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const {
-    buyers: tokenBuyersInitial,
+    buyers: discoveredBuyers,
     tokens: effectiveTokens,
   } = await discoverAndValidateTokenUniverse(tokens, ruggerWallet, buyerLimit, emit);
+
+  const tokenBuyersInitial = excludeInactiveOver24h
+    ? await applyInactiveFilter(discoveredBuyers, inactiveThresholdHours, emit)
+    : discoveredBuyers;
 
   let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
 

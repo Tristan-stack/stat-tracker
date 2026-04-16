@@ -21,12 +21,12 @@ describe('best-wallet cache', () => {
       analysisId: 'a1',
       tpMinPercent: 80,
       tokenLimit: 20,
-      walletLimit: 40,
-      candidateLimit: 16,
+      maxTieWallets: 120,
     });
 
     expect(walletKey).toContain('analysis:a1');
     expect(responseKey).toContain('tp:80');
+    expect(responseKey).toContain('tieMax:120');
   });
 
   it('stores, reads, and invalidates values', () => {
@@ -40,8 +40,7 @@ describe('best-wallet cache', () => {
       analysisId: 'analysis-x',
       tpMinPercent: 75,
       tokenLimit: 10,
-      walletLimit: 20,
-      candidateLimit: 8,
+      maxTieWallets: 80,
     });
 
     setWalletPreviewCache(walletKey, [{ tokenAddress: 'mint' }], 60_000);

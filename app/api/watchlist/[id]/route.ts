@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth-session';
 import { query } from '@/lib/db';
+import { syncWatchlistToHeliusAsync } from '@/lib/helius/webhooks';
 
 export async function PATCH(
   req: NextRequest,
@@ -67,6 +68,8 @@ export async function DELETE(
   if (rows.length === 0) {
     return NextResponse.json({ error: 'Watchlist entry not found' }, { status: 404 });
   }
+
+  syncWatchlistToHeliusAsync();
 
   return NextResponse.json({ deleted: true });
 }

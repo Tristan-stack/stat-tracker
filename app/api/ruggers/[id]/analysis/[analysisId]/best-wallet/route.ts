@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth-session';
 import { query } from '@/lib/db';
 import { buildPurchasePreviews } from '@/lib/gmgn/wallet-purchases';
-import { rankBestWallets, type WalletTokenPreview } from '@/lib/analysis/best-wallet';
+import { rankBestWallets, type BestWalletResult, type WalletTokenPreview } from '@/lib/analysis/best-wallet';
+import { computeTieCapMeta, resolveBestWalletTieMax } from '@/lib/analysis/best-wallet-tie';
 import {
   getBestWalletCacheStats,
   getBestWalletResponseCache,
@@ -17,10 +18,6 @@ import { runWithConcurrency } from '@/lib/analysis/async-pool';
 const DEFAULT_TP_MIN_PERCENT = 80;
 const DEFAULT_TOKEN_LIMIT = 20;
 const MAX_TOKEN_LIMIT = 40;
-const DEFAULT_WALLET_LIMIT = 40;
-const MAX_WALLET_LIMIT = 80;
-const DEFAULT_CANDIDATE_LIMIT = 16;
-const MAX_CANDIDATE_LIMIT = 40;
 const DEFAULT_CONCURRENCY = 1;
 const DEFAULT_WALLET_TIMEOUT_MS = 180_000;
 const WALLET_PREVIEW_CACHE_TTL_MS = 30 * 60_000;
@@ -41,7 +38,9 @@ interface TopTokenRow {
 interface WalletRow {
   wallet_address: string;
   coverage_percent: number;
+  active_days: number;
   candidate_token_matches: number;
+  tied_at_max_count: number;
 }
 
 interface BenchmarkRow {
@@ -50,15 +49,17 @@ interface BenchmarkRow {
 }
 
 interface BestWalletPayload {
-  topWallets: ReturnType<typeof rankBestWallets>;
+  topWallets: Array<BestWalletResult & { activeDays: number }>;
   meta: {
     tpMinPercent: number;
     tokenLimit: number;
-    walletLimit: number;
+    selectionPolicy: 'bestCoverageTie';
+    maxTieWallets: number;
+    maxCoveragePercent: number | null;
+    tiedAtMaxCount: number;
+    tieCapApplied: boolean;
     selectedTokenCount: number;
     scopedWalletCount: number;
-    candidateLimit: number;
-    candidateLimitApplied: boolean;
     walletsAnalyzed: number;
     walletsSucceeded: number;
     walletsFailed: number;
@@ -142,16 +143,7 @@ export async function GET(
     DEFAULT_TOKEN_LIMIT,
     MAX_TOKEN_LIMIT
   );
-  const walletLimit = parsePositiveInt(
-    url.searchParams.get('walletLimit'),
-    DEFAULT_WALLET_LIMIT,
-    MAX_WALLET_LIMIT
-  );
-  const candidateLimit = parsePositiveInt(
-    url.searchParams.get('candidateLimit'),
-    DEFAULT_CANDIDATE_LIMIT,
-    MAX_CANDIDATE_LIMIT
-  );
+  const maxTieWallets = resolveBestWalletTieMax(url.searchParams.get('maxTieWallets'));
   const concurrency = parsePositiveInt(
     url.searchParams.get('concurrency'),
     Number(process.env.GMGN_BEST_WALLET_CONCURRENCY ?? DEFAULT_CONCURRENCY),
@@ -213,9 +205,11 @@ export async function GET(
       meta: {
         tpMinPercent,
         tokenLimit,
-        walletLimit,
-        candidateLimit,
-        candidateLimitApplied: false,
+        selectionPolicy: 'bestCoverageTie',
+        maxTieWallets,
+        maxCoveragePercent: null,
+        tiedAtMaxCount: 0,
+        tieCapApplied: false,
         selectedTokenCount: 0,
         scopedWalletCount: 0,
         walletsAnalyzed: 0,
@@ -253,13 +247,11 @@ export async function GET(
   const toMs = Math.max(fromMs, Math.min(nowMs, endsAt + 7 * 86400000));
   const topTokenAddresses = topTokens.map((row) => row.token_address);
   const topTokenSet = new Set(topTokenAddresses);
-  const effectiveCandidateLimit = Math.min(candidateLimit, walletLimit);
   const responseCacheKey = makeBestWalletResponseCacheKey({
     analysisId,
     tpMinPercent,
     tokenLimit,
-    walletLimit,
-    candidateLimit: effectiveCandidateLimit,
+    maxTieWallets,
   });
   const cachedResponse = getBestWalletResponseCache<BestWalletPayload>(responseCacheKey);
   const streamRequested = url.searchParams.get('stream') === '1';
@@ -290,18 +282,45 @@ export async function GET(
          ORDER BY wallet_count DESC, bp.token_address ASC
          LIMIT $2
        ) t
+     ),
+     wallet_stats AS (
+       SELECT bw.wallet_address,
+              bw.coverage_percent,
+              bw.active_days::int AS active_days,
+              COUNT(DISTINCT CASE WHEN bp.token_address IN (SELECT token_address FROM top_tokens)
+                   THEN bp.token_address END)::int AS candidate_token_matches
+       FROM analysis_buyer_wallets bw
+       LEFT JOIN analysis_buyer_purchases bp ON bp.buyer_wallet_id = bw.id
+       WHERE bw.analysis_id = $1
+       GROUP BY bw.wallet_address, bw.coverage_percent, bw.active_days
+     ),
+     max_cov AS (
+       SELECT MAX(ws.coverage_percent) AS m FROM wallet_stats ws
+     ),
+     tied AS (
+       SELECT ws.wallet_address,
+              ws.coverage_percent,
+              ws.active_days,
+              ws.candidate_token_matches,
+              COUNT(*) OVER ()::int AS tied_at_max_count
+       FROM wallet_stats ws
+       CROSS JOIN max_cov mc
+       WHERE ws.coverage_percent = mc.m
+     ),
+     ranked AS (
+       SELECT t.*, ROW_NUMBER() OVER (
+         ORDER BY t.candidate_token_matches DESC, t.wallet_address ASC
+       )::int AS rn
+       FROM tied t
      )
-     SELECT bw.wallet_address,
-            bw.coverage_percent,
-            COUNT(DISTINCT CASE WHEN bp.token_address IN (SELECT token_address FROM top_tokens)
-                 THEN bp.token_address END)::int AS candidate_token_matches
-     FROM analysis_buyer_wallets bw
-     LEFT JOIN analysis_buyer_purchases bp ON bp.buyer_wallet_id = bw.id
-     WHERE bw.analysis_id = $1
-     GROUP BY bw.wallet_address, bw.coverage_percent
-     ORDER BY bw.coverage_percent DESC, candidate_token_matches DESC, bw.wallet_address ASC
-     LIMIT $3`,
-    [analysisId, tokenLimit, effectiveCandidateLimit]
+     SELECT wallet_address,
+            coverage_percent,
+            active_days,
+            candidate_token_matches,
+            tied_at_max_count
+     FROM ranked
+     WHERE rn <= $3`,
+    [analysisId, tokenLimit, maxTieWallets]
   );
   const candidateQueryMs = performance.now() - tCandidateStart;
 
@@ -404,18 +423,28 @@ export async function GET(
     const gmgnPhaseMs = performance.now() - gmgnPhaseStart;
     const rankingPhaseStart = performance.now();
     const ranked = rankBestWallets(candidates, topTokenAddresses, tpMinPercent);
-    const topWallets = ranked.slice(0, 3);
+    const activeByWallet = new Map(walletRows.map((w) => [w.wallet_address, w.active_days]));
+    const topWallets: Array<BestWalletResult & { activeDays: number }> = ranked.map((row) => ({
+      ...row,
+      activeDays: activeByWallet.get(row.walletAddress) ?? 0,
+    }));
     const rankingMs = performance.now() - rankingPhaseStart;
     const totalMs = performance.now() - startTotal;
+
+    const tiedAtMaxCount = walletRows[0]?.tied_at_max_count ?? 0;
+    const maxCoveragePercent = walletRows.length > 0 ? walletRows[0].coverage_percent : null;
+    const { tieCapApplied } = computeTieCapMeta(tiedAtMaxCount, walletRows.length, maxTieWallets);
 
     return {
       topWallets,
       meta: {
         tpMinPercent,
         tokenLimit,
-        walletLimit,
-        candidateLimit: effectiveCandidateLimit,
-        candidateLimitApplied: effectiveCandidateLimit < walletLimit,
+        selectionPolicy: 'bestCoverageTie',
+        maxTieWallets,
+        maxCoveragePercent,
+        tiedAtMaxCount,
+        tieCapApplied,
         selectedTokenCount: topTokenAddresses.length,
         scopedWalletCount: walletRows.length,
         walletsAnalyzed,

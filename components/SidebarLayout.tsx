@@ -28,13 +28,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IconChartBar, IconEye, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
+import { IconChartBar, IconEye, IconLayersIntersect, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
 import { useSession, signOut } from '@/lib/auth-client';
+import NotificationBell from '@/components/notifications/NotificationBell';
 
 const links = [
   { href: '/', label: 'Stat tracking', icon: IconChartBar },
   { href: '/rugger', label: 'Ruggers', icon: IconWallet },
   { href: '/watchlist', label: 'Watchlist', icon: IconEye },
+  { href: '/wallet-comparison', label: 'Comparaison wallets', icon: IconLayersIntersect },
 ];
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
@@ -179,6 +181,9 @@ export default function SidebarLayout({
       <SidebarInset className="overflow-x-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
+          <div className="ml-auto flex items-center gap-1">
+            <NotificationBell />
+          </div>
         </header>
         <div className="min-w-0 flex-1 overflow-auto">{children}</div>
       </SidebarInset>

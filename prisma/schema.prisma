@@ -20,6 +20,7 @@ model User {
   ruggers            Rugger[]
   fundingChainCache  FundingChainCache[]
   watchlistWallets   WatchlistWallet[]
+  notifications      Notification[]
 
   @@unique([email])
   @@map("user")
@@ -268,4 +269,34 @@ model WatchlistWallet {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("watchlist_wallets")
+}
+
+model Notification {
+  id             String    @id @default(dbgenerated("gen_random_uuid()"))
+  userId         String    @map("user_id")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String    @default("watchlist_buy")
+  walletAddress  String    @map("wallet_address")
+  walletLabel    String?   @map("wallet_label")
+  tokenAddress   String?   @map("token_address")
+  tokenSymbol    String?   @map("token_symbol")
+  amountSol      Decimal?  @map("amount_sol") @db.Decimal(18, 9)
+  txSignature    String    @map("tx_signature")
+  occurredAt     DateTime  @map("occurred_at")
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, walletAddress, txSignature])
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model HeliusWebhookSync {
+  id           String   @id @default(dbgenerated("gen_random_uuid()"))
+  webhookId    String   @unique @map("webhook_id")
+  lastSyncedAt DateTime @default(now()) @map("last_synced_at")
+  addressCount Int      @default(0) @map("address_count")
+
+  @@map("helius_webhook_sync")
 }

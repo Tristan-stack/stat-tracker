@@ -1,17 +1,22 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import { IconCheck, IconCopy } from '@tabler/icons-react';
 
 interface BestWalletLeaderboardProps {
   ruggerId: string;
   analysisId: string;
+  /** Clic sur la ligne (comme le leaderboard principal) : détail wallet / analyse tokens. */
+  onWalletClick?: (walletAddress: string) => void;
 }
 
 interface BestWalletItem {
   walletAddress: string;
   coveragePercent: number;
+  activeDays: number;
   matchedTokenCount: number;
   tpHitCount: number;
   tpHitRate: number;
@@ -24,14 +29,18 @@ interface BestWalletResponse {
   topWallets: BestWalletItem[];
   meta: {
     tpMinPercent: number;
+    tokenLimit: number;
+    selectionPolicy: 'bestCoverageTie';
+    maxTieWallets: number;
+    maxCoveragePercent: number | null;
+    tiedAtMaxCount: number;
+    tieCapApplied: boolean;
     selectedTokenCount: number;
     scopedWalletCount: number;
     walletsAnalyzed: number;
     walletsSucceeded: number;
     walletsFailed: number;
     walletsRemaining: number;
-    candidateLimit: number;
-    candidateLimitApplied: boolean;
     cacheHit: boolean;
     cacheHitResponse: boolean;
     cacheHitWalletPreviews: number;
@@ -72,7 +81,7 @@ function shortenAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWalletLeaderboardProps) {
+export default function BestWalletLeaderboard({ ruggerId, analysisId, onWalletClick }: BestWalletLeaderboardProps) {
   const [tpMinPercent, setTpMinPercent] = useState('80');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,12 +89,20 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [dynamicLogs, setDynamicLogs] = useState<string[]>([]);
   const [copiedWallet, setCopiedWallet] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const tpValue = Number(tpMinPercent);
   const isTpValid = Number.isFinite(tpValue) && tpValue >= 0;
 
+  const handleCancel = () => {
+    abortRef.current?.abort();
+  };
+
   const handleFind = async () => {
     if (!isTpValid || isLoading) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setIsLoading(true);
     setError(null);
     setData(null);
@@ -95,11 +112,11 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
       const params = new URLSearchParams({
         tpMinPercent: String(tpValue),
         tokenLimit: '20',
-        candidateLimit: '12',
         stream: '1',
       });
       const res = await fetch(
-        `/api/ruggers/${ruggerId}/analysis/${analysisId}/best-wallet?${params.toString()}`
+        `/api/ruggers/${ruggerId}/analysis/${analysisId}/best-wallet?${params.toString()}`,
+        { signal: controller.signal }
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -170,9 +187,17 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
           }
         }
       }
-    } catch {
+    } catch (err) {
+      const isAbort =
+        (err instanceof DOMException || err instanceof Error) && (err as Error).name === 'AbortError';
+      if (isAbort) {
+        setProgress(null);
+        setDynamicLogs((prev) => [...prev.slice(-5), 'Analyse annulée.']);
+        return;
+      }
       setError('Erreur réseau pendant le calcul.');
     } finally {
+      abortRef.current = null;
       setIsLoading(false);
     }
   };
@@ -225,6 +250,11 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
         <Button type="button" onClick={() => void handleFind()} disabled={!isTpValid || isLoading}>
           {isLoading ? 'Calcul...' : 'Find best wallet'}
         </Button>
+        {isLoading && (
+          <Button type="button" variant="outline" onClick={handleCancel}>
+            Annuler
+          </Button>
+        )}
       </div>
 
       {!isTpValid && (
@@ -275,8 +305,14 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
             Wallets: {data.meta.walletsAnalyzed}/{data.meta.scopedWalletCount} analysés, {data.meta.walletsRemaining} restant(s).
           </p>
           <p className="text-xs text-muted-foreground">
-            Candidate-first: {data.meta.candidateLimit} wallet(s)
-            {data.meta.candidateLimitApplied ? ' (limité)' : ' (non limité)'}.
+            Candidats: ex-aequo sur la meilleure couverture d&apos;analyse
+            {data.meta.maxCoveragePercent !== null
+              ? ` (${formatPercent(data.meta.maxCoveragePercent)} max)`
+              : ''}
+            — {data.meta.tiedAtMaxCount} wallet(s) à ce niveau
+            {data.meta.tieCapApplied
+              ? `, analysés ${data.meta.scopedWalletCount} (plafond maxTieWallets=${data.meta.maxTieWallets})`
+              : `, tous analysés (${data.meta.scopedWalletCount})`}.
           </p>
           <p className="text-xs text-muted-foreground">
             Cache: {data.meta.cacheHitResponse ? 'response hit' : data.meta.cacheHit ? 'wallet cache hit' : 'miss'} · wallet previews hit {data.meta.cacheHitWalletPreviews}.
@@ -313,6 +349,7 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
                     <th className="px-3 py-2 text-left">Rang</th>
                     <th className="px-3 py-2 text-left">Wallet</th>
                     <th className="px-3 py-2 text-right">Coverage</th>
+                    <th className="px-3 py-2 text-right">Jours actifs</th>
                     <th className="px-3 py-2 text-right">TP hit</th>
                     <th className="px-3 py-2 text-right">Entry quality</th>
                     <th className="px-3 py-2 text-right">Score</th>
@@ -320,21 +357,37 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId }: BestWall
                 </thead>
                 <tbody>
                   {data.topWallets.map((wallet, index) => (
-                    <tr key={wallet.walletAddress} className="border-t border-border">
+                    <tr
+                      key={wallet.walletAddress}
+                      className={cn(
+                        'group border-t border-border',
+                        onWalletClick && 'cursor-pointer hover:bg-muted/30'
+                      )}
+                      onClick={() => onWalletClick?.(wallet.walletAddress)}
+                    >
                       <td className="px-3 py-2">{index + 1}</td>
                       <td className="px-3 py-2 font-medium" title={wallet.walletAddress}>
-                        <button
-                          type="button"
-                          onClick={() => void handleCopyWallet(wallet.walletAddress)}
-                          className="inline-flex items-center gap-2 text-left hover:underline"
-                        >
-                          <span>{shortenAddress(wallet.walletAddress)}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {copiedWallet === wallet.walletAddress ? 'copié' : 'copier'}
-                          </span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs">{shortenAddress(wallet.walletAddress)}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleCopyWallet(wallet.walletAddress);
+                            }}
+                            className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted"
+                            title="Copier l'adresse"
+                          >
+                            {copiedWallet === wallet.walletAddress ? (
+                              <IconCheck className="size-3 text-green-500" />
+                            ) : (
+                              <IconCopy className="size-3 text-muted-foreground" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-right">{formatPercent(wallet.coveragePercent)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{(wallet.activeDays ?? 0)}j</td>
                       <td className="px-3 py-2 text-right">
                         {wallet.tpHitCount}/{wallet.matchedTokenCount} ({formatPercent(wallet.tpHitRate)})
                       </td>

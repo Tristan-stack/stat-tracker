@@ -44,6 +44,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
   const [runningMode, setRunningMode] = useState<AnalysisMode>('combined');
   const [runningDepth, setRunningDepth] = useState(5);
   const [runningWalletCentricRecovery, setRunningWalletCentricRecovery] = useState(15);
+  const [runningExcludeInactiveOver24h, setRunningExcludeInactiveOver24h] = useState(false);
   const [runningResumeAnalysisId, setRunningResumeAnalysisId] = useState<string | null>(null);
   const [launchNonce, setLaunchNonce] = useState(0);
 
@@ -77,15 +78,18 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       mode,
       fundingDepth,
       walletCentricRecoveryLimit,
+      excludeInactiveOver24h,
     }: {
       mode: AnalysisMode;
       fundingDepth: number;
       walletCentricRecoveryLimit: number;
+      excludeInactiveOver24h: boolean;
     }) => {
       userCancelledRef.current = false;
       setRunningMode(mode);
       setRunningDepth(fundingDepth);
       setRunningWalletCentricRecovery(walletCentricRecoveryLimit);
+      setRunningExcludeInactiveOver24h(excludeInactiveOver24h);
       setRunningResumeAnalysisId(null);
       setLaunchNonce((n) => n + 1);
       setView('running');
@@ -127,6 +131,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     setRunningMode(a.mode);
     setRunningDepth(a.fundingDepth);
     setRunningWalletCentricRecovery(15);
+    setRunningExcludeInactiveOver24h(false);
     setRunningResumeAnalysisId(a.id);
     setLaunchNonce((n) => n + 1);
     setView('running');
@@ -260,11 +265,12 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
         <Card>
           <CardContent className="pt-6">
             <AnalysisProgress
-              key={`${ruggerId}-${runningMode}-${runningDepth}-${runningWalletCentricRecovery}-${runningResumeAnalysisId ?? 'new'}-${launchNonce}`}
+              key={`${ruggerId}-${runningMode}-${runningDepth}-${runningWalletCentricRecovery}-${runningExcludeInactiveOver24h ? '1' : '0'}-${runningResumeAnalysisId ?? 'new'}-${launchNonce}`}
               ruggerId={ruggerId}
               mode={runningMode}
               fundingDepth={runningDepth}
               walletCentricRecoveryLimit={runningWalletCentricRecovery}
+              excludeInactiveOver24h={runningExcludeInactiveOver24h}
               resumeAnalysisId={runningResumeAnalysisId}
               onStarted={handleAnalysisStarted}
               onComplete={handleAnalysisComplete}
@@ -352,7 +358,11 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
 
         {resultSection === 'leaderboard' && (
           <div className="space-y-3">
-            <BestWalletLeaderboard ruggerId={ruggerId} analysisId={activeAnalysisId} />
+            <BestWalletLeaderboard
+              ruggerId={ruggerId}
+              analysisId={activeAnalysisId}
+              onWalletClick={handleWalletClick}
+            />
             <LeaderboardTable
               ruggerId={ruggerId}
               analysisId={activeAnalysisId}

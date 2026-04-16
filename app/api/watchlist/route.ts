@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth-session';
 import { query } from '@/lib/db';
+import { syncWatchlistToHeliusAsync } from '@/lib/helius/webhooks';
 
 interface WatchlistRow {
   id: string;
@@ -73,6 +74,9 @@ export async function POST(req: NextRequest) {
   );
 
   const r = rows[0];
+
+  syncWatchlistToHeliusAsync();
+
   return NextResponse.json({
     id: r.id,
     walletAddress: r.wallet_address,

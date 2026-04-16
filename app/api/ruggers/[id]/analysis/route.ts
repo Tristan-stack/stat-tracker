@@ -29,6 +29,8 @@ export async function POST(
     fundingDepth?: number;
     /** 0–120 : nombre de wallets candidats (top coverage) pour la recovery GMGN ; 0 = désactivé. */
     walletCentricRecoveryLimit?: number;
+    /** Si true : éliminer les buyers dont la dernière activité on-chain est > 24h avant l'analyse profonde. */
+    excludeInactiveOver24h?: boolean;
   };
 
   const mode = body.mode ?? 'combined';
@@ -93,6 +95,7 @@ export async function POST(
     fundingDepth,
     buyerLimit: 200,
     walletCentricRecoveryLimit,
+    excludeInactiveOver24h: Boolean(body.excludeInactiveOver24h),
   };
 
   const encoder = new TextEncoder();

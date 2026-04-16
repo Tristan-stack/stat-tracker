@@ -19,8 +19,7 @@ async function run() {
   const runs = Number.parseInt(getEnv('BEST_WALLET_RUNS', '3'), 10);
   const tpMinPercent = getEnv('BEST_WALLET_TP', '80');
   const tokenLimit = getEnv('BEST_WALLET_TOKEN_LIMIT', '20');
-  const walletLimit = getEnv('BEST_WALLET_WALLET_LIMIT', '40');
-  const candidateLimit = getEnv('BEST_WALLET_CANDIDATE_LIMIT', '16');
+  const maxTieWallets = getEnv('BEST_WALLET_MAX_TIE', '120');
 
   if (!ruggerId || !analysisId || !authCookie) {
     throw new Error(
@@ -35,8 +34,7 @@ async function run() {
   );
   url.searchParams.set('tpMinPercent', tpMinPercent);
   url.searchParams.set('tokenLimit', tokenLimit);
-  url.searchParams.set('walletLimit', walletLimit);
-  url.searchParams.set('candidateLimit', candidateLimit);
+  url.searchParams.set('maxTieWallets', maxTieWallets);
 
   for (let i = 0; i < runs; i += 1) {
     const startedAt = Date.now();
