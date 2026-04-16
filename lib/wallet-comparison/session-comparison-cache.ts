@@ -13,6 +13,8 @@ export interface CompareResponseSnapshot {
   walletsCompared: string[];
   skippedWallets: Array<{ walletAddress: string; error: string }>;
   commonMintCount: number;
+  /** Mints distincts sur au moins un wallet (réunion). Absent sur les entrées de cache anciennes. */
+  distinctMintUnionCount?: number;
   globalWinnerWallets: string[];
   scores: Array<{
     walletAddress: string;
@@ -98,7 +100,11 @@ export function pushWalletComparisonSessionCache(input: {
   const { walletAddressesRequested, fromMs, toMs, result } = input;
   const nW = result.walletsCompared.length;
   const nCommon = result.commonMintCount;
-  const label = `${nW} wallet(s) comparé(s) · ${nCommon} token(s) commun(s)`;
+  const nUnion = result.distinctMintUnionCount;
+  const label =
+    nUnion !== undefined
+      ? `${nW} wallet(s) comparé(s) · ${nCommon} commun(s) / ${nUnion} distincts`
+      : `${nW} wallet(s) comparé(s) · ${nCommon} token(s) commun(s)`;
 
   const entry: CachedWalletComparison = {
     id,

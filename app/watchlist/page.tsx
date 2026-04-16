@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { WatchlistWallet } from '@/types/watchlist';
 import type { Rugger } from '@/types/rugger';
-import { IconExternalLink, IconPencil, IconTrash, IconPlus, IconWallet } from '@tabler/icons-react';
+import { ExternalLink, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
 
 function truncateAddress(addr: string) {
   if (addr.length <= 14) return addr;
@@ -120,7 +120,7 @@ export default function WatchlistPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Watchlist</h1>
         <Button type="button" size="sm" onClick={() => setIsAdding(true)} className="gap-1">
-          <IconPlus className="size-4" />Ajouter
+          <Plus className="size-4" />Ajouter
         </Button>
       </div>
 
@@ -175,7 +175,7 @@ export default function WatchlistPage() {
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-xs">{truncateAddress(w.walletAddress)}</span>
                       <a href={`https://solscan.io/account/${w.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
-                        <IconExternalLink className="size-3.5" />
+                        <ExternalLink className="size-3.5" />
                       </a>
                     </div>
                   </td>
@@ -213,7 +213,7 @@ export default function WatchlistPage() {
                       ) : (
                         <>
                           <button type="button" onClick={() => startEdit(w)} className="rounded p-1 hover:bg-muted" aria-label="Modifier">
-                            <IconPencil className="size-3.5 text-muted-foreground" />
+                            <Pencil className="size-3.5 text-muted-foreground" />
                           </button>
                           <button
                             type="button"
@@ -226,10 +226,10 @@ export default function WatchlistPage() {
                             aria-label="Ajouter à un rugger"
                             title="Ajouter à un rugger"
                           >
-                            <IconWallet className="size-3.5 text-primary" />
+                            <Wallet className="size-3.5 text-primary" />
                           </button>
                           <button type="button" onClick={() => void handleDelete(w.id)} className="rounded p-1 hover:bg-muted" aria-label="Supprimer">
-                            <IconTrash className="size-3.5 text-destructive" />
+                            <Trash2 className="size-3.5 text-destructive" />
                           </button>
                         </>
                       )}

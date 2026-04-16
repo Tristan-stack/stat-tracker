@@ -20,7 +20,7 @@ import {
   localGmgnAllTimeRange,
   type TokenPurchaseFilter,
 } from '@/lib/token-date-filter';
-import { IconTrash } from '@tabler/icons-react';
+import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 
@@ -471,7 +471,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
             </div>
             {hasAnyRuggerTokens && (
               <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleResetTokens}>
-                <IconTrash className="size-4 mr-1" />Reset les tokens
+                <Trash2 className="size-4 mr-1" />Reset les tokens
               </Button>
             )}
           </div>

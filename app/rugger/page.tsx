@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { IconPencil, IconTrash, IconArchive, IconArchiveOff } from '@tabler/icons-react';
+import { Archive, ArchiveRestore, Pencil, Trash2 } from 'lucide-react';
 
 function StatusBadge({ statusId }: { statusId: StatusId }) {
   return (
@@ -371,7 +371,7 @@ export default function RuggerPage() {
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               )}
             >
-              <IconArchive className="size-3.5" />
+              <Archive className="size-3.5" />
               Archivés
             </button>
           </div>
@@ -460,7 +460,7 @@ export default function RuggerPage() {
                       }}
                       aria-label="Modifier"
                     >
-                      <IconPencil className="size-4" />
+                      <Pencil className="size-4" />
                     </Button>
                     <Button
                       type="button"
@@ -476,7 +476,7 @@ export default function RuggerPage() {
                       aria-label={rugger.archived ? 'Désarchiver' : 'Archiver'}
                       title={rugger.archived ? 'Désarchiver' : 'Archiver'}
                     >
-                      {rugger.archived ? <IconArchiveOff className="size-4" /> : <IconArchive className="size-4" />}
+                      {rugger.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
                     </Button>
                     <Button
                       type="button"
@@ -486,7 +486,7 @@ export default function RuggerPage() {
                       onClick={(e) => handleDeleteRugger(rugger, e)}
                       aria-label="Supprimer"
                     >
-                      <IconTrash className="size-4" />
+                      <Trash2 className="size-4" />
                     </Button>
                   </div>
                 </Card>

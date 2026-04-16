@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
-import { IconDotsVertical } from '@tabler/icons-react';
+import { MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -118,7 +118,7 @@ export function TokenImportExport({
               className="size-9 text-muted-foreground hover:text-foreground"
               aria-label="Importer ou exporter les tokens (JSON)"
             >
-              <IconDotsVertical className="size-5" />
+              <MoreVertical className="size-5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">

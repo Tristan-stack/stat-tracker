@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode, WalletAnalysis } from '@/types/analysis';
-import { IconLoader2, IconTerminal2, IconChevronDown, IconChevronUp } from '@tabler/icons-react';
+import { ChevronDown, ChevronUp, Loader2, Terminal } from 'lucide-react';
 
 interface SSEProgressEvent {
   percent: number;
@@ -373,7 +373,7 @@ export default function AnalysisProgress({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        {connectionState === 'streaming' && <IconLoader2 className="size-5 animate-spin text-primary" />}
+        {connectionState === 'streaming' && <Loader2 className="size-5 animate-spin text-primary" />}
         <div className="flex-1">
           <p className="text-sm font-medium">{phase}</p>
           {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
@@ -403,9 +403,9 @@ export default function AnalysisProgress({
           onClick={() => setShowLogs((v) => !v)}
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          <IconTerminal2 className="size-3.5" />
+          <Terminal className="size-3.5" />
           <span>Logs</span>
-          {showLogs ? <IconChevronUp className="size-3" /> : <IconChevronDown className="size-3" />}
+          {showLogs ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
           {logs.length > 0 && (
             <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{logs.length}</span>
           )}

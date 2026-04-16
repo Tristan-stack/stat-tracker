@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IconDotsVertical, IconWallet, IconEye, IconLink } from '@tabler/icons-react';
+import { Eye, Link2, MoreVertical, Wallet } from 'lucide-react';
 
 interface WalletActionsProps {
   walletAddress: string;
@@ -115,18 +115,18 @@ export default function WalletActions({ walletAddress, sourceRuggerId }: WalletA
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className="rounded p-1 hover:bg-muted" onClick={(e) => e.stopPropagation()} aria-label="Actions">
-            <IconDotsVertical className="size-4 text-muted-foreground" />
+            <MoreVertical className="size-4 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
           <DropdownMenuItem onClick={() => void handleAddAsRugger()} className="gap-2">
-            <IconWallet className="size-4" />Ajouter comme rugger
+            <Wallet className="size-4" />Ajouter comme rugger
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => void openRuggerPicker()} className="gap-2">
-            <IconLink className="size-4" />Ajouter à un rugger
+            <Link2 className="size-4" />Ajouter à un rugger
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowWatchlistForm(true)} className="gap-2">
-            <IconEye className="size-4" />Ajouter à la watchlist
+            <Eye className="size-4" />Ajouter à la watchlist
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

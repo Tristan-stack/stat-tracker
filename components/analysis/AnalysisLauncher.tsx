@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode } from '@/types/analysis';
-import { IconSearch, IconLink, IconLayersIntersect } from '@tabler/icons-react';
+import type { LucideIcon } from 'lucide-react';
+import { Layers, Link2, Search } from 'lucide-react';
 
 const WALLET_RECOVERY_MIN = 0;
 const WALLET_RECOVERY_MAX = 120;
@@ -23,10 +24,10 @@ interface AnalysisLauncherProps {
   isDisabled?: boolean;
 }
 
-const MODE_OPTIONS: { key: AnalysisMode; label: string; description: string; icon: typeof IconSearch }[] = [
-  { key: 'token', label: 'Tokens', description: 'Corrélation par tokens achetés', icon: IconSearch },
-  { key: 'funding', label: 'Funding', description: 'Corrélation par adresse mère', icon: IconLink },
-  { key: 'combined', label: 'Combiné', description: 'Tokens + funding, wallets en commun mis en avant', icon: IconLayersIntersect },
+const MODE_OPTIONS: { key: AnalysisMode; label: string; description: string; icon: LucideIcon }[] = [
+  { key: 'token', label: 'Tokens', description: 'Corrélation par tokens achetés', icon: Search },
+  { key: 'funding', label: 'Funding', description: 'Corrélation par adresse mère', icon: Link2 },
+  { key: 'combined', label: 'Combiné', description: 'Tokens + funding, wallets en commun mis en avant', icon: Layers },
 ];
 
 const DEPTH_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -171,7 +172,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
       </div>
 
       <Button type="button" onClick={handleLaunch} disabled={!canLaunch} className="gap-2">
-        <IconSearch className="size-4" />
+        <Search className="size-4" />
         Lancer l&apos;analyse
       </Button>
     </div>

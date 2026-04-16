@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { RuggerBuyerOrigin, RuggerBuyerWallet } from '@/types/rugger-buyer';
-import { IconPencil, IconTrash, IconSparkles, IconPlus } from '@tabler/icons-react';
+import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 interface RuggerBuyersTabProps {
   ruggerId: string;
@@ -155,11 +155,11 @@ export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuye
         <h2 className="text-lg font-semibold">Wallets acheteurs</h2>
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="sm" className="gap-1" disabled={isAggregating} onClick={() => void handleAggregateTokens()}>
-            <IconSparkles className="size-4" />
+            <Sparkles className="size-4" />
             {isAggregating ? 'Agrégation…' : 'Générer les tokens du rugger'}
           </Button>
           <Button type="button" size="sm" className="gap-1" onClick={() => setIsAdding(true)}>
-            <IconPlus className="size-4" />
+            <Plus className="size-4" />
             Ajouter un wallet
           </Button>
         </div>
@@ -242,10 +242,10 @@ export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuye
                       ) : (
                         <>
                           <button type="button" onClick={() => startEdit(buyer)} className="rounded p-1 hover:bg-muted" aria-label="Modifier">
-                            <IconPencil className="size-3.5 text-muted-foreground" />
+                            <Pencil className="size-3.5 text-muted-foreground" />
                           </button>
                           <button type="button" onClick={() => void handleDeleteBuyer(buyer)} className="rounded p-1 hover:bg-muted" aria-label="Supprimer">
-                            <IconTrash className="size-3.5 text-destructive" />
+                            <Trash2 className="size-3.5 text-destructive" />
                           </button>
                         </>
                       )}

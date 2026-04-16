@@ -24,6 +24,8 @@ export interface WalletComparisonScore {
 
 export interface BestEntryOnCommonMintsResult {
   commonMintCount: number;
+  /** Mints distincts présents sur au moins un wallet comparé (réunion). */
+  distinctMintUnionCount: number;
   /** Wallets tied for most wins on common mints, after secondary tie-break (lower sumWinnerEntryPrices). */
   globalWinnerWallets: string[];
   scores: WalletComparisonScore[];
@@ -67,6 +69,19 @@ function mintIntersection(
   return common.sort((a, b) => a.localeCompare(b));
 }
 
+function distinctMintUnionCount(
+  orderedWallets: string[],
+  walletMaps: Map<string, Map<string, BestBuyPerMint>>
+): number {
+  const union = new Set<string>();
+  for (const w of orderedWallets) {
+    const m = walletMaps.get(w);
+    if (!m) continue;
+    for (const mint of m.keys()) union.add(mint);
+  }
+  return union.size;
+}
+
 /**
  * @param orderedWallets stable order used for deterministic tie-breaks
  * @param walletMaps best buy per mint per wallet (only wallets in orderedWallets need entries)
@@ -78,6 +93,7 @@ export function computeBestEntryOnCommonMints(
   if (orderedWallets.length < 2) {
     return {
       commonMintCount: 0,
+      distinctMintUnionCount: distinctMintUnionCount(orderedWallets, walletMaps),
       globalWinnerWallets: [],
       scores: orderedWallets.map((walletAddress) => ({
         walletAddress,
@@ -156,6 +172,7 @@ export function computeBestEntryOnCommonMints(
 
   return {
     commonMintCount: n,
+    distinctMintUnionCount: distinctMintUnionCount(orderedWallets, walletMaps),
     globalWinnerWallets,
     scores,
     perMint,

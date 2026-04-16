@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES } from '@/types/rugger';
-import { IconArrowLeft, IconPencil, IconTrash, IconChevronRight, IconChevronLeft } from '@tabler/icons-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import RuggerTokensTab from '@/components/rugger/RuggerTokensTab';
 import RuggerNetworkTab from '@/components/rugger/RuggerNetworkTab';
@@ -156,7 +156,7 @@ export default function RuggerDetailPage() {
     return (
       <div className="space-y-4 p-6 sm:p-8">
         <Link href="/rugger" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <IconArrowLeft className="size-4" />
+          <ArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
         <p className="text-muted-foreground">Rugger introuvable.</p>
@@ -168,7 +168,7 @@ export default function RuggerDetailPage() {
     <div className="min-w-0 overflow-x-hidden space-y-10 p-6 sm:p-8">
       <header className="space-y-4">
         <Link href="/rugger" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <IconArrowLeft className="size-4" />
+          <ArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between overflow-hidden">
@@ -193,14 +193,14 @@ export default function RuggerDetailPage() {
               <div className="flex flex-wrap items-center gap-1.5">
                 {STATUS_ORDER.indexOf(rugger.statusId) > 0 && (
                   <Button type="button" variant="outline" size="sm" onClick={handleRetrogradeStatus} className="gap-1">
-                    <IconChevronLeft className="size-4" />
+                    <ChevronLeft className="size-4" />
                     Revenir à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) - 1]]}
                   </Button>
                 )}
                 {STATUS_ORDER.indexOf(rugger.statusId) < STATUS_ORDER.length - 1 && (
                   <Button type="button" variant="outline" size="sm" onClick={handleAdvanceStatus} className="gap-1">
                     Passer à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) + 1]]}
-                    <IconChevronRight className="size-4" />
+                    <ChevronRight className="size-4" />
                   </Button>
                 )}
               </div>
@@ -241,10 +241,10 @@ export default function RuggerDetailPage() {
           </div>
           <div className="flex shrink-0 flex-wrap gap-2 sm:flex-nowrap">
             <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-              <IconPencil className="size-4 mr-1" />Modifier
+              <Pencil className="size-4 mr-1" />Modifier
             </Button>
             <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleDeleteRugger}>
-              <IconTrash className="size-4 mr-1" />Supprimer
+              <Trash2 className="size-4 mr-1" />Supprimer
             </Button>
           </div>
         </div>

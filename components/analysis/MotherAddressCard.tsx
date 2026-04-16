@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AnalysisMotherAddress } from '@/types/analysis';
-import { IconCheck, IconX, IconExternalLink } from '@tabler/icons-react';
+import { Check, ExternalLink, X } from 'lucide-react';
 
 interface MotherAddressCardProps {
   ruggerId: string;
@@ -59,7 +59,7 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="font-mono text-xs truncate">{truncateAddress(m.address)}</span>
                 <a href={`https://solscan.io/account/${m.address}`} target="_blank" rel="noopener noreferrer" className="shrink-0 text-primary hover:text-primary/80">
-                  <IconExternalLink className="size-3.5" />
+                  <ExternalLink className="size-3.5" />
                 </a>
               </div>
               {m.validated && (
@@ -74,12 +74,12 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
             <div className="flex gap-1.5">
               {!m.validated && (
                 <Button type="button" variant="outline" size="sm" className="gap-1 text-green-600 hover:text-green-600" onClick={() => void handleValidate(m.id, true)}>
-                  <IconCheck className="size-3.5" />Valider
+                  <Check className="size-3.5" />Valider
                 </Button>
               )}
               {m.validated && (
                 <Button type="button" variant="outline" size="sm" className="gap-1 text-destructive hover:text-destructive" onClick={() => void handleValidate(m.id, false)}>
-                  <IconX className="size-3.5" />Invalider
+                  <X className="size-3.5" />Invalider
                 </Button>
               )}
             </div>

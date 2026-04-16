@@ -32,18 +32,18 @@ import {
 import type { WalletUsedEntry } from '@/lib/wallet-comparison/wallet-used-history';
 import WalletGmgnTokenPanel from '@/components/wallet-comparison/WalletGmgnTokenPanel';
 import {
-  IconAnalyze,
-  IconCalendar,
-  IconCheck,
-  IconChevronDown,
-  IconChevronUp,
-  IconCopy,
-  IconLoader2,
-  IconPlus,
-  IconTerminal2,
-  IconTrash,
-  IconX,
-} from '@tabler/icons-react';
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  LineChart,
+  Loader2,
+  Plus,
+  Terminal,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 function truncateAddress(addr: string) {
   if (addr.length <= 14) return addr;
@@ -475,9 +475,9 @@ export default function WalletComparisonPage() {
                       onClick={() => void copyWalletAddress(h.address)}
                     >
                       {copiedWalletHint === h.address ? (
-                        <IconCheck className="size-4 text-green-500" />
+                        <Check className="size-4 text-green-500" />
                       ) : (
-                        <IconCopy className="size-4" />
+                        <Copy className="size-4" />
                       )}
                     </Button>
                     <Button
@@ -487,7 +487,7 @@ export default function WalletComparisonPage() {
                       className="h-8 px-2"
                       onClick={() => setSelectedWallets((prev) => addWalletUnique(prev, h.address))}
                     >
-                      <IconPlus className="size-4" />
+                      <Plus className="size-4" />
                     </Button>
                     <Button
                       type="button"
@@ -497,7 +497,7 @@ export default function WalletComparisonPage() {
                       onClick={() => handleRemoveHistoryEntry(h.address)}
                       aria-label="Retirer cette adresse"
                     >
-                      <IconX className="size-4" />
+                      <X className="size-4" />
                     </Button>
                   </div>
                 </li>
@@ -593,9 +593,9 @@ export default function WalletComparisonPage() {
                         <div className="flex gap-1">
                           <Button type="button" size="sm" variant="outline" onClick={() => void copyWalletAddress(w)}>
                             {copiedWalletHint === w ? (
-                              <IconCheck className="size-3.5 text-green-500" />
+                              <Check className="size-3.5 text-green-500" />
                             ) : (
-                              <IconCopy className="size-3.5" />
+                              <Copy className="size-3.5" />
                             )}
                           </Button>
                           <Button
@@ -611,7 +611,7 @@ export default function WalletComparisonPage() {
                               })
                             }
                           >
-                            <IconAnalyze className="size-3.5" />
+                            <LineChart className="size-3.5" />
                             Tokens
                           </Button>
                         </div>
@@ -653,9 +653,9 @@ export default function WalletComparisonPage() {
                                 onClick={() => void copyWalletAddress(row.walletAddress)}
                               >
                                 {copiedWalletHint === row.walletAddress ? (
-                                  <IconCheck className="size-3 text-green-500" />
+                                  <Check className="size-3 text-green-500" />
                                 ) : (
-                                  <IconCopy className="size-3" />
+                                  <Copy className="size-3" />
                                 )}
                               </Button>
                               <Button
@@ -672,7 +672,7 @@ export default function WalletComparisonPage() {
                                   })
                                 }
                               >
-                                <IconAnalyze className="size-3" />
+                                <LineChart className="size-3" />
                               </Button>
                             </div>
                           </td>
@@ -707,9 +707,9 @@ export default function WalletComparisonPage() {
                     onClick={() => void copyWalletAddress(w)}
                   >
                     {copiedWalletHint === w ? (
-                      <IconCheck className="size-3.5 text-green-500" />
+                      <Check className="size-3.5 text-green-500" />
                     ) : (
-                      <IconCopy className="size-3.5" />
+                      <Copy className="size-3.5" />
                     )}
                   </button>
                   <button
@@ -718,7 +718,7 @@ export default function WalletComparisonPage() {
                     aria-label="Retirer"
                     onClick={() => setSelectedWallets((prev) => removeWalletAt(prev, i))}
                   >
-                    <IconX className="size-3.5" />
+                    <X className="size-3.5" />
                   </button>
                 </li>
               ))}
@@ -738,7 +738,7 @@ export default function WalletComparisonPage() {
               }}
             />
             <Button type="button" variant="secondary" onClick={handleAddManual}>
-              <IconPlus className="mr-1 size-4" />
+              <Plus className="mr-1 size-4" />
               Ajouter
             </Button>
           </div>
@@ -782,7 +782,7 @@ export default function WalletComparisonPage() {
                         setWalletHistory(recordWalletsUsed([w.walletAddress]));
                       }}
                     >
-                      <IconPlus className="size-4" />
+                      <Plus className="size-4" />
                     </Button>
                   </li>
                 ))}
@@ -842,7 +842,7 @@ export default function WalletComparisonPage() {
                           setWalletHistory(recordWalletsUsed([addr]));
                         }}
                       >
-                        <IconPlus className="size-4" />
+                        <Plus className="size-4" />
                       </Button>
                     </li>
                   );
@@ -893,7 +893,7 @@ export default function WalletComparisonPage() {
                       variant="outline"
                       className={cn('min-w-[240px] justify-start text-left font-normal', !dateRange?.from && 'text-muted-foreground')}
                     >
-                      <IconCalendar className="mr-2 size-4" />
+                      <CalendarDays className="mr-2 size-4" />
                       {calendarLabel}
                     </Button>
                   </PopoverTrigger>
@@ -923,7 +923,7 @@ export default function WalletComparisonPage() {
         <Button type="button" onClick={() => void handleCompare()} disabled={isComparing}>
           {isComparing ? (
             <>
-              <IconLoader2 className="mr-2 size-4 animate-spin" />
+              <Loader2 className="mr-2 size-4 animate-spin" />
               Comparaison…
             </>
           ) : (
@@ -937,7 +937,7 @@ export default function WalletComparisonPage() {
         )}
         {selectedWallets.length > 0 && (
           <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedWallets([])} disabled={isComparing}>
-            <IconTrash className="mr-1 size-4" />
+            <Trash2 className="mr-1 size-4" />
             Vider la liste
           </Button>
         )}
@@ -951,10 +951,10 @@ export default function WalletComparisonPage() {
             onClick={() => setShowLogs((v) => !v)}
           >
             <span className="inline-flex items-center gap-1.5">
-              <IconTerminal2 className="size-3.5" />
+              <Terminal className="size-3.5" />
               Journal
             </span>
-            {showLogs ? <IconChevronUp className="size-4" /> : <IconChevronDown className="size-4" />}
+            {showLogs ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
           </button>
           {progress && isComparing && (
             <p className="mb-2 text-xs text-muted-foreground">
@@ -1007,12 +1007,30 @@ export default function WalletComparisonPage() {
                 Fenêtre : {new Date(result.fromMs).toLocaleString()} → {new Date(result.toMs).toLocaleString()} ·{' '}
                 {result.walletsCompared.length} wallet(s) comparé(s)
                 {result.skippedWallets.length > 0 ? ` (${result.skippedWallets.length} exclu(s))` : ''}
+                {result.distinctMintUnionCount !== undefined && (
+                  <>
+                    {' '}
+                    ·{' '}
+                    <span className="font-medium text-foreground">
+                      {result.commonMintCount} en commun sur {result.distinctMintUnionCount}
+                    </span>{' '}
+                    token(s) distinct(s) au total (union sur la période)
+                  </>
+                )}
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
               {result.commonMintCount === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Aucun token en commun sur la période (intersection des achats retenus par mint).
+                  {result.distinctMintUnionCount !== undefined && result.distinctMintUnionCount > 0 && (
+                    <>
+                      {' '}
+                      Sur les wallets comparés,{' '}
+                      <span className="font-medium text-foreground">{result.distinctMintUnionCount}</span> mint(s)
+                      distinct(s) au total sur la période.
+                    </>
+                  )}
                 </p>
               ) : (
                 <>
@@ -1033,9 +1051,9 @@ export default function WalletComparisonPage() {
                             <div className="flex shrink-0 flex-wrap gap-1">
                               <Button type="button" size="sm" variant="outline" onClick={() => void copyWalletAddress(w)}>
                                 {copiedWalletHint === w ? (
-                                  <IconCheck className="size-4 text-green-500" />
+                                  <Check className="size-4 text-green-500" />
                                 ) : (
-                                  <IconCopy className="size-4" />
+                                  <Copy className="size-4" />
                                 )}
                               </Button>
                               <Button
@@ -1047,7 +1065,7 @@ export default function WalletComparisonPage() {
                                   setGmgnPanel({ walletAddress: w, fromMs: result.fromMs, toMs: result.toMs })
                                 }
                               >
-                                <IconAnalyze className="size-3.5" />
+                                <LineChart className="size-3.5" />
                                 Détails tokens
                               </Button>
                             </div>
@@ -1103,9 +1121,9 @@ export default function WalletComparisonPage() {
                                   onClick={() => void copyWalletAddress(row.walletAddress)}
                                 >
                                   {copiedWalletHint === row.walletAddress ? (
-                                    <IconCheck className="size-3.5 text-green-500" />
+                                    <Check className="size-3.5 text-green-500" />
                                   ) : (
-                                    <IconCopy className="size-3.5" />
+                                    <Copy className="size-3.5" />
                                   )}
                                 </Button>
                                 <Button
@@ -1122,7 +1140,7 @@ export default function WalletComparisonPage() {
                                     })
                                   }
                                 >
-                                  <IconAnalyze className="size-3.5" />
+                                  <LineChart className="size-3.5" />
                                 </Button>
                               </div>
                             </td>
@@ -1164,9 +1182,9 @@ export default function WalletComparisonPage() {
                                     onClick={() => void copyWalletAddress(m.winnerWallet)}
                                   >
                                     {copiedWalletHint === m.winnerWallet ? (
-                                      <IconCheck className="size-3 text-green-500" />
+                                      <Check className="size-3 text-green-500" />
                                     ) : (
-                                      <IconCopy className="size-3" />
+                                      <Copy className="size-3" />
                                     )}
                                   </button>
                                 </div>
@@ -1185,9 +1203,9 @@ export default function WalletComparisonPage() {
                                         onClick={() => void copyWalletAddress(e.walletAddress)}
                                       >
                                         {copiedWalletHint === e.walletAddress ? (
-                                          <IconCheck className="size-3 text-green-500" />
+                                          <Check className="size-3 text-green-500" />
                                         ) : (
-                                          <IconCopy className="size-3" />
+                                          <Copy className="size-3" />
                                         )}
                                       </button>
                                     </li>

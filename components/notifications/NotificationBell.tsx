@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { IconBell, IconCheck, IconExternalLink, IconWallet } from '@tabler/icons-react';
+import { Bell, Check, ExternalLink, Wallet } from 'lucide-react';
 import { useSession } from '@/lib/auth-client';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -128,7 +128,7 @@ export default function NotificationBell() {
           className="relative size-8"
           aria-label="Notifications"
         >
-          <IconBell className="size-4" />
+          <Bell className="size-4" />
           {unreadCount > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground tabular-nums">
               {unreadCount > 99 ? '99+' : unreadCount}
@@ -161,7 +161,7 @@ export default function NotificationBell() {
         <div className="max-h-[420px] overflow-y-auto">
           {items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-              <IconBell className="size-6 text-muted-foreground/50" />
+              <Bell className="size-6 text-muted-foreground/50" />
               <p className="text-xs text-muted-foreground">
                 Aucune notification pour le moment.
               </p>
@@ -189,7 +189,7 @@ export default function NotificationBell() {
                         isUnread ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                       )}
                     >
-                      <IconWallet className="size-3.5" />
+                      <Wallet className="size-3.5" />
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
                       <p className="text-xs leading-relaxed">
@@ -211,7 +211,7 @@ export default function NotificationBell() {
                           rel="noreferrer"
                           className="inline-flex items-center gap-0.5 hover:text-foreground"
                         >
-                          <IconExternalLink className="size-3" />
+                          <ExternalLink className="size-3" />
                           tx
                         </a>
                       </div>
@@ -223,7 +223,7 @@ export default function NotificationBell() {
                         className="self-start rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
                         aria-label="Marquer comme lue"
                       >
-                        <IconCheck className="size-3.5" />
+                        <Check className="size-3.5" />
                       </button>
                     )}
                   </li>

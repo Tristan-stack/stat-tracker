@@ -28,15 +28,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IconChartBar, IconEye, IconLayersIntersect, IconLogout, IconUser, IconWallet } from '@tabler/icons-react';
+import { BarChart3, Eye, Layers, LogOut, User, Wallet } from 'lucide-react';
 import { useSession, signOut } from '@/lib/auth-client';
 import NotificationBell from '@/components/notifications/NotificationBell';
 
 const links = [
-  { href: '/', label: 'Stat tracking', icon: IconChartBar },
-  { href: '/rugger', label: 'Ruggers', icon: IconWallet },
-  { href: '/watchlist', label: 'Watchlist', icon: IconEye },
-  { href: '/wallet-comparison', label: 'Comparaison wallets', icon: IconLayersIntersect },
+  { href: '/', label: 'Stat tracking', icon: BarChart3 },
+  { href: '/rugger', label: 'Ruggers', icon: Wallet },
+  { href: '/watchlist', label: 'Watchlist', icon: Eye },
+  { href: '/wallet-comparison', label: 'Comparaison wallets', icon: Layers },
 ];
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
@@ -142,7 +142,7 @@ function AppSidebar() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => router.push('/profile')}>
-                <IconUser className="mr-2 size-4" />
+                <User className="mr-2 size-4" />
                 Profil
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -155,7 +155,7 @@ function AppSidebar() {
                   router.refresh();
                 }}
               >
-                <IconLogout className="mr-2 size-4" />
+                <LogOut className="mr-2 size-4" />
                 Déconnexion
               </DropdownMenuItem>
             </DropdownMenuContent>

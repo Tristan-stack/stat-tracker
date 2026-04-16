@@ -12,7 +12,7 @@ import BestWalletLeaderboard from '@/components/analysis/BestWalletLeaderboard';
 import MotherAddressCard from '@/components/analysis/MotherAddressCard';
 import CombinationOptimizer from '@/components/analysis/CombinationOptimizer';
 import WalletDetail from '@/components/analysis/WalletDetail';
-import { IconHistory, IconChevronRight, IconPlus, IconTrash } from '@tabler/icons-react';
+import { ChevronRight, History, Plus, Trash2 } from 'lucide-react';
 
 type TabView = 'idle' | 'running' | 'results';
 type ResultSection = 'leaderboard' | 'mothers' | 'combinations';
@@ -303,7 +303,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <Button type="button" variant="ghost" size="sm" onClick={handleBackToIdle} className="gap-1">
-              <IconHistory className="size-4" />Historique
+              <History className="size-4" />Historique
             </Button>
             {activeAnalysis && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -325,11 +325,11 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
               disabled={deletingAnalysisId === activeAnalysisId}
               onClick={() => void handleDeleteAnalysis(activeAnalysisId)}
             >
-              <IconTrash className="size-4" />
+              <Trash2 className="size-4" />
               Supprimer
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleBackToIdle} className="gap-1">
-              <IconPlus className="size-4" />Nouvelle analyse
+              <Plus className="size-4" />Nouvelle analyse
             </Button>
           </div>
         </div>
@@ -391,7 +391,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <IconHistory className="size-4 text-muted-foreground" />
+            <History className="size-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">Analyses précédentes</h3>
           </div>
           {analyses.length > 0 && (
@@ -403,7 +403,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
               disabled={isDeletingAll}
               onClick={() => void handleDeleteAllAnalyses()}
             >
-              <IconTrash className="size-3.5" />
+              <Trash2 className="size-3.5" />
               {isDeletingAll ? 'Suppression…' : 'Tout supprimer'}
             </Button>
           )}
@@ -460,7 +460,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
                     </div>
                   </div>
                   {rowClickable && (
-                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   )}
                   {a.status === 'failed' && a.errorMessage && (
                     <span className="shrink-0 text-xs text-destructive max-w-[200px] truncate">{a.errorMessage}</span>
@@ -476,7 +476,7 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
                     aria-label="Supprimer cette analyse"
                     onClick={() => void handleDeleteAnalysis(a.id)}
                   >
-                    <IconTrash className="size-4" />
+                    <Trash2 className="size-4" />
                   </Button>
                 </div>
               </div>

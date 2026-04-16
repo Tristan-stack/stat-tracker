@@ -8,7 +8,7 @@ import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import type { Token } from '@/types/token';
 import { StatsSummary } from '@/components/StatsSummary';
 import WalletActions from '@/components/analysis/WalletActions';
-import { IconAnalyze, IconCheck, IconCopy, IconExternalLink, IconLoader2, IconX } from '@tabler/icons-react';
+import { Check, Copy, ExternalLink, LineChart, Loader2, X } from 'lucide-react';
 
 const SECURE_MARGIN_PCT = 2;
 
@@ -141,9 +141,9 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
             >
               <span className="truncate">{walletAddress}</span>
               {copiedWallet ? (
-                <IconCheck className="size-3.5 shrink-0 text-green-500" />
+                <Check className="size-3.5 shrink-0 text-green-500" />
               ) : (
-                <IconCopy className="size-3.5 shrink-0 text-muted-foreground" />
+                <Copy className="size-3.5 shrink-0 text-muted-foreground" />
               )}
             </button>
             <a
@@ -153,7 +153,7 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
               className="text-primary hover:text-primary/80"
               title="Solscan"
             >
-              <IconExternalLink className="size-4" />
+              <ExternalLink className="size-4" />
             </a>
             <a
               href={`https://gmgn.ai/sol/address/${walletAddress}`}
@@ -175,7 +175,7 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
         <div className="flex shrink-0 gap-1">
           {onClose && (
             <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label="Fermer le panneau">
-              <IconX className="size-4" />
+              <X className="size-4" />
             </Button>
           )}
         </div>
@@ -192,12 +192,12 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
         >
           {isAnalyzing ? (
             <>
-              <IconLoader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-3.5 animate-spin" />
               Analyse en cours…
             </>
           ) : (
             <>
-              <IconAnalyze className="size-3.5" />
+              <LineChart className="size-3.5" />
               {tokenAnalysis ? 'Relancer l’analyse tokens' : 'Analyser les tokens'}
             </>
           )}
@@ -269,9 +269,9 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                                 </div>
                               </div>
                               {copiedTokenMint === t.tokenAddress ? (
-                                <IconCheck className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                                <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
                               ) : (
-                                <IconCopy className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                                <Copy className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
                               )}
                             </button>
                           </td>
@@ -311,7 +311,7 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                                 rel="noopener noreferrer"
                                 className="text-primary hover:text-primary/80"
                               >
-                                <IconExternalLink className="size-3.5" />
+                                <ExternalLink className="size-3.5" />
                               </a>
                               <a
                                 href={`https://gmgn.ai/sol/token/${t.tokenAddress}`}

@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { IconCheck, IconCopy } from '@tabler/icons-react';
+import { Check, Copy } from 'lucide-react';
 
 interface BestWalletLeaderboardProps {
   ruggerId: string;
@@ -379,9 +379,9 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId, onWalletCl
                             title="Copier l'adresse"
                           >
                             {copiedWallet === wallet.walletAddress ? (
-                              <IconCheck className="size-3 text-green-500" />
+                              <Check className="size-3 text-green-500" />
                             ) : (
-                              <IconCopy className="size-3 text-muted-foreground" />
+                              <Copy className="size-3 text-muted-foreground" />
                             )}
                           </button>
                         </div>

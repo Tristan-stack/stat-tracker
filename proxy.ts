@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
-
-const PUBLIC_PATHS = ['/sign-in', '/sign-up', '/401', '/403', '/404', '/405'];
-
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
+import { isPublicPagePath } from '@/lib/public-auth-paths';
 
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -22,7 +17,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (isPublicPath(pathname)) {
+  if (isPublicPagePath(pathname)) {
     return NextResponse.next();
   }
 

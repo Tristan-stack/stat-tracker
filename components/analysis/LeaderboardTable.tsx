@@ -5,15 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { WalletSource, CrossRuggerMatch } from '@/types/analysis';
-import {
-  IconChevronDown,
-  IconChevronUp,
-  IconExternalLink,
-  IconCopy,
-  IconCheck,
-  IconSearch,
-  IconX,
-} from '@tabler/icons-react';
+import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Search, X } from 'lucide-react';
 import CrossRuggerBadge from '@/components/analysis/CrossRuggerBadge';
 import WalletActions from '@/components/analysis/WalletActions';
 
@@ -251,7 +243,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
         <p className="text-xs text-muted-foreground">Tri via en-têtes de colonnes</p>
       </div>
       <div className="relative">
-        <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => {
@@ -271,7 +263,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             title="Effacer la recherche"
           >
-            <IconX className="size-3.5" />
+            <X className="size-3.5" />
           </button>
         )}
       </div>
@@ -384,8 +376,8 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                           title="Copier l'adresse"
                         >
                           {copiedAddress === w.walletAddress
-                            ? <IconCheck className="size-3 text-green-500" />
-                            : <IconCopy className="size-3 text-muted-foreground" />}
+                            ? <Check className="size-3 text-green-500" />
+                            : <Copy className="size-3 text-muted-foreground" />}
                         </button>
                         {crossMatch && <span className="size-1.5 rounded-full bg-amber-500 shrink-0" title="Multi-rugger" />}
                       </div>
@@ -418,7 +410,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                     <td className="px-3 py-2">
                       <button type="button" onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : w.id); }}
                         className="rounded p-0.5 hover:bg-muted">
-                        {isExpanded ? <IconChevronUp className="size-4" /> : <IconChevronDown className="size-4" />}
+                        {isExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
                       </button>
                     </td>
                   </tr>
@@ -442,8 +434,8 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                                   title="Copier l'adresse"
                                 >
                                   {copiedAddress === w.walletAddress
-                                    ? <IconCheck className="size-3.5 text-green-600 dark:text-green-400" />
-                                    : <IconCopy className="size-3.5 text-muted-foreground" />}
+                                    ? <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                                    : <Copy className="size-3.5 text-muted-foreground" />}
                                 </button>
                                 <a
                                   href={`https://solscan.io/account/${w.walletAddress}`}
@@ -452,7 +444,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                                   className="rounded-md border border-border/80 bg-muted/40 p-1.5 text-primary hover:bg-muted"
                                   title="Solscan"
                                 >
-                                  <IconExternalLink className="size-3.5" />
+                                  <ExternalLink className="size-3.5" />
                                 </a>
                                 <a
                                   href={`https://gmgn.ai/sol/address/${w.walletAddress}`}

@@ -74,6 +74,7 @@ function buildJsonPayload(
     walletsCompared: orderedOk,
     skippedWallets: partialFailures,
     commonMintCount: computed.commonMintCount,
+    distinctMintUnionCount: computed.distinctMintUnionCount,
     globalWinnerWallets: computed.globalWinnerWallets,
     scores: computed.scores,
     perMint: computed.perMint,

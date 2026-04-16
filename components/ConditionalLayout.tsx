@@ -2,8 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import SidebarLayout from '@/components/SidebarLayout';
-
-const NO_SIDEBAR_PATHS = ['/sign-in', '/sign-up', '/401', '/403', '/404', '/405'];
+import { isPublicPagePath } from '@/lib/public-auth-paths';
 
 export default function ConditionalLayout({
   children,
@@ -11,9 +10,7 @@ export default function ConditionalLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const hideSidebar = NO_SIDEBAR_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`)
-  );
+  const hideSidebar = isPublicPagePath(pathname);
 
   if (hideSidebar) {
     return <>{children}</>;

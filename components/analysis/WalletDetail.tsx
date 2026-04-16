@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WalletSource } from '@/types/analysis';
-import { IconArrowLeft, IconExternalLink, IconCopy, IconCheck, IconAnalyze, IconLoader2 } from '@tabler/icons-react';
+import { ArrowLeft, Check, Copy, ExternalLink, LineChart, Loader2 } from 'lucide-react';
 import WalletActions from '@/components/analysis/WalletActions';
 import { getMaxGainPercent, getMaxLossPercent } from '@/lib/token-calculations';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
@@ -197,7 +197,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
     <div className="space-y-5">
       <div className="flex items-center gap-3">
         <Button type="button" variant="ghost" size="sm" onClick={onBack} className="gap-1">
-          <IconArrowLeft className="size-4" />Retour
+          <ArrowLeft className="size-4" />Retour
         </Button>
       </div>
 
@@ -211,12 +211,12 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
           >
             <span className="font-mono text-sm">{wallet.walletAddress}</span>
             {copied
-              ? <IconCheck className="size-3.5 text-green-500" />
-              : <IconCopy className="size-3.5 text-muted-foreground" />}
+              ? <Check className="size-3.5 text-green-500" />
+              : <Copy className="size-3.5 text-muted-foreground" />}
           </button>
           <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', sourceBadgeStyle[wallet.source])}>{wallet.source}</span>
           <a href={`https://solscan.io/account/${wallet.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
-            <IconExternalLink className="size-4" />
+            <ExternalLink className="size-4" />
           </a>
           <a href={`https://gmgn.ai/sol/address/${wallet.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:text-primary/80 font-medium" title="GMGN">
             GMGN
@@ -281,8 +281,8 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
             onClick={() => void handleAnalyzeTokens()}
           >
             {isAnalyzing
-              ? <><IconLoader2 className="size-3.5 animate-spin" />Analyse en cours…</>
-              : <><IconAnalyze className="size-3.5" />{tokenAnalysis ? 'Relancer l’analyse' : 'Analyser les tokens'}</>}
+              ? <><Loader2 className="size-3.5 animate-spin" />Analyse en cours…</>
+              : <><LineChart className="size-3.5" />{tokenAnalysis ? 'Relancer l’analyse' : 'Analyser les tokens'}</>}
           </Button>
         </div>
         {analysisError && (
@@ -317,7 +317,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1">
                           <a href={`https://solscan.io/token/${p.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
-                            <IconExternalLink className="size-3.5" />
+                            <ExternalLink className="size-3.5" />
                           </a>
                           <a href={`https://gmgn.ai/sol/token/${p.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:text-primary/80 font-medium" title="GMGN">
                             GMGN
@@ -400,8 +400,8 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                             </div>
                             <span className="shrink-0 self-center">
                               {copiedTokenMint === t.tokenAddress
-                                ? <IconCheck className="size-3.5 text-green-600 dark:text-green-400" />
-                                : <IconCopy className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />}
+                                ? <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                                : <Copy className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />}
                             </span>
                           </button>
                         </td>
@@ -426,7 +426,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1">
                             <a href={`https://solscan.io/token/${t.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
-                              <IconExternalLink className="size-3.5" />
+                              <ExternalLink className="size-3.5" />
                             </a>
                             <a href={`https://gmgn.ai/sol/token/${t.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:text-primary/80 font-medium" title="GMGN">
                               GMGN

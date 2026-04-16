@@ -13,7 +13,7 @@ import {
   localTodayPurchaseRange,
   localYesterdayPurchaseRange,
 } from '@/lib/token-date-filter';
-import { IconTrash } from '@tabler/icons-react';
+import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 
@@ -564,7 +564,7 @@ export default function GmgnTokenAddSection({
                           onClick={() => removeGmgnPreviewRow(p.rowKey)}
                           aria-label="Retirer de la liste"
                         >
-                          <IconTrash className="size-4" />
+                          <Trash2 className="size-4" />
                         </Button>
                         <Button type="button" size="sm" variant="outline" onClick={() => void handleAddGmgnPurchases([p])}>
                           Ajouter
