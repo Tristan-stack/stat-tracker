@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { WatchlistWallet } from '@/types/watchlist';
 import type { Rugger } from '@/types/rugger';
-import { ExternalLink, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
+import { Check, Copy, ExternalLink, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
 
 function truncateAddress(addr: string) {
   if (addr.length <= 14) return addr;
@@ -29,6 +29,7 @@ export default function WatchlistPage() {
   const [ruggers, setRuggers] = useState<Rugger[]>([]);
   const [linkingWallet, setLinkingWallet] = useState<WatchlistWallet | null>(null);
   const [selectedRuggerId, setSelectedRuggerId] = useState('');
+  const [copiedWalletId, setCopiedWalletId] = useState<string | null>(null);
 
   const fetchWallets = useCallback(async () => {
     setIsLoading(true);
@@ -114,6 +115,18 @@ export default function WatchlistPage() {
     setLinkingWallet(null);
     setSelectedRuggerId('');
   }, [linkingWallet, selectedRuggerId]);
+
+  const handleCopyWallet = useCallback(async (wallet: WatchlistWallet) => {
+    try {
+      await navigator.clipboard.writeText(wallet.walletAddress);
+      setCopiedWalletId(wallet.id);
+      setTimeout(() => {
+        setCopiedWalletId((current) => (current === wallet.id ? null : current));
+      }, 1200);
+    } catch {
+      setError('Impossible de copier le wallet.');
+    }
+  }, []);
 
   return (
     <div className="space-y-6 p-6 sm:p-8">
@@ -214,6 +227,19 @@ export default function WatchlistPage() {
                         <>
                           <button type="button" onClick={() => startEdit(w)} className="rounded p-1 hover:bg-muted" aria-label="Modifier">
                             <Pencil className="size-3.5 text-muted-foreground" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyWallet(w)}
+                            className="rounded p-1 hover:bg-muted"
+                            aria-label="Copier le wallet"
+                            title={copiedWalletId === w.id ? 'Copié' : 'Copier le wallet'}
+                          >
+                            {copiedWalletId === w.id ? (
+                              <Check className="size-3.5 text-green-600" />
+                            ) : (
+                              <Copy className="size-3.5 text-muted-foreground" />
+                            )}
                           </button>
                           <button
                             type="button"

@@ -1,6 +1,6 @@
 export type AnalysisStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-export type AnalysisMode = 'token' | 'funding' | 'combined';
+export type AnalysisMode = 'token' | 'funding' | 'combined' | 'token_hunting';
 
 export type WalletSource = 'token' | 'funding' | 'both';
 

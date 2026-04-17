@@ -8,7 +8,7 @@ import type { AnalysisMode } from '@/types/analysis';
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
-const VALID_MODES: AnalysisMode[] = ['token', 'funding', 'combined'];
+const VALID_MODES: AnalysisMode[] = ['token', 'funding', 'combined', 'token_hunting'];
 
 export async function POST(
   req: NextRequest,
@@ -37,7 +37,7 @@ export async function POST(
 
   const mode = body.mode ?? 'combined';
   if (!VALID_MODES.includes(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use: token, funding, or combined' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid mode. Use: token, funding, combined, or token_hunting' }, { status: 400 });
   }
 
   const fundingDepth = body.fundingDepth ?? 5;
@@ -50,7 +50,7 @@ export async function POST(
     [ruggerId]
   );
   const ruggerWallet = rugger[0]?.wallet_address;
-  if (!ruggerWallet) {
+  if (!ruggerWallet && mode !== 'token_hunting') {
     return NextResponse.json({ error: 'Rugger has no primary wallet configured' }, { status: 400 });
   }
 
@@ -65,7 +65,7 @@ export async function POST(
     tokens = dbTokens.map((t) => ({ address: t.token_address, name: t.token_name }));
   }
 
-  if ((mode === 'token' || mode === 'combined') && tokens.length === 0) {
+  if ((mode === 'token' || mode === 'combined' || mode === 'token_hunting') && tokens.length === 0) {
     return NextResponse.json(
       { error: 'No tokens available. Add tokens to the rugger or provide tokenAddresses.' },
       { status: 400 }
@@ -159,7 +159,7 @@ export async function POST(
 
       emit('ping', { analysisId });
 
-      runAnalysisPipeline(analysisId, tokens, ruggerWallet, userId, pipelineOpts, emit)
+      runAnalysisPipeline(analysisId, tokens, ruggerWallet ?? null, userId, pipelineOpts, emit)
         .catch((error) => {
           if (clientDisconnected) return;
           const message =

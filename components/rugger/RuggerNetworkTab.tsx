@@ -24,6 +24,7 @@ interface RuggerNetworkTabProps {
 
 const MODE_LABELS: Record<AnalysisMode, string> = {
   token: 'Tokens',
+  token_hunting: 'Token Hunting',
   funding: 'Funding',
   combined: 'Combiné',
 };

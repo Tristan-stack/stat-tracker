@@ -1,6 +1,7 @@
 import { runWithConcurrency } from '@/lib/analysis/async-pool';
 import type { DiscoveredBuyer } from '@/lib/analysis/discover-buyers';
 import { collectSolanaBuysInRange } from '@/lib/gmgn/wallet-purchases';
+import type { WalletActivityRow } from '@/lib/gmgn/client';
 
 const DEFAULT_CONCURRENCY = Number(process.env.FILTER_MCAP_CONCURRENCY ?? '4');
 const PURCHASE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -27,22 +28,34 @@ function parseMcapValue(raw: unknown): number | null {
   return n;
 }
 
-async function getEntryMcapForPurchase(
-  walletAddress: string,
-  tokenAddress: string,
-  purchasedAt: string
-): Promise<number | null> {
-  const purchaseMs = Date.parse(purchasedAt);
-  if (!Number.isFinite(purchaseMs)) return null;
-  const fromMs = Math.max(0, purchaseMs - PURCHASE_LOOKBACK_MS);
-  const toMs = purchaseMs + PURCHASE_LOOKAHEAD_MS;
-  const rows = await collectSolanaBuysInRange(walletAddress, fromMs, toMs);
-  const match = rows.find((row) => {
-    const mint = row.token?.address ?? row.token_address;
-    return mint === tokenAddress;
-  });
-  if (!match) return null;
-  return parseMcapValue(match.price_usd);
+function tokenMint(row: WalletActivityRow): string | null {
+  const mint = row.token?.address ?? row.token_address;
+  if (typeof mint !== 'string' || mint.trim() === '') return null;
+  return mint;
+}
+
+function buildMcapByToken(rows: WalletActivityRow[]): Map<string, number> {
+  const byToken = new Map<string, number>();
+  for (const row of rows) {
+    const mint = tokenMint(row);
+    if (!mint || byToken.has(mint)) continue;
+    const mcap = parseMcapValue(row.price_usd);
+    if (mcap !== null) byToken.set(mint, mcap);
+  }
+  return byToken;
+}
+
+function computeWalletRangeMs(purchases: DiscoveredBuyer['purchases']): { fromMs: number; toMs: number } | null {
+  const purchaseMsValues = purchases
+    .map((purchase) => Date.parse(purchase.purchasedAt))
+    .filter((value) => Number.isFinite(value)) as number[];
+  if (purchaseMsValues.length === 0) return null;
+  const minPurchaseMs = Math.min(...purchaseMsValues);
+  const maxPurchaseMs = Math.max(...purchaseMsValues);
+  return {
+    fromMs: Math.max(0, minPurchaseMs - PURCHASE_LOOKBACK_MS),
+    toMs: maxPurchaseMs + PURCHASE_LOOKAHEAD_MS,
+  };
 }
 
 function isInsideRange(value: number, min?: number, max?: number): boolean {
@@ -65,25 +78,30 @@ export async function filterBuyersByMcapRange(
   }
 
   const concurrency = Math.max(1, opts?.concurrency ?? DEFAULT_CONCURRENCY);
-  const cache = new Map<string, Promise<number | null>>();
+  const walletRowsCache = new Map<string, Promise<WalletActivityRow[]>>();
   let completed = 0;
 
   const decisions = await runWithConcurrency(buyers, concurrency, async (buyer) => {
+    const range = computeWalletRangeMs(buyer.purchases);
+    if (!range) {
+      completed += 1;
+      opts?.onProgress?.(completed, buyers.length);
+      return { keep: true, unknown: true };
+    }
+
+    let pendingRows = walletRowsCache.get(buyer.walletAddress);
+    if (!pendingRows) {
+      pendingRows = collectSolanaBuysInRange(buyer.walletAddress, range.fromMs, range.toMs);
+      walletRowsCache.set(buyer.walletAddress, pendingRows);
+    }
+    const walletRows = await pendingRows;
+    const mcapByToken = buildMcapByToken(walletRows);
+
     let hasKnownMcap = false;
     let hasInRangeMcap = false;
 
     for (const purchase of buyer.purchases) {
-      const key = `${buyer.walletAddress}:${purchase.tokenAddress}:${purchase.purchasedAt}`;
-      let pending = cache.get(key);
-      if (!pending) {
-        pending = getEntryMcapForPurchase(
-          buyer.walletAddress,
-          purchase.tokenAddress,
-          purchase.purchasedAt
-        );
-        cache.set(key, pending);
-      }
-      const mcap = await pending;
+      const mcap = mcapByToken.get(purchase.tokenAddress) ?? null;
       if (mcap === null) continue;
       hasKnownMcap = true;
       if (isInsideRange(mcap, mcapMin, mcapMax)) {

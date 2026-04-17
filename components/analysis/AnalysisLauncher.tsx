@@ -7,11 +7,13 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode } from '@/types/analysis';
 import type { LucideIcon } from 'lucide-react';
-import { Layers, Link2, Search } from 'lucide-react';
+import { Layers, Link2, Search, Target } from 'lucide-react';
 
 const WALLET_RECOVERY_MIN = 0;
 const WALLET_RECOVERY_MAX = 120;
 const WALLET_RECOVERY_DEFAULT = 15;
+const MCAP_INPUT_MULTIPLIER = 1000;
+const MCAP_MIGRATION_WARNING_THRESHOLD = 1000;
 
 interface AnalysisLauncherProps {
   tokenCount: number;
@@ -28,6 +30,7 @@ interface AnalysisLauncherProps {
 
 const MODE_OPTIONS: { key: AnalysisMode; label: string; description: string; icon: LucideIcon }[] = [
   { key: 'token', label: 'Tokens', description: 'Corrélation par tokens achetés', icon: Search },
+  { key: 'token_hunting', label: 'Token Hunting', description: 'Corrélation wallets depuis les tokens du rugger (sans wallet de référence)', icon: Target },
   { key: 'funding', label: 'Funding', description: 'Corrélation par adresse mère', icon: Link2 },
   { key: 'combined', label: 'Combiné', description: 'Tokens + funding, wallets en commun mis en avant', icon: Layers },
 ];
@@ -43,9 +46,18 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
   const [mcapMaxInput, setMcapMaxInput] = useState('');
   const [launchError, setLaunchError] = useState<string | null>(null);
 
-  const needsTokens = mode === 'token' || mode === 'combined';
+  const needsTokens = mode === 'token' || mode === 'combined' || mode === 'token_hunting';
   const showDepth = mode === 'funding' || mode === 'combined';
   const canLaunch = !isDisabled && (!needsTokens || tokenCount > 0);
+  const parsedMcapMinInput = mcapMinInput.trim() === '' ? null : Number(mcapMinInput);
+  const parsedMcapMaxInput = mcapMaxInput.trim() === '' ? null : Number(mcapMaxInput);
+  const showMcapMigrationWarning =
+    (parsedMcapMinInput !== null &&
+      Number.isFinite(parsedMcapMinInput) &&
+      parsedMcapMinInput >= MCAP_MIGRATION_WARNING_THRESHOLD) ||
+    (parsedMcapMaxInput !== null &&
+      Number.isFinite(parsedMcapMaxInput) &&
+      parsedMcapMaxInput >= MCAP_MIGRATION_WARNING_THRESHOLD);
 
   const handleLaunch = () => {
     if (!canLaunch) return;
@@ -59,8 +71,10 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
           )
         )
       : WALLET_RECOVERY_DEFAULT;
-    const mcapMin = mcapMinInput.trim() === '' ? undefined : Number(mcapMinInput);
-    const mcapMax = mcapMaxInput.trim() === '' ? undefined : Number(mcapMaxInput);
+    const mcapMinXk = parsedMcapMinInput === null ? undefined : parsedMcapMinInput;
+    const mcapMaxXk = parsedMcapMaxInput === null ? undefined : parsedMcapMaxInput;
+    const mcapMin = mcapMinXk === undefined ? undefined : mcapMinXk * MCAP_INPUT_MULTIPLIER;
+    const mcapMax = mcapMaxXk === undefined ? undefined : mcapMaxXk * MCAP_INPUT_MULTIPLIER;
     if (mcapMin !== undefined && (!Number.isFinite(mcapMin) || mcapMin < 0)) {
       setLaunchError('MCAP min doit etre un nombre positif.');
       return;
@@ -87,7 +101,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
     <div className="space-y-5">
       <div className="space-y-2">
         <Label className="text-sm font-medium">Mode d&apos;analyse</Label>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
           {MODE_OPTIONS.map(({ key, label, description, icon: Icon }) => (
             <button
               key={key}
@@ -172,11 +186,11 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
         <div className="space-y-2">
           <Label className="text-sm font-medium">Filtre MCAP (buyers token)</Label>
           <p className="text-xs text-muted-foreground">
-            Garde uniquement les wallets avec un MCAP d&apos;entree GMGN dans la plage min/max.
+            Unité xK: 15 = 15k (15000). Nouvelle unité: les anciennes valeurs brutes doivent être adaptées.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="mcap-min" className="text-xs text-muted-foreground">MCAP min</Label>
+              <Label htmlFor="mcap-min" className="text-xs text-muted-foreground">MCAP min (xK)</Label>
               <Input
                 id="mcap-min"
                 type="number"
@@ -184,12 +198,12 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
                 step={1}
                 value={mcapMinInput}
                 onChange={(e) => setMcapMinInput(e.target.value)}
-                placeholder="ex: 500000"
+                placeholder="ex: 15"
                 disabled={!canLaunch}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="mcap-max" className="text-xs text-muted-foreground">MCAP max</Label>
+              <Label htmlFor="mcap-max" className="text-xs text-muted-foreground">MCAP max (xK)</Label>
               <Input
                 id="mcap-max"
                 type="number"
@@ -197,11 +211,16 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
                 step={1}
                 value={mcapMaxInput}
                 onChange={(e) => setMcapMaxInput(e.target.value)}
-                placeholder="ex: 5000000"
+                placeholder="ex: 300"
                 disabled={!canLaunch}
               />
             </div>
           </div>
+          {showMcapMigrationWarning && (
+            <p className="text-xs text-amber-600">
+              Attention: tu as saisi une grande valeur. En mode xK, 15000 signifie 15 000 000.
+            </p>
+          )}
         </div>
       )}
 

@@ -171,7 +171,7 @@ interface WalletDecision {
 export async function runAnalysisPipeline(
   analysisId: string,
   tokens: TokenInput[],
-  ruggerWallet: string,
+  ruggerWallet: string | null,
   userId: string,
   opts: PipelineOpts,
   emit: EmitFn
@@ -190,6 +190,7 @@ export async function runAnalysisPipeline(
     let modeRun: ModeRunResult;
 
     if (mode === 'token') {
+      if (!ruggerWallet) throw new Error('Rugger has no primary wallet configured');
       modeRun = await runTokenMode(
         analysisId,
         tokens,
@@ -202,9 +203,23 @@ export async function runAnalysisPipeline(
         mcapMax,
         emit
       );
+    } else if (mode === 'token_hunting') {
+      modeRun = await runTokenHuntingMode(
+        analysisId,
+        tokens,
+        buyerLimit,
+        walletCentricRecoveryLimit,
+        excludeInactiveOver24h,
+        inactiveThresholdHours,
+        mcapMin,
+        mcapMax,
+        emit
+      );
     } else if (mode === 'funding') {
+      if (!ruggerWallet) throw new Error('Rugger has no primary wallet configured');
       modeRun = await runFundingMode(tokens, ruggerWallet, userId, fundingDepth, buyerLimit, emit);
     } else {
+      if (!ruggerWallet) throw new Error('Rugger has no primary wallet configured');
       modeRun = await runCombinedMode(
         analysisId,
         tokens,
@@ -269,7 +284,7 @@ async function runTokenMode(
 ): Promise<ModeRunResult> {
   const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
     tokens,
-    ruggerWallet,
+    { ruggerWallet, discoverFromRuggerWallet: true },
     buyerLimit,
     emit
   );
@@ -310,6 +325,101 @@ async function runTokenMode(
 
     recoveredResult = await recoverWalletCentricBuyers(effectiveTokens, rankedWallets, {
       excludeWallets: [ruggerWallet],
+      fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+      toMs: Date.now(),
+      maxCandidates: Math.max(1, rankedWallets.length || 1),
+      onProgress: (current, total) => {
+        const pct = 48 + Math.round((current / Math.max(1, total)) * 20);
+        emit('progress', {
+          phase: 'wallet_centric_recovery',
+          percent: pct,
+          detail: `${current}/${total} wallets analysés`,
+        });
+      },
+    });
+  }
+
+  emit('progress', { phase: 'wallet_centric_recovery', percent: 70, detail: 'Fusion des résultats…' });
+  const { mergedBuyers, recoveredWalletAddresses } = mergeRecoveredBuyers(
+    mcapFilteredBuyers,
+    recoveredResult.buyers
+  );
+  if (recoveredWalletAddresses.size > 0) {
+    emit('wallet_centric_recovered', { recoveredCount: recoveredWalletAddresses.size });
+  }
+
+  return {
+    mergedWallets: mergedBuyers.map((b) => ({
+      walletAddress: b.walletAddress,
+      source: 'token' as WalletSource,
+      purchases: b.purchases.map((p) => ({
+        tokenAddress: p.tokenAddress,
+        tokenName: p.tokenName,
+        purchasedAt: p.purchasedAt,
+        amountSol: p.amountSol,
+      })),
+      fundingChain: null,
+      fundingDepth: null,
+      motherAddress: null,
+      hasHighFanoutMother: false,
+      motherChildCount: 0,
+      recoveredByWalletCentric: recoveredWalletAddresses.has(b.walletAddress),
+    })),
+    effectiveTokens,
+  };
+}
+
+async function runTokenHuntingMode(
+  analysisId: string,
+  tokens: TokenInput[],
+  buyerLimit: number,
+  walletCentricRecoveryLimit: number,
+  excludeInactiveOver24h: boolean,
+  inactiveThresholdHours: number,
+  mcapMin: number | undefined,
+  mcapMax: number | undefined,
+  emit: EmitFn
+): Promise<ModeRunResult> {
+  const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
+    tokens,
+    { ruggerWallet: null, discoverFromRuggerWallet: false },
+    buyerLimit,
+    emit
+  );
+
+  const buyers = excludeInactiveOver24h
+    ? await applyInactiveFilter(initialBuyers, inactiveThresholdHours, emit)
+    : initialBuyers;
+  const mcapFilteredBuyers = await applyMcapFilter(buyers, mcapMin, mcapMax, emit);
+
+  let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
+  if (walletCentricRecoveryLimit === 0) {
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 55,
+      detail: 'Recovery wallet-centric désactivée (0 wallet)',
+    });
+    recoveredResult = {
+      buyers: [],
+      tokenCount: effectiveTokens.length,
+      totalUniqueBuyers: 0,
+    };
+  } else {
+    emit('progress', { phase: 'wallet_centric_recovery', percent: 45, detail: 'Chargement des candidats…' });
+    const candidateWallets = await loadWalletCentricCandidates(analysisId);
+    const historicalCoverage = await loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId);
+    const rankedWallets = selectTopCandidatesByCoverage(
+      candidateWallets,
+      mcapFilteredBuyers,
+      historicalCoverage,
+      walletCentricRecoveryLimit
+    );
+    emit('progress', {
+      phase: 'wallet_centric_recovery',
+      percent: 48,
+      detail: `${candidateWallets.length} en base → ${rankedWallets.length} retenus (meilleure couverture, N=${walletCentricRecoveryLimit})`,
+    });
+    recoveredResult = await recoverWalletCentricBuyers(effectiveTokens, rankedWallets, {
       fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       toMs: Date.now(),
       maxCandidates: Math.max(1, rankedWallets.length || 1),
@@ -411,7 +521,12 @@ async function runCombinedMode(
   const {
     buyers: discoveredBuyers,
     tokens: effectiveTokens,
-  } = await discoverAndValidateTokenUniverse(tokens, ruggerWallet, buyerLimit, emit);
+  } = await discoverAndValidateTokenUniverse(
+    tokens,
+    { ruggerWallet, discoverFromRuggerWallet: true },
+    buyerLimit,
+    emit
+  );
 
   const tokenBuyersInitial = excludeInactiveOver24h
     ? await applyInactiveFilter(discoveredBuyers, inactiveThresholdHours, emit)
@@ -572,14 +687,22 @@ async function runCombinedMode(
   };
 }
 
+interface DiscoverTokenUniverseOpts {
+  ruggerWallet: string | null;
+  discoverFromRuggerWallet: boolean;
+}
+
 async function discoverAndValidateTokenUniverse(
   registeredTokens: TokenInput[],
-  ruggerWallet: string,
+  opts: DiscoverTokenUniverseOpts,
   buyerLimit: number,
   emit: EmitFn
 ): Promise<{ tokens: TokenInput[]; buyers: DiscoveredBuyer[] }> {
+  const { ruggerWallet, discoverFromRuggerWallet } = opts;
   emit('progress', { phase: 'discovering_rugger_tokens', percent: 5 });
-  const allCandidateTokens = await discoverRuggerTokens(ruggerWallet, registeredTokens);
+  const allCandidateTokens = discoverFromRuggerWallet
+    ? await discoverRuggerTokens(ruggerWallet ?? '', registeredTokens)
+    : registeredTokens;
   emit('tokens_discovered', {
     candidateCount: allCandidateTokens.length,
     registeredCount: registeredTokens.length,
@@ -591,7 +714,7 @@ async function discoverAndValidateTokenUniverse(
     new Set(registeredTokens.map((token) => token.address)),
     {
       buyerLimit,
-      excludeWallets: [ruggerWallet],
+      excludeWallets: ruggerWallet ? [ruggerWallet] : [],
       concurrency: ANALYSIS_CONCURRENCY,
       onProgress: (current, total) => {
         const pct = 10 + Math.round((current / total) * 30);
