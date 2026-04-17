@@ -6,6 +6,7 @@ import {
 import { discoverSiblingWallets } from '@/lib/analysis/discover-siblings';
 import { traceFundingForWallets } from '@/lib/analysis/trace-funding';
 import { filterBuyersByLastActivity } from '@/lib/analysis/filter-active-buyers';
+import { filterBuyersByMcapRange } from '@/lib/analysis/filter-buyers-by-mcap';
 import { scoreWallets, type ScoringInput, type ScoringResult } from '@/lib/analysis/scoring';
 import { solveCombinations, type WalletTokenSet } from '@/lib/analysis/combinations';
 import {
@@ -73,6 +74,51 @@ async function applyInactiveFilter(
   return result.keptBuyers;
 }
 
+async function applyMcapFilter(
+  buyers: DiscoveredBuyer[],
+  mcapMin: number | undefined,
+  mcapMax: number | undefined,
+  emit: EmitFn
+): Promise<DiscoveredBuyer[]> {
+  if (buyers.length === 0) return buyers;
+  if (mcapMin === undefined && mcapMax === undefined) return buyers;
+
+  const minLabel = mcapMin === undefined ? '-inf' : String(mcapMin);
+  const maxLabel = mcapMax === undefined ? '+inf' : String(mcapMax);
+  emit('progress', {
+    phase: 'filter_mcap',
+    percent: 44,
+    detail: `Filtre MCAP en cours (${minLabel} -> ${maxLabel}) sur ${buyers.length} wallets...`,
+  });
+
+  const result = await filterBuyersByMcapRange(buyers, {
+    mcapMin,
+    mcapMax,
+    onProgress: (current, total) => {
+      emit('progress', {
+        phase: 'filter_mcap',
+        percent: 45,
+        detail: `${current}/${total} wallets verifies`,
+      });
+    },
+  });
+
+  emit('progress', {
+    phase: 'filter_mcap',
+    percent: 46,
+    detail: `${result.removedCount} wallets exclus via MCAP · ${result.keptBuyers.length} conserves`,
+  });
+  emit('buyers_filtered_mcap', {
+    removedCount: result.removedCount,
+    keptCount: result.keptBuyers.length,
+    unknownCount: result.unknownWallets.length,
+    mcapMin: mcapMin ?? null,
+    mcapMax: mcapMax ?? null,
+  });
+
+  return result.keptBuyers;
+}
+
 interface TokenInput {
   address: string;
   name: string | null;
@@ -88,6 +134,9 @@ export interface PipelineOpts {
   excludeInactiveOver24h?: boolean;
   /** Seuil d'inactivité en heures. Défaut 24. Utilisé uniquement si `excludeInactiveOver24h` est true. */
   inactiveThresholdHours?: number;
+  /** Filtre optionnel du mcap d'entrée GMGN des buyers token. */
+  mcapMin?: number;
+  mcapMax?: number;
 }
 
 interface MergedWallet {
@@ -131,6 +180,8 @@ export async function runAnalysisPipeline(
   const walletCentricRecoveryLimit = resolveWalletCentricRecoveryLimit(opts);
   const excludeInactiveOver24h = Boolean(opts.excludeInactiveOver24h);
   const inactiveThresholdHours = Math.max(1, opts.inactiveThresholdHours ?? 24);
+  const mcapMin = opts.mcapMin;
+  const mcapMax = opts.mcapMax;
 
   try {
     await updateAnalysisStatus(analysisId, 'running', 0, 'Starting analysis...');
@@ -147,6 +198,8 @@ export async function runAnalysisPipeline(
         walletCentricRecoveryLimit,
         excludeInactiveOver24h,
         inactiveThresholdHours,
+        mcapMin,
+        mcapMax,
         emit
       );
     } else if (mode === 'funding') {
@@ -162,6 +215,8 @@ export async function runAnalysisPipeline(
         walletCentricRecoveryLimit,
         excludeInactiveOver24h,
         inactiveThresholdHours,
+        mcapMin,
+        mcapMax,
         emit
       );
     }
@@ -208,6 +263,8 @@ async function runTokenMode(
   walletCentricRecoveryLimit: number,
   excludeInactiveOver24h: boolean,
   inactiveThresholdHours: number,
+  mcapMin: number | undefined,
+  mcapMax: number | undefined,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
@@ -220,6 +277,7 @@ async function runTokenMode(
   const buyers = excludeInactiveOver24h
     ? await applyInactiveFilter(initialBuyers, inactiveThresholdHours, emit)
     : initialBuyers;
+  const mcapFilteredBuyers = await applyMcapFilter(buyers, mcapMin, mcapMax, emit);
 
   let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
 
@@ -240,7 +298,7 @@ async function runTokenMode(
     const historicalCoverage = await loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId);
     const rankedWallets = selectTopCandidatesByCoverage(
       candidateWallets,
-      buyers,
+      mcapFilteredBuyers,
       historicalCoverage,
       walletCentricRecoveryLimit
     );
@@ -268,7 +326,7 @@ async function runTokenMode(
 
   emit('progress', { phase: 'wallet_centric_recovery', percent: 70, detail: 'Fusion des résultats…' });
   const { mergedBuyers, recoveredWalletAddresses } = mergeRecoveredBuyers(
-    buyers,
+    mcapFilteredBuyers,
     recoveredResult.buyers
   );
   if (recoveredWalletAddresses.size > 0) {
@@ -346,6 +404,8 @@ async function runCombinedMode(
   walletCentricRecoveryLimit: number,
   excludeInactiveOver24h: boolean,
   inactiveThresholdHours: number,
+  mcapMin: number | undefined,
+  mcapMax: number | undefined,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const {
@@ -356,6 +416,12 @@ async function runCombinedMode(
   const tokenBuyersInitial = excludeInactiveOver24h
     ? await applyInactiveFilter(discoveredBuyers, inactiveThresholdHours, emit)
     : discoveredBuyers;
+  const mcapFilteredBuyers = await applyMcapFilter(
+    tokenBuyersInitial,
+    mcapMin,
+    mcapMax,
+    emit
+  );
 
   let recoveredResult: Awaited<ReturnType<typeof recoverWalletCentricBuyers>>;
 
@@ -376,7 +442,7 @@ async function runCombinedMode(
     const historicalCoverage = await loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId);
     const rankedWallets = selectTopCandidatesByCoverage(
       candidateWallets,
-      tokenBuyersInitial,
+      mcapFilteredBuyers,
       historicalCoverage,
       walletCentricRecoveryLimit
     );
@@ -404,7 +470,7 @@ async function runCombinedMode(
 
   emit('progress', { phase: 'wallet_centric_recovery', percent: 52, detail: 'Fusion des résultats…' });
   const { mergedBuyers: tokenBuyers, recoveredWalletAddresses } = mergeRecoveredBuyers(
-    tokenBuyersInitial,
+    mcapFilteredBuyers,
     recoveredResult.buyers
   );
   if (recoveredWalletAddresses.size > 0) {

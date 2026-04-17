@@ -45,6 +45,8 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
   const [runningDepth, setRunningDepth] = useState(5);
   const [runningWalletCentricRecovery, setRunningWalletCentricRecovery] = useState(15);
   const [runningExcludeInactiveOver24h, setRunningExcludeInactiveOver24h] = useState(false);
+  const [runningMcapMin, setRunningMcapMin] = useState<number | undefined>(undefined);
+  const [runningMcapMax, setRunningMcapMax] = useState<number | undefined>(undefined);
   const [runningResumeAnalysisId, setRunningResumeAnalysisId] = useState<string | null>(null);
   const [launchNonce, setLaunchNonce] = useState(0);
 
@@ -79,17 +81,23 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       fundingDepth,
       walletCentricRecoveryLimit,
       excludeInactiveOver24h,
+      mcapMin,
+      mcapMax,
     }: {
       mode: AnalysisMode;
       fundingDepth: number;
       walletCentricRecoveryLimit: number;
       excludeInactiveOver24h: boolean;
+      mcapMin?: number;
+      mcapMax?: number;
     }) => {
       userCancelledRef.current = false;
       setRunningMode(mode);
       setRunningDepth(fundingDepth);
       setRunningWalletCentricRecovery(walletCentricRecoveryLimit);
       setRunningExcludeInactiveOver24h(excludeInactiveOver24h);
+      setRunningMcapMin(mcapMin);
+      setRunningMcapMax(mcapMax);
       setRunningResumeAnalysisId(null);
       setLaunchNonce((n) => n + 1);
       setView('running');
@@ -132,6 +140,8 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     setRunningDepth(a.fundingDepth);
     setRunningWalletCentricRecovery(15);
     setRunningExcludeInactiveOver24h(false);
+    setRunningMcapMin(undefined);
+    setRunningMcapMax(undefined);
     setRunningResumeAnalysisId(a.id);
     setLaunchNonce((n) => n + 1);
     setView('running');
@@ -271,6 +281,8 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
               fundingDepth={runningDepth}
               walletCentricRecoveryLimit={runningWalletCentricRecovery}
               excludeInactiveOver24h={runningExcludeInactiveOver24h}
+              mcapMin={runningMcapMin}
+              mcapMax={runningMcapMax}
               resumeAnalysisId={runningResumeAnalysisId}
               onStarted={handleAnalysisStarted}
               onComplete={handleAnalysisComplete}

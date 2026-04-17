@@ -25,6 +25,9 @@ interface AnalysisProgressProps {
   walletCentricRecoveryLimit?: number;
   /** Si true : éliminer les buyers dont la dernière activité on-chain est > 24h avant l'analyse profonde. */
   excludeInactiveOver24h?: boolean;
+  /** Bornes MCAP d'entrée GMGN appliquées aux buyers token (optionnel). */
+  mcapMin?: number;
+  mcapMax?: number;
   /** Si défini : ne pas relancer l’analyse, poller le statut jusqu’à completed/failed. */
   resumeAnalysisId?: string | null;
   onStarted?: (analysisId: string) => void;
@@ -54,6 +57,8 @@ export default function AnalysisProgress({
   fundingDepth,
   walletCentricRecoveryLimit = 15,
   excludeInactiveOver24h = false,
+  mcapMin,
+  mcapMax,
   resumeAnalysisId = null,
   onStarted,
   onComplete,
@@ -149,6 +154,16 @@ export default function AnalysisProgress({
           appendLog(msg);
           break;
         }
+        case 'buyers_filtered_mcap': {
+          const removed = data.removedCount ?? 0;
+          const kept = data.keptCount ?? 0;
+          const min = data.mcapMin ?? '-inf';
+          const max = data.mcapMax ?? '+inf';
+          const msg = `Filtre MCAP [${min} -> ${max}] : ${removed} wallets exclus · ${kept} conserves`;
+          setPhase(msg);
+          appendLog(msg);
+          break;
+        }
         case 'tokens_discovered': {
           const msg =
             `${data.candidateCount ?? 0} tokens découverts via Helius` +
@@ -203,7 +218,14 @@ export default function AnalysisProgress({
       const res = await fetch(`/api/ruggers/${ruggerId}/analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h }),
+        body: JSON.stringify({
+          mode,
+          fundingDepth,
+          walletCentricRecoveryLimit,
+          excludeInactiveOver24h,
+          mcapMin,
+          mcapMax,
+        }),
         signal: controller.signal,
       });
       if (connectTimeoutRef.current) {
@@ -276,7 +298,7 @@ export default function AnalysisProgress({
         connectTimeoutRef.current = null;
       }
     }
-  }, [ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h, appendLog, updateEta]);
+  }, [ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h, mcapMin, mcapMax, appendLog, updateEta]);
 
   useEffect(() => {
     if (!resumeAnalysisId) return;
@@ -368,7 +390,7 @@ export default function AnalysisProgress({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- startAnalysis regroupe déjà les deps du flux SSE
-  }, [resumeAnalysisId, ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h]);
+  }, [resumeAnalysisId, ruggerId, mode, fundingDepth, walletCentricRecoveryLimit, excludeInactiveOver24h, mcapMin, mcapMax]);
 
   return (
     <div className="space-y-4">

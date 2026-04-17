@@ -31,6 +31,8 @@ export async function POST(
     walletCentricRecoveryLimit?: number;
     /** Si true : éliminer les buyers dont la dernière activité on-chain est > 24h avant l'analyse profonde. */
     excludeInactiveOver24h?: boolean;
+    mcapMin?: number;
+    mcapMax?: number;
   };
 
   const mode = body.mode ?? 'combined';
@@ -82,6 +84,37 @@ export async function POST(
     walletCentricRecoveryLimit = n;
   }
 
+  let mcapMin: number | undefined;
+  if (body.mcapMin !== undefined && body.mcapMin !== null) {
+    const n = Number(body.mcapMin);
+    if (!Number.isFinite(n) || n < 0) {
+      return NextResponse.json(
+        { error: 'mcapMin must be a finite number >= 0' },
+        { status: 400 }
+      );
+    }
+    mcapMin = n;
+  }
+
+  let mcapMax: number | undefined;
+  if (body.mcapMax !== undefined && body.mcapMax !== null) {
+    const n = Number(body.mcapMax);
+    if (!Number.isFinite(n) || n < 0) {
+      return NextResponse.json(
+        { error: 'mcapMax must be a finite number >= 0' },
+        { status: 400 }
+      );
+    }
+    mcapMax = n;
+  }
+
+  if (mcapMin !== undefined && mcapMax !== undefined && mcapMin > mcapMax) {
+    return NextResponse.json(
+      { error: 'mcapMin must be <= mcapMax' },
+      { status: 400 }
+    );
+  }
+
   const analysisRows = await query<{ id: string }>(
     `INSERT INTO wallet_analyses (id, rugger_id, mode, status, funding_depth, buyer_limit, token_count)
      VALUES (gen_random_uuid(), $1, $2, 'pending', $3, 200, $4)
@@ -96,6 +129,8 @@ export async function POST(
     buyerLimit: 200,
     walletCentricRecoveryLimit,
     excludeInactiveOver24h: Boolean(body.excludeInactiveOver24h),
+    mcapMin,
+    mcapMax,
   };
 
   const encoder = new TextEncoder();

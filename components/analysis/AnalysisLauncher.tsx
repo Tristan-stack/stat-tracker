@@ -20,6 +20,8 @@ interface AnalysisLauncherProps {
     fundingDepth: number;
     walletCentricRecoveryLimit: number;
     excludeInactiveOver24h: boolean;
+    mcapMin?: number;
+    mcapMax?: number;
   }) => void;
   isDisabled?: boolean;
 }
@@ -37,6 +39,9 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
   const [fundingDepth, setFundingDepth] = useState(5);
   const [walletCentricRecoveryLimit, setWalletCentricRecoveryLimit] = useState(WALLET_RECOVERY_DEFAULT);
   const [excludeInactiveOver24h, setExcludeInactiveOver24h] = useState(false);
+  const [mcapMinInput, setMcapMinInput] = useState('');
+  const [mcapMaxInput, setMcapMaxInput] = useState('');
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const needsTokens = mode === 'token' || mode === 'combined';
   const showDepth = mode === 'funding' || mode === 'combined';
@@ -44,6 +49,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
 
   const handleLaunch = () => {
     if (!canLaunch) return;
+    setLaunchError(null);
     const clamped = needsTokens
       ? Math.max(
           WALLET_RECOVERY_MIN,
@@ -53,7 +59,28 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
           )
         )
       : WALLET_RECOVERY_DEFAULT;
-    onLaunch({ mode, fundingDepth, walletCentricRecoveryLimit: clamped, excludeInactiveOver24h });
+    const mcapMin = mcapMinInput.trim() === '' ? undefined : Number(mcapMinInput);
+    const mcapMax = mcapMaxInput.trim() === '' ? undefined : Number(mcapMaxInput);
+    if (mcapMin !== undefined && (!Number.isFinite(mcapMin) || mcapMin < 0)) {
+      setLaunchError('MCAP min doit etre un nombre positif.');
+      return;
+    }
+    if (mcapMax !== undefined && (!Number.isFinite(mcapMax) || mcapMax < 0)) {
+      setLaunchError('MCAP max doit etre un nombre positif.');
+      return;
+    }
+    if (mcapMin !== undefined && mcapMax !== undefined && mcapMin > mcapMax) {
+      setLaunchError('MCAP min doit etre inferieur ou egal a MCAP max.');
+      return;
+    }
+    onLaunch({
+      mode,
+      fundingDepth,
+      walletCentricRecoveryLimit: clamped,
+      excludeInactiveOver24h,
+      mcapMin,
+      mcapMax,
+    });
   };
 
   return (
@@ -141,6 +168,43 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
         </div>
       )}
 
+      {needsTokens && (
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Filtre MCAP (buyers token)</Label>
+          <p className="text-xs text-muted-foreground">
+            Garde uniquement les wallets avec un MCAP d&apos;entree GMGN dans la plage min/max.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="mcap-min" className="text-xs text-muted-foreground">MCAP min</Label>
+              <Input
+                id="mcap-min"
+                type="number"
+                min={0}
+                step={1}
+                value={mcapMinInput}
+                onChange={(e) => setMcapMinInput(e.target.value)}
+                placeholder="ex: 500000"
+                disabled={!canLaunch}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="mcap-max" className="text-xs text-muted-foreground">MCAP max</Label>
+              <Input
+                id="mcap-max"
+                type="number"
+                min={0}
+                step={1}
+                value={mcapMaxInput}
+                onChange={(e) => setMcapMaxInput(e.target.value)}
+                placeholder="ex: 5000000"
+                disabled={!canLaunch}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2">
         <Label className="text-sm font-medium">Filtres pré-analyse</Label>
         <label
@@ -175,6 +239,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
         <Search className="size-4" />
         Lancer l&apos;analyse
       </Button>
+      {launchError && <p className="text-xs text-destructive">{launchError}</p>}
     </div>
   );
 }
