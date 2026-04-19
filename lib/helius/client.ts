@@ -115,7 +115,8 @@ function getBackoffMs(attempt: number, status: number, retryAfterMs?: number | n
   return HELIUS_RETRY_BASE_MS * Math.pow(2, attempt);
 }
 
-export async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
+/** `params` JSON-RPC : tableau (RPC classique) ou objet (ex. DAS `getAsset`). */
+export async function heliusRpc<T>(method: string, params: unknown): Promise<T> {
   const url = buildRpcUrl();
   let lastError: unknown = null;
 

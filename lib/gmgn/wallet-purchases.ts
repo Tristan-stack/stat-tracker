@@ -35,7 +35,7 @@ export interface WalletPurchasePreview {
  * Retourne un timestamp Unix en **secondes**.
  * GMGN renvoie souvent des millisecondes (≈ 1,7e12) ; comparer tel quel à `fromMs/1000` exclut tous les événements.
  */
-function rowTimestampSec(row: WalletActivityRow): number {
+export function rowTimestampSec(row: WalletActivityRow): number {
   const r = row as WalletActivityRow & { ts?: number; block_time?: number; time?: number };
   const candidates = [r.timestamp, r.ts, r.block_time, r.time];
   for (const t of candidates) {
@@ -46,7 +46,7 @@ function rowTimestampSec(row: WalletActivityRow): number {
   return 0;
 }
 
-function tokenMint(row: WalletActivityRow): string | null {
+export function tokenMint(row: WalletActivityRow): string | null {
   const a = row.token?.address ?? row.token_address;
   if (typeof a === 'string' && a.length > 0) return a;
   return null;

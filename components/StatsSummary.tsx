@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,6 +33,16 @@ function parseDecimal(value: string): number {
   const normalized = value.trim().replace(',', '.');
   const n = Number(normalized);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** `eurPerOneSol` = prix d’1 SOL en EUR (spot Helius + conversion EUR). */
+function formatEurInputAsSol(eurInput: string, eurPerOneSol: number | null): string | null {
+  if (eurPerOneSol === null || !Number.isFinite(eurPerOneSol) || eurPerOneSol <= 0) return null;
+  const eur = parseDecimal(eurInput);
+  if (eur <= 0) return null;
+  const sol = eur / eurPerOneSol;
+  if (!Number.isFinite(sol)) return null;
+  return sol.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
 const MAX_TPS = 5;
@@ -268,6 +278,46 @@ export function StatsSummary({
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [takeProfitsRight, setTakeProfitsRight] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
+  /** Prix de 1 SOL en EUR (API publique, indicatif). */
+  const [solEurPerSol, setSolEurPerSol] = useState<number | null>(null);
+  const [solEurFetchState, setSolEurFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+
+  useEffect(() => {
+    if (!optimizedRevenue) return;
+    let cancelled = false;
+    setSolEurFetchState('loading');
+    void (async () => {
+      try {
+        const res = await fetch('/api/gmgn/sol-quote');
+        const data = (await res.json()) as {
+          eurPerSol?: number | null;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setSolEurPerSol(null);
+          setSolEurFetchState('error');
+          return;
+        }
+        const eur = data.eurPerSol;
+        if (typeof eur !== 'number' || !Number.isFinite(eur) || eur <= 0) {
+          setSolEurPerSol(null);
+          setSolEurFetchState('error');
+          return;
+        }
+        setSolEurPerSol(eur);
+        setSolEurFetchState('ready');
+      } catch {
+        if (!cancelled) {
+          setSolEurPerSol(null);
+          setSolEurFetchState('error');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [optimizedRevenue]);
 
   const amount = parseDecimal(simulatedAmount);
 
@@ -735,47 +785,70 @@ export function StatsSummary({
 
               {optimizedRevenue && (
                 <div className="space-y-3">
-                  <p className="text-sm font-medium">Wallets (max. {WALLET_SLOTS})</p>
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <p className="text-sm font-medium">Wallets (max. {WALLET_SLOTS})</p>
+                    {solEurFetchState === 'loading' && (
+                      <p className="text-xs text-muted-foreground">Cours SOL (Helius)…</p>
+                    )}
+                    {solEurFetchState === 'ready' && solEurPerSol !== null && (
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        1 SOL ≈ {formatNum(solEurPerSol, 2)} € <span className="text-[10px]">(Helius)</span>
+                      </p>
+                    )}
+                    {solEurFetchState === 'error' && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">Cours SOL indisponible</p>
+                    )}
+                  </div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {Array.from({ length: WALLET_SLOTS }, (_, i) => (
-                      <label
-                        key={i}
-                        className="flex flex-wrap items-center gap-2 rounded-md border bg-background/80 px-3 py-2 text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          className="size-4 shrink-0 rounded border-input"
-                          checked={walletEnabled[i]}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setWalletEnabled((prev) => {
-                              const next = [...prev];
-                              next[i] = checked;
-                              return next;
-                            });
-                          }}
-                          aria-label={`Activer wallet ${i + 1}`}
-                        />
-                        <span className="shrink-0 font-medium">Wallet {i + 1}</span>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="€ / token"
-                          className="h-8 max-w-[140px] text-xs tabular-nums"
-                          value={walletAmounts[i]}
-                          disabled={!walletEnabled[i]}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setWalletAmounts((prev) => {
-                              const next = [...prev];
-                              next[i] = val;
-                              return next;
-                            });
-                          }}
-                          aria-label={`Montant par token wallet ${i + 1}`}
-                        />
-                      </label>
-                    ))}
+                    {Array.from({ length: WALLET_SLOTS }, (_, i) => {
+                      const solStr = formatEurInputAsSol(walletAmounts[i] ?? '', solEurPerSol);
+                      return (
+                        <label
+                          key={i}
+                          className="flex flex-col gap-1 rounded-md border bg-background/80 px-3 py-2 text-sm"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="checkbox"
+                              className="size-4 shrink-0 rounded border-input"
+                              checked={walletEnabled[i]}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setWalletEnabled((prev) => {
+                                  const next = [...prev];
+                                  next[i] = checked;
+                                  return next;
+                                });
+                              }}
+                              aria-label={`Activer wallet ${i + 1}`}
+                            />
+                            <span className="shrink-0 font-medium">Wallet {i + 1}</span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="€ / token"
+                              className="h-8 max-w-[140px] text-xs tabular-nums"
+                              value={walletAmounts[i]}
+                              disabled={!walletEnabled[i]}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setWalletAmounts((prev) => {
+                                  const next = [...prev];
+                                  next[i] = val;
+                                  return next;
+                                });
+                              }}
+                              aria-label={`Montant par token wallet ${i + 1}`}
+                            />
+                          </div>
+                          {walletEnabled[i] && solStr !== null && (
+                            <p className="pl-6 text-[11px] tabular-nums text-muted-foreground">
+                              ≈ {solStr} SOL
+                            </p>
+                          )}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}

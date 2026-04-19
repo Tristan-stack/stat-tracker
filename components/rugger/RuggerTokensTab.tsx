@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
 import GmgnTokenAddSection, { type GmgnPreviewRow } from '@/components/GmgnTokenAddSection';
@@ -23,6 +23,8 @@ import {
 import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseGmgnDecimalString } from '@/lib/gmgn/price-rounding';
+import { getTokenMintAddress } from '@/lib/token-display';
+import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
 
 interface RuggerTokensTabProps {
   ruggerId: string;
@@ -60,6 +62,13 @@ function formatDateToYyyyMmDd(date?: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function formatFirstBuyStatValue(v: number, unit: 'usd' | 'sol'): string {
+  if (unit === 'usd') {
+    return `${v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+  }
+  return `${v.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} SOL`;
+}
+
 interface GmgnPurchasePreview {
   tokenAddress: string;
   name: string;
@@ -81,6 +90,7 @@ function buildRuggerMintSet(tokens: Token[]): Set<string> {
 }
 
 const DEFAULT_GMGN_TARGET_PERCENT = 100;
+const FIRST_BUY_UNIT_LS = 'stattracker-first-buy-unit';
 
 export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: RuggerTokensTabProps) {
   const id = ruggerId;
@@ -106,6 +116,27 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
   const [refreshingTokenIds, setRefreshingTokenIds] = useState<Set<string>>(() => new Set());
   const [unfilteredRuggerTokens, setUnfilteredRuggerTokens] = useState<Token[]>([]);
+  const [firstBuyUnit, setFirstBuyUnit] = useState<'usd' | 'sol'>('usd');
+  const [firstBuyByMint, setFirstBuyByMint] = useState<Record<string, FirstBuyPreviewEntry>>({});
+  const [firstBuyLoading, setFirstBuyLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(FIRST_BUY_UNIT_LS);
+      if (v === 'sol' || v === 'usd') setFirstBuyUnit(v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleFirstBuyUnitChange = useCallback((u: 'usd' | 'sol') => {
+    setFirstBuyUnit(u);
+    try {
+      window.localStorage.setItem(FIRST_BUY_UNIT_LS, u);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -151,6 +182,89 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
     () => allTokensForStats.filter((t) => isMigrationPeakMcap(t.high)).length,
     [allTokensForStats]
   );
+
+  const pagedTokensMerged = useMemo(
+    () => mergeHidden(tokensPage?.tokens ?? []),
+    [mergeHidden, tokensPage?.tokens]
+  );
+
+  /** Mints des tokens inclus dans les stats (tous chargés, hors masqués) — aligné sur `tokensForStats`. */
+  const firstBuyNeededMints = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of tokensForStats) {
+      const m = getTokenMintAddress(t).trim();
+      if (m === '' || seen.has(m)) continue;
+      seen.add(m);
+      out.push(m);
+    }
+    out.sort();
+    return out;
+  }, [tokensForStats]);
+
+  const firstBuyNeededMintsKey = firstBuyNeededMints.join('|');
+
+  const buyerSourceKey = `${id}|${(rugger.walletAddress ?? '').trim()}|${rugger.walletType}`;
+
+  const firstBuyByMintRef = useRef(firstBuyByMint);
+  firstBuyByMintRef.current = firstBuyByMint;
+
+  useLayoutEffect(() => {
+    if (rugger.walletType !== 'buyer') {
+      setFirstBuyByMint({});
+      return;
+    }
+    setFirstBuyByMint({});
+  }, [rugger.walletType, buyerSourceKey]);
+
+  useEffect(() => {
+    if (rugger.walletType !== 'buyer') {
+      setFirstBuyLoading(false);
+      return;
+    }
+    const wallet = rugger.walletAddress?.trim() ?? '';
+    if (wallet === '' || firstBuyNeededMints.length === 0) {
+      setFirstBuyLoading(false);
+      return;
+    }
+
+    const missing = firstBuyNeededMints.filter((m) => firstBuyByMintRef.current[m] === undefined);
+    if (missing.length === 0) {
+      setFirstBuyLoading(false);
+      return;
+    }
+
+    const ac = new AbortController();
+    let active = true;
+    setFirstBuyLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/ruggers/${id}/tokens/first-buy-preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenAddresses: missing }),
+          signal: ac.signal,
+        });
+        const data = (await res.json()) as {
+          byMint?: Record<string, FirstBuyPreviewEntry>;
+        };
+        if (!active) return;
+        if (!res.ok) {
+          setFirstBuyByMint({});
+          return;
+        }
+        setFirstBuyByMint((prev) => ({ ...prev, ...(data.byMint ?? {}) }));
+      } catch {
+        if (active) setFirstBuyByMint({});
+      } finally {
+        if (active) setFirstBuyLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+      ac.abort();
+    };
+  }, [buyerSourceKey, firstBuyNeededMintsKey, id]);
 
   const handleMigrationViewChange = useCallback((view: MigrationView) => {
     setMigrationView(view);
@@ -428,8 +542,37 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   const hasAnyRuggerTokens =
     (tokensPage?.total ?? 0) > 0 || allTokensForStats.length > 0 || (rugger.tokenCount ?? 0) > 0;
 
-  const activeTokens: Token[] = mergeHidden(tokensPage?.tokens ?? []);
+  const activeTokens: Token[] = pagedTokensMerged;
   const tokensWithMetrics = activeTokens.map(getTokenWithMetrics);
+
+  const firstBuyStats = useMemo(() => {
+    if (rugger.walletType !== 'buyer') return null;
+    const values: number[] = [];
+    for (const t of tokensForStats) {
+      const mint = getTokenMintAddress(t).trim();
+      if (mint === '') continue;
+      const e = firstBuyByMint[mint];
+      if (!e) continue;
+      const v = firstBuyUnit === 'usd' ? e.usd : e.sol;
+      if (v === null || !Number.isFinite(v)) continue;
+      values.push(v);
+    }
+    if (values.length === 0) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const avg = values.reduce((s, x) => s + x, 0) / values.length;
+    return { min, max, avg, count: values.length };
+  }, [rugger.walletType, tokensForStats, firstBuyByMint, firstBuyUnit]);
+
+  const firstBuyColumn =
+    rugger.walletType === 'buyer'
+      ? {
+          unit: firstBuyUnit,
+          onUnitChange: handleFirstBuyUnitChange,
+          byMint: firstBuyByMint,
+          isLoading: firstBuyLoading,
+        }
+      : undefined;
 
   return (
     <div className="space-y-8">
@@ -509,6 +652,11 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
             {gmgnRefreshError}
           </p>
         )}
+        {rugger.walletType === 'buyer' && !rugger.walletAddress?.trim() && activeTokens.length > 0 && (
+          <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
+            Renseigne l&apos;adresse Solana du wallet acheteur sur le rugger pour afficher le montant du 1er achat GMGN par token.
+          </p>
+        )}
         {isLoadingTokens && tokensPage === null ? (
           <p className="text-sm text-muted-foreground">Chargement des tokens…</p>
         ) : activeTokens.length === 0 ? (
@@ -535,7 +683,61 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
                   {globalExitMode === 'percent' ? 'Applique le même % de sortie à tous les tokens.' : "Calcule le % de sortie pour chaque token en fonction de son point d'entrée."}
                 </span>
               </div>
-              <TokenTable tokens={tokensWithMetrics} onChangeTarget={handleChangeTarget} onChangeEntryPrice={handleChangeEntryPrice} onRefreshToken={handleRefreshTokenFromGmgn} refreshingTokenIds={refreshingTokenIds} onDeleteToken={handleDeleteToken} onToggleHidden={handleToggleHidden} migrationView={migrationView} onMigrationViewChange={handleMigrationViewChange} migrationKnownCount={migrationKnownTotal} />
+              {rugger.walletType === 'buyer' && rugger.walletAddress?.trim() !== '' && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-teal-500/25 bg-teal-500/10 px-4 py-2 text-xs dark:bg-teal-950/30">
+                  <span className="font-semibold text-foreground">1er achat</span>
+                  <span className="text-muted-foreground">(stats, hors masqués)</span>
+                  <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground">
+                    {firstBuyUnit === 'usd' ? 'USD' : 'SOL'}
+                  </span>
+                  {firstBuyLoading ? (
+                    <span className="text-muted-foreground">Chargement…</span>
+                  ) : firstBuyStats ? (
+                    <>
+                      <span className="tabular-nums text-muted-foreground">
+                        Min :{' '}
+                        <span className="font-medium text-foreground">
+                          {formatFirstBuyStatValue(firstBuyStats.min, firstBuyUnit)}
+                        </span>
+                      </span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        Max :{' '}
+                        <span className="font-medium text-foreground">
+                          {formatFirstBuyStatValue(firstBuyStats.max, firstBuyUnit)}
+                        </span>
+                      </span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        Moyenne :{' '}
+                        <span className="font-medium text-foreground">
+                          {formatFirstBuyStatValue(firstBuyStats.avg, firstBuyUnit)}
+                        </span>
+                      </span>
+                      <span className="text-muted-foreground">
+                        ({firstBuyStats.count} token{firstBuyStats.count > 1 ? 's' : ''})
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Aucun montant exploitable (mints ou données GMGN).
+                    </span>
+                  )}
+                </div>
+              )}
+              <TokenTable
+                tokens={tokensWithMetrics}
+                onChangeTarget={handleChangeTarget}
+                onChangeEntryPrice={handleChangeEntryPrice}
+                onRefreshToken={handleRefreshTokenFromGmgn}
+                refreshingTokenIds={refreshingTokenIds}
+                onDeleteToken={handleDeleteToken}
+                onToggleHidden={handleToggleHidden}
+                migrationView={migrationView}
+                onMigrationViewChange={handleMigrationViewChange}
+                migrationKnownCount={migrationKnownTotal}
+                firstBuyColumn={firstBuyColumn}
+              />
               <div className="flex flex-wrap items-center justify-start gap-3">
                 <span className="text-xs font-medium text-muted-foreground">Par page</span>
                 <div className="flex rounded-md border text-xs">

@@ -90,7 +90,7 @@ export async function PATCH(
   };
 
   const walletType = body.walletType;
-  if (walletType !== undefined && !['exchange', 'mother', 'simple'].includes(walletType)) {
+  if (walletType !== undefined && !['exchange', 'mother', 'simple', 'buyer'].includes(walletType)) {
     return NextResponse.json({ error: 'Invalid walletType' }, { status: 400 });
   }
 

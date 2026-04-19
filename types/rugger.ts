@@ -1,4 +1,4 @@
-export type WalletType = 'exchange' | 'mother' | 'simple';
+export type WalletType = 'exchange' | 'mother' | 'simple' | 'buyer';
 
 export type StatusId = 'verification' | 'en_test' | 'actif';
 

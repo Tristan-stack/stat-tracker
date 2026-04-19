@@ -177,6 +177,7 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                     <option value="exchange">Exchange</option>
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
+                    <option value="buyer">Wallet acheteur</option>
                   </select>
                 </div>
                 {(walletType === 'exchange' || walletType === 'mother') && (
@@ -256,6 +257,11 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                     placeholder="0x..."
                     disabled={isSubmitting}
                   />
+                  {walletType === 'buyer' && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Adresse Solana du wallet acheteur pour le montant du 1er achat par token.
+                    </p>
+                  )}
                 </div>
 
                 {error !== '' && (

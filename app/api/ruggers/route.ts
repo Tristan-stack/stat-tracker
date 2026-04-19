@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
   const endHour = toHour(body.endHour);
   const notes = typeof body.notes === 'string' ? (body.notes.trim() || null) : null;
 
-  if (!['exchange', 'mother', 'simple'].includes(walletType)) {
+  if (!['exchange', 'mother', 'simple', 'buyer'].includes(walletType)) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TokenWithMetrics, ExitMode } from '@/types/token';
@@ -9,6 +9,7 @@ import { Eye, EyeOff, RefreshCcw, Trash2 } from 'lucide-react';
 import { isMigrationPeakMcap, MIGRATION_MCAP_THRESHOLD, type MigrationView } from '@/lib/migration';
 import { cn } from '@/lib/utils';
 import { formatMintShort, getTokenMintAddress, getTokenTableNameCell } from '@/lib/token-display';
+import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -145,6 +146,38 @@ function McapTargetInput({
   );
 }
 
+function formatFirstBuyCell(
+  unit: 'usd' | 'sol',
+  entry: FirstBuyPreviewEntry | undefined,
+  isLoading: boolean,
+  hasMint: boolean
+): ReactNode {
+  if (!hasMint) return '—';
+  if (isLoading && entry === undefined) return '…';
+  if (!entry) return '—';
+  const v = unit === 'usd' ? entry.usd : entry.sol;
+  if (v === null || !Number.isFinite(v)) {
+    const hint = entry.error ?? 'Donnée indisponible';
+    return (
+      <span className="text-muted-foreground" title={hint}>
+        —
+      </span>
+    );
+  }
+  if (unit === 'usd') {
+    return (
+      <span className="tabular-nums">
+        {v.toLocaleString('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: 0 })} $
+      </span>
+    );
+  }
+  return (
+    <span className="tabular-nums">
+      {v.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} SOL
+    </span>
+  );
+}
+
 export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onChangeTarget: (id: string, nextPercent: number) => void;
@@ -159,6 +192,13 @@ export interface TokenTableProps {
   onMigrationViewChange?: (view: MigrationView) => void;
   /** Total migrations connues (liste complète). Sinon dérivé des `tokens` passés. */
   migrationKnownCount?: number;
+  /** Colonne « 1er achat » GMGN (rugger type acheteur). */
+  firstBuyColumn?: {
+    unit: 'usd' | 'sol';
+    onUnitChange: (unit: 'usd' | 'sol') => void;
+    byMint: Record<string, FirstBuyPreviewEntry>;
+    isLoading: boolean;
+  };
 }
 
 export function TokenTable({
@@ -172,6 +212,7 @@ export function TokenTable({
   migrationView: migrationViewProp,
   onMigrationViewChange,
   migrationKnownCount,
+  firstBuyColumn,
 }: TokenTableProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exitMode, setExitMode] = useState<ExitMode>('percent');
@@ -235,6 +276,34 @@ export function TokenTable({
           </button>
         </div>
         <span className="text-xs text-muted-foreground">|</span>
+        {firstBuyColumn && (
+          <>
+            <span className="text-xs font-medium text-muted-foreground">1er achat :</span>
+            <div className="flex rounded-md border text-xs">
+              <button
+                type="button"
+                onClick={() => firstBuyColumn.onUnitChange('usd')}
+                className={cn(
+                  'px-3 py-1 rounded-l-md transition-colors font-medium',
+                  firstBuyColumn.unit === 'usd' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                USD
+              </button>
+              <button
+                type="button"
+                onClick={() => firstBuyColumn.onUnitChange('sol')}
+                className={cn(
+                  'px-3 py-1 rounded-r-md transition-colors font-medium border-l border-border',
+                  firstBuyColumn.unit === 'sol' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                SOL
+              </button>
+            </div>
+            <span className="text-xs text-muted-foreground">|</span>
+          </>
+        )}
         <span className="text-xs font-medium text-muted-foreground">Migration :</span>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border text-xs">
@@ -267,7 +336,7 @@ export function TokenTable({
       </div>
 
       <div className="overflow-x-auto rounded-xl border -mx-1 sm:mx-0">
-        <table className="w-full min-w-[880px] text-xs sm:text-sm">
+        <table className="w-full min-w-[960px] text-xs sm:text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
               {onToggleHidden && (
@@ -278,6 +347,9 @@ export function TokenTable({
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Adresse</th>
               <th className="whitespace-nowrap px-2 py-3 text-left font-medium sm:px-3 sm:py-4">Achat</th>
+              {firstBuyColumn && (
+                <th className="whitespace-nowrap px-2 py-3 text-right font-medium sm:px-3 sm:py-4">1er achat</th>
+              )}
               <th className="px-5 py-4 text-right font-medium">Entrée</th>
               <th className="px-5 py-4 text-right font-medium">Plus haut</th>
               <th className="px-3 py-4 text-center font-medium">Migration</th>
@@ -363,6 +435,16 @@ export function TokenTable({
                 <td className="whitespace-nowrap px-2 py-3 text-left text-muted-foreground tabular-nums sm:px-3 sm:py-4">
                   {formatPurchaseDate(t.purchasedAt)}
                 </td>
+                {firstBuyColumn && (
+                  <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums sm:px-3 sm:py-4">
+                    {formatFirstBuyCell(
+                      firstBuyColumn.unit,
+                      firstBuyColumn.byMint[getTokenMintAddress(t).trim()],
+                      firstBuyColumn.isLoading,
+                      getTokenMintAddress(t).trim() !== ''
+                    )}
+                  </td>
+                )}
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
                   <InlineNumericInput
                     value={t.entryPrice}

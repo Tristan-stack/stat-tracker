@@ -21,6 +21,7 @@ const walletTypeLabel: Record<WalletType, string> = {
   exchange: 'Exchange',
   mother: 'Mère',
   simple: 'Simple',
+  buyer: 'Wallet acheteur',
 };
 
 function StatusBadge({ statusId }: { statusId: StatusId }) {
@@ -184,7 +185,9 @@ export default function RuggerDetailPage() {
                     'shrink-0 rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide',
                     rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
                     rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                    rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200'
+                    rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
+                    rugger.walletType === 'buyer' &&
+                      'bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-200'
                   )}
                 >
                   {walletTypeLabel[rugger.walletType]}
@@ -270,6 +273,11 @@ export default function RuggerDetailPage() {
                 <div className="space-y-2">
                   <Label htmlFor="edit-detail-wallet">Adresse du wallet (optionnel)</Label>
                   <Input id="edit-detail-wallet" value={editWalletAddress} onChange={(e) => setEditWalletAddress(e.target.value)} placeholder="0x..." />
+                  {editWalletType === 'buyer' && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Adresse Solana du wallet acheteur pour le montant du 1er achat dans le tableau des tokens.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-detail-type">Type de wallet</Label>
@@ -277,6 +285,7 @@ export default function RuggerDetailPage() {
                     <option value="exchange">Exchange</option>
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
+                    <option value="buyer">Wallet acheteur</option>
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -316,7 +325,7 @@ export default function RuggerDetailPage() {
       </nav>
 
       {activeTab === 'tokens' && (
-        <RuggerTokensTab ruggerId={id} rugger={rugger} onRuggerChange={handleRuggerChange} />
+        <RuggerTokensTab key={id} ruggerId={id} rugger={rugger} onRuggerChange={handleRuggerChange} />
       )}
       {activeTab === 'buyers' && (
         <RuggerBuyersTab ruggerId={id} onRuggerChange={handleRuggerChange} />

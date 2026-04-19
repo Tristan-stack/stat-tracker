@@ -206,6 +206,7 @@ export default function RuggerPage() {
     exchange: 'Exchange',
     mother: 'Mère',
     simple: 'Simple',
+    buyer: 'Wallet acheteur',
   };
 
   return (
@@ -253,6 +254,7 @@ export default function RuggerPage() {
                 <option value="exchange">Exchange</option>
                 <option value="mother">Mère</option>
                 <option value="simple">Simple</option>
+                <option value="buyer">Wallet acheteur</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -266,6 +268,11 @@ export default function RuggerPage() {
               <p className="text-xs text-muted-foreground">
                 Tu peux créer un rugger sans wallet principal, puis ajouter des wallets acheteurs dans l&apos;onglet dédié.
               </p>
+              {walletType === 'buyer' && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Pour le montant du 1er achat dans le tableau des tokens, renseigne l&apos;adresse Solana du wallet acheteur.
+                </p>
+              )}
             </div>
             {(walletType === 'exchange' || walletType === 'mother') && (
               <div className="space-y-2 sm:col-span-2">
@@ -403,7 +410,9 @@ export default function RuggerPage() {
                               'rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide',
                               rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
                               rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                              rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200'
+                              rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
+                              rugger.walletType === 'buyer' &&
+                                'bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-200'
                             )}
                           >
                             {walletTypeLabel[rugger.walletType]}
@@ -575,6 +584,11 @@ export default function RuggerPage() {
                     onChange={(e) => setEditWalletAddress(e.target.value)}
                     placeholder="0x..."
                   />
+                  {editWalletType === 'buyer' && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Adresse Solana du wallet acheteur pour afficher le montant du 1er achat par token.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-rugger-type">Type de wallet</Label>
@@ -587,6 +601,7 @@ export default function RuggerPage() {
                     <option value="exchange">Exchange</option>
                     <option value="mother">Mère</option>
                     <option value="simple">Simple</option>
+                    <option value="buyer">Wallet acheteur</option>
                   </select>
                 </div>
                 <div className="space-y-2">
