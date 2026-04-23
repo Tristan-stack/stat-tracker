@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   getAggregateMetrics,
   getTokenWithMetrics,
@@ -150,6 +149,11 @@ function simulateTokenMultiTp(
   return totalReceived;
 }
 
+function simulateTokenSimpleRealistic(amount: number, token: TokenWithMetrics): number {
+  const realizedPercent = token.targetReached ? token.targetExitPercent : token.maxLossPercent;
+  return amount * (1 + realizedPercent / 100);
+}
+
 interface MultiTpSimulationResult {
   investedTotal: number;
   totalReceived: number;
@@ -159,6 +163,25 @@ interface MultiTpSimulationResult {
   tokensFullLoss: number;
   totalFees: number;
   profitBeforeFees: number;
+}
+
+interface DailyPnlPoint {
+  dayKey: string;
+  dayLabel: string;
+  pnl: number;
+}
+
+interface BestWorstDaySummary {
+  bestDay: DailyPnlPoint;
+  worstDay: DailyPnlPoint;
+  averageDayPnl: number;
+}
+
+function getLocalDayKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getMultiTpSimulation(
@@ -267,8 +290,8 @@ export function StatsSummary({
     [activityBasis]
   );
   const acceptance = getAcceptanceCriteria(tokens);
-  const [simulatedAmount, setSimulatedAmount] = useState('');
-  const [optimizedRevenue, setOptimizedRevenue] = useState(false);
+  const [simulatedAmount] = useState('');
+  const [optimizedRevenue] = useState(true);
   const [walletEnabled, setWalletEnabled] = useState<boolean[]>(() =>
     Array.from({ length: WALLET_SLOTS }, () => false)
   );
@@ -451,6 +474,73 @@ export function StatsSummary({
         : [{ key: 'left' as const, title: 'Stratégie', tps: takeProfits, result: multiTpResult }],
     [compareEnabled, takeProfits, takeProfitsRight, multiTpResult, multiTpResultRight]
   );
+  const dailyPnlByStrategy = useMemo(() => {
+    const out = new Map<'left' | 'right', BestWorstDaySummary | null>();
+    if (!optimizedRevenue || effectiveWalletAmounts.length === 0 || tokensWithMetrics.length === 0) {
+      out.set('left', null);
+      out.set('right', null);
+      return out;
+    }
+
+    const computeSummary = (resolvedTps: TakeProfitParsed[]): BestWorstDaySummary | null => {
+      const byDay = new Map<string, { ts: number; label: string; pnl: number }>();
+      const walletCount = effectiveWalletAmounts.length;
+      const hasResolvedTps = resolvedTps.length > 0;
+      for (const token of tokensWithMetrics) {
+        if (!token.purchasedAt) continue;
+        const purchasedDate = new Date(token.purchasedAt);
+        const ts = purchasedDate.getTime();
+        if (!Number.isFinite(ts)) continue;
+
+        let tokenPnl = 0;
+        for (const walletAmount of effectiveWalletAmounts) {
+          const received = hasResolvedTps
+            ? simulateTokenMultiTp(walletAmount, token, resolveTpsForToken(resolvedTps, token))
+            : simulateTokenSimpleRealistic(walletAmount, token);
+          tokenPnl += received - walletAmount;
+        }
+        tokenPnl -= FEE_EUR_PER_PAIR * walletCount;
+
+        const dayKey = getLocalDayKey(purchasedDate);
+        const dayLabel = purchasedDate.toLocaleDateString('fr-FR', { dateStyle: 'short' });
+        const existing = byDay.get(dayKey);
+        if (existing) {
+          existing.pnl += tokenPnl;
+        } else {
+          byDay.set(dayKey, { ts, label: dayLabel, pnl: tokenPnl });
+        }
+      }
+
+      if (byDay.size === 0) return null;
+      const orderedDays = Array.from(byDay.entries()).sort((a, b) => a[1].ts - b[1].ts);
+      let best = orderedDays[0];
+      let worst = orderedDays[0];
+      for (const day of orderedDays) {
+        if (day[1].pnl > best[1].pnl) best = day;
+        if (day[1].pnl < worst[1].pnl) worst = day;
+      }
+
+      return {
+        bestDay: {
+          dayKey: best[0],
+          dayLabel: best[1].label,
+          pnl: best[1].pnl,
+        },
+        worstDay: {
+          dayKey: worst[0],
+          dayLabel: worst[1].label,
+          pnl: worst[1].pnl,
+        },
+        averageDayPnl:
+          orderedDays.reduce((sum, day) => sum + day[1].pnl, 0) / orderedDays.length,
+      };
+    };
+
+    out.set('left', computeSummary(parsedTps));
+    out.set('right', computeSummary(parsedTpsRight));
+    return out;
+  }, [optimizedRevenue, effectiveWalletAmounts, tokensWithMetrics, parsedTps, parsedTpsRight]);
+  const primaryDaySummary = dailyPnlByStrategy.get('left') ?? null;
 
   const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string | ExitMode | 'tp' | 'initial') => {
     setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
@@ -746,42 +836,9 @@ export function StatsSummary({
         {showSimulation && (
           <div className="mt-2 space-y-4 rounded-lg border bg-muted/30 p-4 sm:p-5">
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant={optimizedRevenue ? 'default' : 'outline'}
-                  size="sm"
-                  aria-pressed={optimizedRevenue}
-                  onClick={() => setOptimizedRevenue((v) => !v)}
-                >
-                  Revenu optimisé
-                </Button>
-                <p className="text-xs text-muted-foreground max-w-xl">
-                  {optimizedRevenue
-                    ? `Plusieurs wallets : montant par token par wallet. Frais fixes ${FEE_EUR_PER_PAIR} € par wallet et par token (achat/vente).`
-                    : 'Un seul montant par token pour toute la simulation.'}
-                </p>
-              </div>
-
-              {!optimizedRevenue && (
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="w-full max-w-xs space-y-2">
-                    <Label htmlFor="simulated-amount">Montant investi par token (à l&apos;entrée)</Label>
-                    <Input
-                      id="simulated-amount"
-                      inputMode="decimal"
-                      placeholder="Ex. 1 000"
-                      value={simulatedAmount}
-                      onChange={(e) => setSimulatedAmount(e.target.value)}
-                    />
-                  </div>
-                  {hasSimulationInput && (
-                    <p className="text-xs text-muted-foreground sm:text-sm">
-                      Simule le résultat global en investissant ce montant sur chaque token.
-                    </p>
-                  )}
-                </div>
-              )}
+              <p className="text-xs text-muted-foreground max-w-xl">
+                {`Plusieurs wallets : montant par token par wallet. Frais fixes ${FEE_EUR_PER_PAIR} € par wallet et par token (achat/vente).`}
+              </p>
 
               {optimizedRevenue && (
                 <div className="space-y-3">
@@ -855,50 +912,93 @@ export function StatsSummary({
             </div>
 
             {hasSimulationInput && simpleRealistic && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Résultat réaliste (simple)
-                </p>
-                <p className="text-sm">
-                  % combiné :{' '}
-                  <span className={`font-semibold ${realisticPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatPercent(realisticPercentSum)}
-                  </span>
-                </p>
-                <p className="text-sm">
-                  Investi total:{' '}
-                  <span className="font-semibold">{formatNum(simpleRealistic.investedTotal, 2)}</span>
-                </p>
-                {simpleRealistic.totalFees > 0 && (
-                  <>
+              <div className="grid gap-4 md:grid-cols-2 md:items-start">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Résultat réaliste (simple)
+                  </p>
+                  <p className="text-sm">
+                    % combiné :{' '}
+                    <span className={`font-semibold ${realisticPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {formatPercent(realisticPercentSum)}
+                    </span>
+                  </p>
+                  <p className="text-sm">
+                    Investi total:{' '}
+                    <span className="font-semibold">{formatNum(simpleRealistic.investedTotal, 2)}</span>
+                  </p>
+                  {simpleRealistic.totalFees > 0 && (
+                    <>
+                      <p className="text-sm">
+                        Bénéfice avant frais:{' '}
+                        <span className={`font-semibold ${simpleRealistic.gainBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {simpleRealistic.gainBeforeFees >= 0 ? '+' : ''}{formatNum(simpleRealistic.gainBeforeFees, 2)}
+                        </span>
+                      </p>
+                      <p className="text-sm">
+                        Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} tokens × {simpleRealistic.walletCount} wallet{simpleRealistic.walletCount !== 1 ? 's' : ''}):{' '}
+                        <span className="font-semibold tabular-nums">−{formatNum(simpleRealistic.totalFees, 2)} €</span>
+                      </p>
+                    </>
+                  )}
+                  <p className="text-sm">
+                    Montant final:{' '}
+                    <span className={`font-semibold ${simpleRealistic.finalAmount >= simpleRealistic.investedTotal ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {formatNum(simpleRealistic.finalAmount, 2)}
+                    </span>
+                  </p>
+                  <p className="text-sm">
+                    Bénéfice / Perte:{' '}
+                    <span className={`font-semibold ${simpleRealistic.netGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {simpleRealistic.netGain >= 0 ? '+' : ''}{formatNum(simpleRealistic.netGain, 2)}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {reachedCount} token{reachedCount !== 1 ? 's' : ''} à l&apos;objectif ({formatPercent(tokensWithMetrics.filter((t) => t.targetReached).reduce((s, t) => s + t.targetExitPercent, 0))}),{' '}
+                    {missedCount} en perte ({formatPercent(tokensWithMetrics.filter((t) => !t.targetReached).reduce((s, t) => s + t.maxLossPercent, 0))})
+                  </p>
+                </div>
+
+                {primaryDaySummary && (
+                  <div className="space-y-2 rounded-lg border bg-background/60 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Meilleur / pire journée
+                    </p>
                     <p className="text-sm">
-                      Bénéfice avant frais:{' '}
-                      <span className={`font-semibold ${simpleRealistic.gainBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                        {simpleRealistic.gainBeforeFees >= 0 ? '+' : ''}{formatNum(simpleRealistic.gainBeforeFees, 2)}
+                      Meilleur jour:{' '}
+                      <span className="font-semibold text-green-600 dark:text-green-400">
+                        {primaryDaySummary.bestDay.dayLabel} · {primaryDaySummary.bestDay.pnl >= 0 ? '+' : ''}
+                        {formatNum(primaryDaySummary.bestDay.pnl, 2)} EUR
                       </span>
                     </p>
                     <p className="text-sm">
-                      Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} tokens × {simpleRealistic.walletCount} wallet{simpleRealistic.walletCount !== 1 ? 's' : ''}):{' '}
-                      <span className="font-semibold tabular-nums">−{formatNum(simpleRealistic.totalFees, 2)} €</span>
+                      Pire jour:{' '}
+                      <span
+                        className={`font-semibold ${
+                          primaryDaySummary.worstDay.pnl >= 0
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        {primaryDaySummary.worstDay.dayLabel} · {primaryDaySummary.worstDay.pnl >= 0 ? '+' : ''}
+                        {formatNum(primaryDaySummary.worstDay.pnl, 2)} EUR
+                      </span>
                     </p>
-                  </>
+                    <p className="text-sm">
+                      Journée moyenne:{' '}
+                      <span
+                        className={`font-semibold ${
+                          primaryDaySummary.averageDayPnl >= 0
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        {primaryDaySummary.averageDayPnl >= 0 ? '+' : ''}
+                        {formatNum(primaryDaySummary.averageDayPnl, 2)} EUR
+                      </span>
+                    </p>
+                  </div>
                 )}
-                <p className="text-sm">
-                  Montant final:{' '}
-                  <span className={`font-semibold ${simpleRealistic.finalAmount >= simpleRealistic.investedTotal ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatNum(simpleRealistic.finalAmount, 2)}
-                  </span>
-                </p>
-                <p className="text-sm">
-                  Bénéfice / Perte:{' '}
-                  <span className={`font-semibold ${simpleRealistic.netGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {simpleRealistic.netGain >= 0 ? '+' : ''}{formatNum(simpleRealistic.netGain, 2)}
-                  </span>
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {reachedCount} token{reachedCount !== 1 ? 's' : ''} à l&apos;objectif ({formatPercent(tokensWithMetrics.filter((t) => t.targetReached).reduce((s, t) => s + t.targetExitPercent, 0))}),{' '}
-                  {missedCount} en perte ({formatPercent(tokensWithMetrics.filter((t) => !t.targetReached).reduce((s, t) => s + t.maxLossPercent, 0))})
-                </p>
               </div>
             )}
 
@@ -924,7 +1024,9 @@ export function StatsSummary({
               </div>
 
               <div className={cn('grid gap-4', compareEnabled ? 'md:grid-cols-2' : 'grid-cols-1')}>
-                {compareStrategies.map((strategy) => (
+                {compareStrategies.map((strategy) => {
+                  const daySummary = dailyPnlByStrategy.get(strategy.key);
+                  return (
                   <div key={strategy.key} className="space-y-2 rounded-md border bg-background/40 p-3">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-medium text-muted-foreground">{strategy.title}</p>
@@ -1094,10 +1196,39 @@ export function StatsSummary({
                             {strategy.result.profit >= 0 ? '+' : ''}{formatNum(strategy.result.profit, 2)} ({strategy.result.profitPercent >= 0 ? '+' : ''}{formatNum(strategy.result.profitPercent, 2)} %)
                           </span>
                         </p>
+                        {daySummary && (
+                          <>
+                            <p className="text-sm">
+                              Meilleur jour:{' '}
+                              <span className="font-semibold text-green-600 dark:text-green-400">
+                                {daySummary.bestDay.dayLabel} ·
+                                {' '}
+                                {daySummary.bestDay.pnl >= 0 ? '+' : ''}
+                                {formatNum(daySummary.bestDay.pnl, 2)} EUR
+                              </span>
+                            </p>
+                            <p className="text-sm">
+                              Pire jour:{' '}
+                              <span
+                                className={`font-semibold ${
+                                  daySummary.worstDay.pnl >= 0
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : 'text-red-600 dark:text-red-400'
+                                }`}
+                              >
+                                {daySummary.worstDay.dayLabel} ·
+                                {' '}
+                                {daySummary.worstDay.pnl >= 0 ? '+' : ''}
+                                {formatNum(daySummary.worstDay.pnl, 2)} EUR
+                              </span>
+                            </p>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
