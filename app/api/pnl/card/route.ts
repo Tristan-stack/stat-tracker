@@ -106,7 +106,10 @@ export async function POST(request: NextRequest) {
     const winRate = tokens > 0 ? (winners / tokens) * 100 : 0;
 
     const { usdPerSol } = await fetchSolFiatSpotFromGmgn();
-    const totalPnlSol = usdPerSol > 0 ? totalPnlUsd / usdPerSol : 0;
+    const totalPnlSol =
+      typeof usdPerSol === 'number' && Number.isFinite(usdPerSol) && usdPerSol > 0
+        ? totalPnlUsd / usdPerSol
+        : 0;
 
     const existingMetadata = await getWalletMetadataForUser(userId, walletAddresses);
     const creationByWallet = new Map<string, string | null>();
