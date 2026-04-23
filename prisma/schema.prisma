@@ -21,9 +21,55 @@ model User {
   fundingChainCache  FundingChainCache[]
   watchlistWallets   WatchlistWallet[]
   notifications      Notification[]
+  walletMetadata     WalletMetadata[]
+  pnlWallets         PnlWallet[]
+  pnlBackgrounds     PnlBackground[]
 
   @@unique([email])
   @@map("user")
+}
+
+model WalletMetadata {
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress String   @map("wallet_address")
+  createdAt     DateTime? @map("created_at")
+  creationSource String   @default("helius_first_tx") @map("creation_source")
+  lastFetchedAt DateTime @default(now()) @map("last_fetched_at")
+  insertedAt    DateTime @default(now()) @map("inserted_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, walletAddress])
+  @@index([userId])
+  @@map("wallet_metadata")
+}
+
+model PnlWallet {
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress String   @map("wallet_address")
+  label         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, walletAddress])
+  @@index([userId])
+  @@map("pnl_wallets")
+}
+
+model PnlBackground {
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String?
+  imageData  String   @map("image_data")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
+
+  @@index([userId])
+  @@map("pnl_backgrounds")
 }
 
 model Session {

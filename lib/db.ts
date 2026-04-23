@@ -11,7 +11,7 @@ export const db = connectionString ? neon(connectionString) : null;
 
 export async function query<T>(
   sql: string,
-  params: (string | number | boolean | null)[]
+  params: unknown[]
 ): Promise<T[]> {
   if (!db) {
     throw new Error('DATABASE_URL is not configured');

@@ -8,6 +8,7 @@ import {
   type WalletActivityRow,
 } from '@/lib/gmgn/client';
 import { sanitizeUsdToMcapPrices } from '@/lib/gmgn/price-rounding';
+import { fetchSolUsdFromGmgn, mergeNotionalWithSolUsd, parseFirstBuyNotional } from '@/lib/gmgn/first-buy-notional';
 
 const CHAIN_SOL = 'sol';
 /** Limite de requêtes kline par import (throttle ~2 req/s côté GMGN). */
@@ -29,6 +30,9 @@ export interface WalletPurchasePreview {
   truncatedKlines: boolean;
   /** Présent quand l’achat provient d’un fetch multi-wallets. */
   sourceWallet?: string;
+  /** Montant notionnel estimé de l'achat (USD/SOL). */
+  spentUsd?: number | null;
+  spentSol?: number | null;
 }
 
 /**
@@ -164,6 +168,7 @@ export async function buildPurchasePreviews(
   const maxKlineEnrich = spanMs <= SHORT_RANGE_FULL_KLINE_MS ? rows.length : MAX_KLINE_ENRICH;
   const out: WalletPurchasePreview[] = [];
   let klineCount = 0;
+  let solUsdSpot: number | null | undefined;
 
   for (const row of rows) {
     const mint = tokenMint(row);
@@ -173,6 +178,8 @@ export async function buildPurchasePreviews(
     const entryPrice = parsePriceUsd(row);
     const name = tokenDisplayName(row);
     const purchasedAt = new Date(tsSec * 1000).toISOString();
+    let spentUsd: number | null = null;
+    let spentSol: number | null = null;
 
     let high = entryPrice;
     let low = entryPrice;
@@ -217,6 +224,20 @@ export async function buildPurchasePreviews(
       `   → mcap entry=${String(rounded.entry)} high=${String(rounded.high)} low=${String(rounded.low)}`
     );
 
+    const parsedNotional = parseFirstBuyNotional(row);
+    if (parsedNotional.usd !== null || parsedNotional.sol !== null) {
+      if (solUsdSpot === undefined) {
+        try {
+          solUsdSpot = await fetchSolUsdFromGmgn();
+        } catch {
+          solUsdSpot = null;
+        }
+      }
+      const mergedNotional = mergeNotionalWithSolUsd(parsedNotional, solUsdSpot ?? null);
+      spentUsd = mergedNotional.usd;
+      spentSol = mergedNotional.sol;
+    }
+
     out.push({
       tokenAddress: mint,
       name,
@@ -225,6 +246,8 @@ export async function buildPurchasePreviews(
       high: rounded.high,
       low: rounded.low,
       truncatedKlines,
+      spentUsd,
+      spentSol,
     });
   }
 
