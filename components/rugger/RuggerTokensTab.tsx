@@ -69,6 +69,14 @@ function formatFirstBuyStatValue(v: number, unit: 'usd' | 'sol'): string {
   return `${v.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} SOL`;
 }
 
+function parsePositiveNumericFilterValue(raw: string): number | null {
+  const normalized = raw.trim().replace(',', '.');
+  if (normalized === '') return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 interface GmgnPurchasePreview {
   tokenAddress: string;
   name: string;
@@ -107,6 +115,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
   const [tokenPurchaseFilter, setTokenPurchaseFilter] = useState<TokenPurchaseFilter>('all');
+  const [tokenEntryMcapMax, setTokenEntryMcapMax] = useState('');
   const [tokenTableCustomFrom, setTokenTableCustomFrom] = useState('');
   const [tokenTableCustomTo, setTokenTableCustomTo] = useState('');
   const [tokenTablePickDay, setTokenTablePickDay] = useState('');
@@ -278,6 +287,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
       listPageSize: number,
       status?: StatusId | 'all',
       purchaseFilter?: TokenPurchaseFilter,
+      entryMcapMaxRaw?: string,
       tableCustomFrom?: string,
       tableCustomTo?: string,
       pickDay?: string,
@@ -291,6 +301,8 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         });
         if (status && status !== 'all') searchParams.set('status', status);
         appendTokenDateQueryParams(searchParams, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo, pickDay);
+        const entryMcapMax = parsePositiveNumericFilterValue(entryMcapMaxRaw ?? '');
+        if (entryMcapMax !== null) searchParams.set('entryMcapMax', String(entryMcapMax));
         if (migrationOnly) searchParams.set('migration', 'true');
         const response = await fetch(`/api/ruggers/${ruggerId}/tokens?${searchParams.toString()}`);
         if (!response.ok) return;
@@ -306,6 +318,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
       ruggerId: string,
       status?: StatusId | 'all',
       purchaseFilter?: TokenPurchaseFilter,
+      entryMcapMaxRaw?: string,
       tableCustomFrom?: string,
       tableCustomTo?: string,
       pickDay?: string
@@ -314,6 +327,8 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         const params = new URLSearchParams({ all: 'true' });
         if (status && status !== 'all') params.set('status', status);
         appendTokenDateQueryParams(params, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo, pickDay);
+        const entryMcapMax = parsePositiveNumericFilterValue(entryMcapMaxRaw ?? '');
+        if (entryMcapMax !== null) params.set('entryMcapMax', String(entryMcapMax));
         const response = await fetch(`/api/ruggers/${ruggerId}/tokens?${params.toString()}`);
         if (!response.ok) return;
         const data = (await response.json()) as TokensResponse;
@@ -349,9 +364,9 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
     }
     const fetchPage = ruggerChanged ? 1 : page;
     const migrationOnly = ruggerChanged ? false : migrationView === 'migrations';
-    void loadTokens(id, fetchPage, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationOnly);
-    void loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, page, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, tokenTablePageSize, loadTokens, loadAllTokensForStats]);
+    void loadTokens(id, fetchPage, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationOnly);
+    void loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
+  }, [id, page, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, tokenTablePageSize, loadTokens, loadAllTokensForStats]);
 
   useEffect(() => {
     if (tokensPage?.allSameTargetPercent != null) {
@@ -360,15 +375,15 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   }, [tokensPage?.allSameTargetPercent]);
 
   const reloadTokens = useCallback(async () => {
-    await loadTokens(id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
-    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
+    await loadTokens(id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
+    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
+  }, [id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
 
   const reloadTokensFromPage1 = useCallback(async () => {
     setPage(1);
-    await loadTokens(id, 1, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
-    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
+    await loadTokens(id, 1, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
+    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
+  }, [id, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
 
   const handleImportTokens = useCallback(
     async (importedTokens: Token[]) => {
@@ -631,6 +646,22 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
                 {getPurchaseFilterLabel(period)}
               </button>
             ))}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-2">
+              <Label>MCAP d&apos;entrée max</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                className="w-[200px]"
+                value={tokenEntryMcapMax}
+                onChange={(e) => {
+                  setTokenEntryMcapMax(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="500000"
+              />
+            </div>
           </div>
           {tokenPurchaseFilter === 'day' && (
             <div className="flex flex-wrap items-end gap-3">

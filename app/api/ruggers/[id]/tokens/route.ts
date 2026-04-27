@@ -47,6 +47,7 @@ export async function GET(
   const statusFilter = searchParams.get('status') as StatusId | null;
   const tokenDateFrom = searchParams.get('tokenDateFrom');
   const tokenDateTo = searchParams.get('tokenDateTo');
+  const entryMcapMaxRaw = searchParams.get('entryMcapMax');
   const migrationOnly = searchParams.get('migration') === 'true';
   const page = Number(searchParams.get('page') ?? '1');
   const pageSize = Number(searchParams.get('pageSize') ?? '10');
@@ -73,6 +74,13 @@ export async function GET(
     if (!Number.isNaN(d.getTime())) {
       conditions.push(`${effectiveTsExpr} <= $` + (baseParams.length + 1));
       baseParams.push(d.toISOString());
+    }
+  }
+  if (entryMcapMaxRaw) {
+    const entryMcapMax = Number(entryMcapMaxRaw.replace(',', '.'));
+    if (Number.isFinite(entryMcapMax) && entryMcapMax > 0) {
+      conditions.push('entry_price <= $' + (baseParams.length + 1));
+      baseParams.push(entryMcapMax);
     }
   }
   if (migrationOnly) {
