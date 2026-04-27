@@ -145,6 +145,16 @@ export interface OptimalExitResult {
   total: number;
 }
 
+export interface OptimalEntryMcapFilterResult {
+  kind: 'min' | 'max';
+  value: number;
+  tokenCount: number;
+  coverageRate: number;
+  avgRealisticPercent: number;
+  avgGainPercent: number;
+  avgLossPercent: number;
+}
+
 function scoreOptimal(avgProfit: number, winRate: number): number {
   if (avgProfit <= 0) return -Infinity;
   return avgProfit * winRate;
@@ -288,4 +298,53 @@ export function suggestSnipeMode(
     mode: 'tie',
     summary: 'Les deux modes sont équivalents sur le score et le nombre de TP atteints.',
   };
+}
+
+function scoreEntryMcapFilter(avgRealisticPercent: number, coverageRate: number): number {
+  if (coverageRate <= 0) return -Infinity;
+  return avgRealisticPercent * coverageRate;
+}
+
+export function findOptimalEntryMcapFilter(
+  twm: TokenWithMetrics[],
+  kind: 'min' | 'max'
+): OptimalEntryMcapFilterResult | null {
+  if (twm.length === 0) return null;
+
+  const candidates = [...new Set(twm.map((t) => t.entryPrice).filter((v) => v > 0))].sort((a, b) => a - b);
+  if (candidates.length === 0) return null;
+
+  let best: { result: OptimalEntryMcapFilterResult; score: number } | null = null;
+  const totalCount = twm.length;
+
+  for (const candidateValue of candidates) {
+    const filtered =
+      kind === 'min'
+        ? twm.filter((t) => t.entryPrice >= candidateValue)
+        : twm.filter((t) => t.entryPrice <= candidateValue);
+    if (filtered.length === 0) continue;
+
+    const gainValues = filtered.map((t) => t.targetExitPercent);
+    const lossValues = filtered.map((t) => t.maxLossPercent);
+    const realisticValues = filtered.map((t) => (t.targetReached ? t.targetExitPercent : t.maxLossPercent));
+
+    const avgGainPercent = gainValues.reduce((sum, v) => sum + v, 0) / filtered.length;
+    const avgLossPercent = lossValues.reduce((sum, v) => sum + v, 0) / filtered.length;
+    const avgRealisticPercent = realisticValues.reduce((sum, v) => sum + v, 0) / filtered.length;
+    const coverageRate = filtered.length / totalCount;
+
+    const result: OptimalEntryMcapFilterResult = {
+      kind,
+      value: candidateValue,
+      tokenCount: filtered.length,
+      coverageRate,
+      avgRealisticPercent,
+      avgGainPercent,
+      avgLossPercent,
+    };
+    const score = scoreEntryMcapFilter(avgRealisticPercent, coverageRate);
+    if (best === null || score > best.score) best = { result, score };
+  }
+
+  return best?.result ?? null;
 }

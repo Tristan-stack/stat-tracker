@@ -8,6 +8,7 @@ import {
   getAggregateMetrics,
   getMaxConsecutiveLosses,
   getAcceptanceCriteria,
+  findOptimalEntryMcapFilter,
 } from './token-calculations';
 import type { Token } from '@/types/token';
 
@@ -328,5 +329,46 @@ describe('getAcceptanceCriteria', () => {
       { length: 2, occurrences: 1 },
       { length: 1, occurrences: 1 },
     ]);
+  });
+});
+
+describe('findOptimalEntryMcapFilter', () => {
+  it('returns null for empty input', () => {
+    expect(findOptimalEntryMcapFilter([], 'min')).toBeNull();
+    expect(findOptimalEntryMcapFilter([], 'max')).toBeNull();
+  });
+
+  it('finds best min threshold balancing return and coverage', () => {
+    const twm = [
+      // Bad low entry bucket
+      { ...makeToken({ entryPrice: 10, high: 11, low: 5, targetExitPercent: 20 }), targetExitPrice: 12, maxGainPercent: 10, maxLossPercent: -50, targetReached: false },
+      { ...makeToken({ entryPrice: 20, high: 22, low: 12, targetExitPercent: 20 }), targetExitPrice: 24, maxGainPercent: 10, maxLossPercent: -40, targetReached: false },
+      // Good mid/high entry bucket
+      { ...makeToken({ entryPrice: 100, high: 180, low: 90, targetExitPercent: 40 }), targetExitPrice: 140, maxGainPercent: 80, maxLossPercent: -10, targetReached: true },
+      { ...makeToken({ entryPrice: 120, high: 190, low: 100, targetExitPercent: 35 }), targetExitPrice: 162, maxGainPercent: 58.33, maxLossPercent: -16.67, targetReached: true },
+    ];
+
+    const result = findOptimalEntryMcapFilter(twm, 'min');
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe('min');
+    expect(result?.value).toBe(100);
+    expect(result?.tokenCount).toBe(2);
+    expect(result?.coverageRate).toBe(0.5);
+  });
+
+  it('finds best max threshold balancing return and coverage', () => {
+    const twm = [
+      { ...makeToken({ entryPrice: 10, high: 50, low: 9, targetExitPercent: 25 }), targetExitPrice: 12.5, maxGainPercent: 400, maxLossPercent: -10, targetReached: true },
+      { ...makeToken({ entryPrice: 20, high: 60, low: 18, targetExitPercent: 30 }), targetExitPrice: 26, maxGainPercent: 200, maxLossPercent: -10, targetReached: true },
+      { ...makeToken({ entryPrice: 200, high: 210, low: 120, targetExitPercent: 30 }), targetExitPrice: 260, maxGainPercent: 5, maxLossPercent: -40, targetReached: false },
+      { ...makeToken({ entryPrice: 250, high: 260, low: 130, targetExitPercent: 30 }), targetExitPrice: 325, maxGainPercent: 4, maxLossPercent: -48, targetReached: false },
+    ];
+
+    const result = findOptimalEntryMcapFilter(twm, 'max');
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe('max');
+    expect(result?.value).toBe(20);
+    expect(result?.tokenCount).toBe(2);
+    expect(result?.coverageRate).toBe(0.5);
   });
 });

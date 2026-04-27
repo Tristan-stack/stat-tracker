@@ -10,6 +10,7 @@ import {
   getAcceptanceCriteria,
   findOptimalPercent,
   findOptimalMcap,
+  findOptimalEntryMcapFilter,
   suggestSnipeMode,
 } from '@/lib/token-calculations';
 import { inferActivityHoursFromTokens } from '@/lib/infer-activity-hours';
@@ -414,6 +415,14 @@ export function StatsSummary({
 
   const optimalPercent = useMemo(() => findOptimalPercent(tokensWithMetrics), [tokensWithMetrics]);
   const optimalMcap = useMemo(() => findOptimalMcap(tokensWithMetrics), [tokensWithMetrics]);
+  const recommendedEntryMcapMin = useMemo(
+    () => findOptimalEntryMcapFilter(tokensWithMetrics, 'min'),
+    [tokensWithMetrics]
+  );
+  const recommendedEntryMcapMax = useMemo(
+    () => findOptimalEntryMcapFilter(tokensWithMetrics, 'max'),
+    [tokensWithMetrics]
+  );
   const snipeSuggestion = useMemo(
     () => suggestSnipeMode(optimalPercent, optimalMcap),
     [optimalPercent, optimalMcap]
@@ -715,6 +724,34 @@ export function StatsSummary({
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Gain moy. {formatPercent(optimalMcap.avgGainPerWinner)} / Perte moy. {formatPercent(optimalMcap.avgLossPerLoser)}
+              </p>
+            </div>
+          )}
+          {recommendedEntryMcapMin && (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée min conseillée</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {formatNum(recommendedEntryMcapMin.value, 0)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Rentabilité réaliste moy. {formatPercent(recommendedEntryMcapMin.avgRealisticPercent)} · Couverture {formatNum(recommendedEntryMcapMin.coverageRate * 100, 0)}% ({recommendedEntryMcapMin.tokenCount}/{metrics.tokenCount})
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Gain visé moy. {formatPercent(recommendedEntryMcapMin.avgGainPercent)} / Perte max moy. {formatPercent(recommendedEntryMcapMin.avgLossPercent)}
+              </p>
+            </div>
+          )}
+          {recommendedEntryMcapMax && (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée max conseillée</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {formatNum(recommendedEntryMcapMax.value, 0)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Rentabilité réaliste moy. {formatPercent(recommendedEntryMcapMax.avgRealisticPercent)} · Couverture {formatNum(recommendedEntryMcapMax.coverageRate * 100, 0)}% ({recommendedEntryMcapMax.tokenCount}/{metrics.tokenCount})
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Gain visé moy. {formatPercent(recommendedEntryMcapMax.avgGainPercent)} / Perte max moy. {formatPercent(recommendedEntryMcapMax.avgLossPercent)}
               </p>
             </div>
           )}
