@@ -731,7 +731,7 @@ export function StatsSummary({
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée min conseillée</p>
               <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {formatNum(recommendedEntryMcapMin.value, 0)}
+                {formatNum(recommendedEntryMcapMin.value, 1)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Rentabilité réaliste moy. {formatPercent(recommendedEntryMcapMin.avgRealisticPercent)} · Couverture {formatNum(recommendedEntryMcapMin.coverageRate * 100, 0)}% ({recommendedEntryMcapMin.tokenCount}/{metrics.tokenCount})
@@ -745,7 +745,7 @@ export function StatsSummary({
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée max conseillée</p>
               <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {formatNum(recommendedEntryMcapMax.value, 0)}
+                {formatNum(recommendedEntryMcapMax.value, 1)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Rentabilité réaliste moy. {formatPercent(recommendedEntryMcapMax.avgRealisticPercent)} · Couverture {formatNum(recommendedEntryMcapMax.coverageRate * 100, 0)}% ({recommendedEntryMcapMax.tokenCount}/{metrics.tokenCount})
