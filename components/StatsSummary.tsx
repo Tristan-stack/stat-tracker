@@ -34,12 +34,12 @@ function parseDecimal(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** `eurPerOneSol` = prix d’1 SOL en EUR (spot Helius + conversion EUR). */
-function formatEurInputAsSol(eurInput: string, eurPerOneSol: number | null): string | null {
-  if (eurPerOneSol === null || !Number.isFinite(eurPerOneSol) || eurPerOneSol <= 0) return null;
-  const eur = parseDecimal(eurInput);
-  if (eur <= 0) return null;
-  const sol = eur / eurPerOneSol;
+/** `usdPerOneSol` = prix d’1 SOL en USD (spot Helius/GMGN). */
+function formatUsdInputAsSol(usdInput: string, usdPerOneSol: number | null): string | null {
+  if (usdPerOneSol === null || !Number.isFinite(usdPerOneSol) || usdPerOneSol <= 0) return null;
+  const usd = parseDecimal(usdInput);
+  if (usd <= 0) return null;
+  const sol = usd / usdPerOneSol;
   if (!Number.isFinite(sol)) return null;
   return sol.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
@@ -301,39 +301,38 @@ export function StatsSummary({
   const [takeProfits, setTakeProfits] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [takeProfitsRight, setTakeProfitsRight] = useState<TakeProfitInput[]>([{ ...DEFAULT_TP }]);
-  /** Prix de 1 SOL en EUR (API publique, indicatif). */
-  const [solEurPerSol, setSolEurPerSol] = useState<number | null>(null);
-  const [solEurFetchState, setSolEurFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  /** Prix de 1 SOL en USD (API publique, indicatif). */
+  const [solUsdPerSol, setSolUsdPerSol] = useState<number | null>(null);
+  const [solUsdFetchState, setSolUsdFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
     if (!optimizedRevenue) return;
     let cancelled = false;
-    setSolEurFetchState('loading');
     void (async () => {
       try {
         const res = await fetch('/api/gmgn/sol-quote');
         const data = (await res.json()) as {
-          eurPerSol?: number | null;
+          usdPerSol?: number | null;
           error?: string;
         };
         if (cancelled) return;
         if (!res.ok) {
-          setSolEurPerSol(null);
-          setSolEurFetchState('error');
+          setSolUsdPerSol(null);
+          setSolUsdFetchState('error');
           return;
         }
-        const eur = data.eurPerSol;
-        if (typeof eur !== 'number' || !Number.isFinite(eur) || eur <= 0) {
-          setSolEurPerSol(null);
-          setSolEurFetchState('error');
+        const usd = data.usdPerSol;
+        if (typeof usd !== 'number' || !Number.isFinite(usd) || usd <= 0) {
+          setSolUsdPerSol(null);
+          setSolUsdFetchState('error');
           return;
         }
-        setSolEurPerSol(eur);
-        setSolEurFetchState('ready');
+        setSolUsdPerSol(usd);
+        setSolUsdFetchState('ready');
       } catch {
         if (!cancelled) {
-          setSolEurPerSol(null);
-          setSolEurFetchState('error');
+          setSolUsdPerSol(null);
+          setSolUsdFetchState('error');
         }
       }
     })();
@@ -844,21 +843,21 @@ export function StatsSummary({
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-end justify-between gap-2">
                     <p className="text-sm font-medium">Wallets (max. {WALLET_SLOTS})</p>
-                    {solEurFetchState === 'loading' && (
+                    {solUsdFetchState === 'loading' && (
                       <p className="text-xs text-muted-foreground">Cours SOL (Helius)…</p>
                     )}
-                    {solEurFetchState === 'ready' && solEurPerSol !== null && (
+                    {solUsdFetchState === 'ready' && solUsdPerSol !== null && (
                       <p className="text-xs text-muted-foreground tabular-nums">
-                        1 SOL ≈ {formatNum(solEurPerSol, 2)} € <span className="text-[10px]">(Helius)</span>
+                        1 SOL ≈ {formatNum(solUsdPerSol, 2)} $ <span className="text-[10px]">(Helius)</span>
                       </p>
                     )}
-                    {solEurFetchState === 'error' && (
+                    {solUsdFetchState === 'error' && (
                       <p className="text-xs text-amber-700 dark:text-amber-400">Cours SOL indisponible</p>
                     )}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {Array.from({ length: WALLET_SLOTS }, (_, i) => {
-                      const solStr = formatEurInputAsSol(walletAmounts[i] ?? '', solEurPerSol);
+                      const solStr = formatUsdInputAsSol(walletAmounts[i] ?? '', solUsdPerSol);
                       return (
                         <label
                           key={i}
@@ -883,7 +882,7 @@ export function StatsSummary({
                             <Input
                               type="text"
                               inputMode="decimal"
-                              placeholder="€ / token"
+                              placeholder="$ / token"
                               className="h-8 max-w-[140px] text-xs tabular-nums"
                               value={walletAmounts[i]}
                               disabled={!walletEnabled[i]}
