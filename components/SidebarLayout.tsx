@@ -28,7 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { BarChart3, Eye, Layers, LogOut, User, Wallet, TrendingUp } from 'lucide-react';
+import { BarChart3, Bot, Eye, Layers, LogOut, User, Wallet, TrendingUp } from 'lucide-react';
 import { useSession, signOut } from '@/lib/auth-client';
 import NotificationBell from '@/components/notifications/NotificationBell';
 
@@ -38,6 +38,7 @@ const links = [
   { href: '/watchlist', label: 'Watchlist', icon: Eye },
   { href: '/wallet-comparison', label: 'Comparaison wallets', icon: Layers },
   { href: '/pnl', label: 'PnL', icon: TrendingUp },
+  { href: '/chat', label: 'AI Chat', icon: Bot },
 ];
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
