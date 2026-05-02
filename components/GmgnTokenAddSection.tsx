@@ -74,9 +74,11 @@ function formatDateToYyyyMmDd(date?: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+const GMGN_KLINE_BATCH_SIZE = 100;
+
 function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow[] {
   return purchases.map((p) => ({
-    rowKey: crypto.randomUUID(),
+    rowKey: p.tokenAddress.trim(),
     tokenAddress: p.tokenAddress,
     name: p.name,
     purchasedAt: p.purchasedAt,
@@ -86,6 +88,33 @@ function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow
     lowStr: formatGmgnDecimalString(p.low),
     sourceWallet: p.sourceWallet,
   }));
+}
+
+function mergeKlinePatchesIntoRows(
+  rows: GmgnPreviewRow[],
+  patches: GmgnPurchasePreview[]
+): GmgnPreviewRow[] {
+  const byMint = new Map(patches.map((p) => [p.tokenAddress.trim(), p] as const));
+  return rows.map((row) => {
+    const p = byMint.get(row.tokenAddress.trim());
+    if (!p) return row;
+    return {
+      ...row,
+      truncatedKlines: p.truncatedKlines,
+      entryStr: formatGmgnDecimalString(p.entryPrice),
+      highStr: formatGmgnDecimalString(p.high),
+      lowStr: formatGmgnDecimalString(p.low),
+    };
+  });
+}
+
+interface GmgnWalletPurchasesMeta {
+  totalPurchases: number;
+  klineSliceOffset: number;
+  klineSliceBatchSize: number;
+  klineEnrichCap: number;
+  enrichedCountThisRequest: number;
+  serverMaxKlineCap: number;
 }
 
 function parseWalletLines(text: string): string[] {
@@ -127,7 +156,10 @@ export default function GmgnTokenAddSection({
   const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
   const [gmgnFetchFrom, setGmgnFetchFrom] = useState('');
   const [gmgnFetchTo, setGmgnFetchTo] = useState('');
+  const [gmgnKlineBudgetStr, setGmgnKlineBudgetStr] = useState('300');
   const [gmgnLoading, setGmgnLoading] = useState(false);
+  const [gmgnEnrichingMore, setGmgnEnrichingMore] = useState(false);
+  const [gmgnEnrichProgress, setGmgnEnrichProgress] = useState<string | null>(null);
   const [gmgnError, setGmgnError] = useState<string | null>(null);
   const [gmgnPreview, setGmgnPreview] = useState<GmgnPreviewRow[] | null>(null);
   const [gmgnDedupeNotice, setGmgnDedupeNotice] = useState<string | null>(null);
@@ -165,40 +197,113 @@ export default function GmgnTokenAddSection({
       return;
     }
     setGmgnLoading(true);
+    setGmgnEnrichingMore(false);
+    setGmgnEnrichProgress(null);
     try {
       const existingTokens = await resolveKnownTokens();
       const knownMints = buildMintSet(existingTokens);
-      const res = await fetch('/api/gmgn/wallet-purchases', {
+      const budgetParsed = Math.floor(Number(String(gmgnKlineBudgetStr).replace(',', '.')));
+      const budget =
+        Number.isFinite(budgetParsed) && budgetParsed >= 1 ? Math.min(budgetParsed, 5000) : 300;
+
+      const res1 = await fetch('/api/gmgn/wallet-purchases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: w, fromMs: range.fromMs, toMs: range.toMs }),
+        body: JSON.stringify({
+          walletAddress: w,
+          fromMs: range.fromMs,
+          toMs: range.toMs,
+          klineEnrichTotalCap: budget,
+          klineEnrichOffset: 0,
+          klineEnrichBatchSize: GMGN_KLINE_BATCH_SIZE,
+        }),
       });
-      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
-      if (!res.ok) {
-        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+      const data1 = (await res1.json()) as {
+        purchases?: GmgnPurchasePreview[];
+        error?: string;
+        meta?: GmgnWalletPurchasesMeta;
+      };
+      if (!res1.ok) {
+        setGmgnError(data1.error ?? 'Échec du fetch GMGN');
         return;
       }
-      const rows = mapApiPurchasesToRows(data.purchases ?? []);
-      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
-      const skipped = rows.length - filtered.length;
-      if (rows.length === 0) {
+      const fullPurchases = data1.purchases ?? [];
+      const rowsAll = mapApiPurchasesToRows(fullPurchases);
+      const filtered = rowsAll.filter((r) => !knownMints.has(r.tokenAddress.trim()));
+      const skipped = rowsAll.length - filtered.length;
+
+      if (rowsAll.length === 0) {
         setGmgnPreview([]);
         setGmgnDedupeNotice('Aucun achat « buy » renvoyé par GMGN sur ce créneau.');
-      } else if (filtered.length === 0) {
+        return;
+      }
+      if (filtered.length === 0) {
         setGmgnPreview([]);
-        setGmgnDedupeNotice(`Les ${rows.length} achat(s) trouvé(s) sont déjà enregistrés.`);
-      } else {
-        setGmgnPreview(filtered);
-        setGmgnDedupeNotice(
-          skipped > 0 ? `${skipped} achat(s) déjà présent(s) — exclus de la liste.` : null
-        );
+        setGmgnDedupeNotice(`Les ${rowsAll.length} achat(s) trouvé(s) sont déjà enregistrés.`);
+        return;
+      }
+
+      setGmgnPreview(filtered);
+      setGmgnDedupeNotice(
+        skipped > 0 ? `${skipped} achat(s) déjà présent(s) — exclus de la liste.` : null
+      );
+      setGmgnLoading(false);
+
+      const meta = data1.meta;
+      if (!meta) return;
+
+      const enrichLimit = Math.min(meta.klineEnrichCap, meta.totalPurchases);
+      let off = meta.klineSliceBatchSize;
+      if (off >= enrichLimit) return;
+
+      setGmgnEnrichingMore(true);
+      setGmgnEnrichProgress(`${Math.min(off, enrichLimit)} / ${enrichLimit}`);
+
+      try {
+        while (off < enrichLimit) {
+          const resN = await fetch('/api/gmgn/wallet-purchases', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              walletAddress: w,
+              fromMs: range.fromMs,
+              toMs: range.toMs,
+              klineEnrichTotalCap: budget,
+              klineEnrichOffset: off,
+              klineEnrichBatchSize: GMGN_KLINE_BATCH_SIZE,
+              klineSliceOnly: true,
+            }),
+          });
+          const dataN = (await resN.json()) as {
+            purchasePatches?: GmgnPurchasePreview[];
+            error?: string;
+          };
+          if (!resN.ok) {
+            setGmgnError(dataN.error ?? `Enrichissement kline interrompu après ${off} token(s).`);
+            break;
+          }
+          const patches = dataN.purchasePatches ?? [];
+          setGmgnPreview((prev) => (prev ? mergeKlinePatchesIntoRows(prev, patches) : prev));
+          off += GMGN_KLINE_BATCH_SIZE;
+          setGmgnEnrichProgress(`${Math.min(off, enrichLimit)} / ${enrichLimit}`);
+        }
+      } finally {
+        setGmgnEnrichingMore(false);
+        setGmgnEnrichProgress(null);
       }
     } catch {
       setGmgnError('Erreur réseau');
     } finally {
       setGmgnLoading(false);
     }
-  }, [gmgnWalletInput, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, resolveKnownTokens]);
+  }, [
+    gmgnWalletInput,
+    gmgnFetchPeriod,
+    gmgnFetchFrom,
+    gmgnFetchTo,
+    gmgnKlineBudgetStr,
+    resolveKnownTokens,
+  ]);
 
   const handleMotherFetch = useCallback(async () => {
     setGmgnError(null);
@@ -464,6 +569,26 @@ export default function GmgnTokenAddSection({
                 placeholder="Adresse Solana"
                 className="w-full font-mono text-sm"
               />
+              <div className="space-y-2">
+                <Label htmlFor="gmgn-kline-budget" className="text-sm font-medium leading-normal">
+                  Budget klines (nombre max de tokens à enrichir avec courbes GMGN)
+                </Label>
+                <Input
+                  id="gmgn-kline-budget"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={5000}
+                  value={gmgnKlineBudgetStr}
+                  onChange={(e) => setGmgnKlineBudgetStr(e.target.value)}
+                  className="w-40"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Chargement par paquets de {GMGN_KLINE_BATCH_SIZE} : les premiers tokens s&apos;affichent tout de suite,
+                  puis le reste se met à jour. Le serveur applique aussi un plafond (variable{' '}
+                  <span className="font-mono">GMGN_MAX_KLINE_ENRICH_CAP</span>, défaut 2000).
+                </p>
+              </div>
             </div>
           )}
           {tokenAddMode === 'motherExchange' && (
@@ -505,6 +630,9 @@ export default function GmgnTokenAddSection({
             </div>
           )}
           {gmgnError && <p className="text-sm text-destructive">{gmgnError}</p>}
+          {gmgnEnrichProgress !== null && (
+            <p className="text-xs text-muted-foreground">Enrichissement klines : {gmgnEnrichProgress}</p>
+          )}
           <Button
             type="button"
             onClick={() =>
@@ -514,9 +642,13 @@ export default function GmgnTokenAddSection({
                   ? handleTokenTrackingFetch()
                   : handleGmgnFetch())
             }
-            disabled={gmgnLoading}
+            disabled={gmgnLoading || gmgnEnrichingMore}
           >
-            {gmgnLoading ? 'Chargement GMGN…' : 'Fetch achats'}
+            {gmgnLoading
+              ? 'Chargement GMGN…'
+              : gmgnEnrichingMore
+                ? 'Enrichissement klines…'
+                : 'Fetch achats'}
           </Button>
           {gmgnPreview && gmgnPreview.length > 0 && (
             <div className="space-y-3">

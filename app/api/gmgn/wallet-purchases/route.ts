@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/auth-session';
 import {
   buildPurchasePreviews,
+  buildWalletPurchasePreviews,
+  DEFAULT_KLINE_ENRICH_BATCH,
+  type BuildWalletPurchasePreviewsMeta,
   type WalletPurchasePreview,
 } from '@/lib/gmgn/wallet-purchases';
 
@@ -41,6 +44,11 @@ function mergeMultiWalletPurchases(rows: WalletPurchasePreview[]): WalletPurchas
   );
 }
 
+function parseOptionalPositiveInt(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 1) return undefined;
+  return Math.floor(v);
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireUser(req);
   if ('response' in auth) return auth.response;
@@ -57,8 +65,11 @@ export async function POST(req: NextRequest) {
     walletAddresses?: unknown;
     fromMs?: unknown;
     toMs?: unknown;
-    /** Si true, renvoie debugLog (lignes texte du traitement klines / arrondis). */
     debug?: unknown;
+    klineEnrichTotalCap?: unknown;
+    klineEnrichOffset?: unknown;
+    klineEnrichBatchSize?: unknown;
+    klineSliceOnly?: unknown;
   };
 
   const fromMs = typeof b.fromMs === 'number' && Number.isFinite(b.fromMs) ? b.fromMs : NaN;
@@ -97,26 +108,78 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  try {
-    let purchases: WalletPurchasePreview[];
+  const klineSliceOnly = b.klineSliceOnly === true;
+  const userCap = parseOptionalPositiveInt(b.klineEnrichTotalCap);
+  const klineOffset =
+    typeof b.klineEnrichOffset === 'number' && Number.isFinite(b.klineEnrichOffset) && b.klineEnrichOffset >= 0
+      ? Math.floor(b.klineEnrichOffset)
+      : 0;
+  const klineBatchSize =
+    typeof b.klineEnrichBatchSize === 'number' &&
+    Number.isFinite(b.klineEnrichBatchSize) &&
+    b.klineEnrichBatchSize >= 1
+      ? Math.min(Math.floor(b.klineEnrichBatchSize), 500)
+      : DEFAULT_KLINE_ENRICH_BATCH;
 
-    if (walletList.length === 1) {
-      purchases = await buildPurchasePreviews(walletList[0], fromMs, toMs, { debugLog });
-    } else {
-      const merged: WalletPurchasePreview[] = [];
-      for (const addr of walletList) {
-        const batch = await buildPurchasePreviews(addr, fromMs, toMs, { debugLog });
-        for (const p of batch) {
-          merged.push({ ...p, sourceWallet: addr });
+  if (klineSliceOnly && walletList.length !== 1) {
+    return NextResponse.json(
+      { error: 'klineSliceOnly is only supported for a single walletAddress' },
+      { status: 400 }
+    );
+  }
+
+  if (klineSliceOnly && userCap === undefined) {
+    return NextResponse.json({ error: 'klineEnrichTotalCap is required when klineSliceOnly is true' }, { status: 400 });
+  }
+
+  try {
+    const useBatchedKlines = walletList.length === 1 && userCap !== undefined;
+
+    if (!useBatchedKlines) {
+      let purchases: WalletPurchasePreview[];
+      if (walletList.length === 1) {
+        purchases = await buildPurchasePreviews(walletList[0], fromMs, toMs, { debugLog });
+      } else {
+        const merged: WalletPurchasePreview[] = [];
+        for (const addr of walletList) {
+          const batch = await buildPurchasePreviews(addr, fromMs, toMs, { debugLog });
+          for (const p of batch) {
+            merged.push({ ...p, sourceWallet: addr });
+          }
         }
+        merged.sort(
+          (a, b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime()
+        );
+        purchases = mergeMultiWalletPurchases(merged);
       }
-      merged.sort(
-        (a, b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime()
-      );
-      purchases = mergeMultiWalletPurchases(merged);
+      const payload: {
+        purchases: typeof purchases;
+        debugLog?: string[];
+        meta?: BuildWalletPurchasePreviewsMeta;
+      } = { purchases };
+      if (debug && debugLog !== undefined) payload.debugLog = debugLog;
+      return NextResponse.json(payload);
     }
 
-    const payload: { purchases: typeof purchases; debugLog?: string[] } = { purchases };
+    const wallet = walletList[0];
+    const result = await buildWalletPurchasePreviews(wallet, fromMs, toMs, {
+      debugLog,
+      klineEnrichTotalCap: userCap,
+      klineEnrichOffset: klineOffset,
+      klineEnrichBatchSize: klineBatchSize,
+      klineSliceOnly,
+    });
+
+    const payload: {
+      purchases: WalletPurchasePreview[];
+      purchasePatches?: WalletPurchasePreview[];
+      meta?: BuildWalletPurchasePreviewsMeta;
+      debugLog?: string[];
+    } = {
+      purchases: result.purchases,
+      purchasePatches: result.purchasePatches,
+      meta: result.meta,
+    };
     if (debug && debugLog !== undefined) payload.debugLog = debugLog;
     return NextResponse.json(payload);
   } catch (e) {

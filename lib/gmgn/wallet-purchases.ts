@@ -1,23 +1,27 @@
 import {
   aggregateHighLowFromKlines,
   fetchTokenKline,
-  fetchWalletActivityPage,
   klineResolutionToMs,
   pickKlineResolution,
-  type WalletActivityPage,
   type WalletActivityRow,
 } from '@/lib/gmgn/client';
+import { collectSolanaBuysInRange, rowTimestampSec, tokenMint } from '@/lib/gmgn/collect-solana-buys-in-range';
 import { sanitizeUsdToMcapPrices } from '@/lib/gmgn/price-rounding';
 import { fetchSolUsdFromGmgn, mergeNotionalWithSolUsd, parseFirstBuyNotional } from '@/lib/gmgn/first-buy-notional';
 
 const CHAIN_SOL = 'sol';
-/** Limite de requêtes kline par import (throttle ~2 req/s côté GMGN). */
+/** Limite de requêtes kline par import sans budget explicite (plage > 24 h). */
 const MAX_KLINE_ENRICH = 100;
-/** Sur une plage courte (ex. aujourd'hui), on privilégie la justesse: enrichir tous les tokens. */
+/** Sur une plage courte (ex. aujourd'hui), on privilégie la justesse: enrichir tous les tokens (mode legacy). */
 const SHORT_RANGE_FULL_KLINE_MS = 86400000;
-const MAX_ACTIVITY_PAGES = 80;
-/** Portefeuilles très actifs : plages courtes (ex. « aujourd’hui ») nécessitent plus de pages si l’API renvoie l’historique du plus ancien au plus récent. */
-const MAX_ACTIVITY_PAGES_SHORT_RANGE = 250;
+/** Taille de lot par défaut pour l'enrichissement kline (UI + API). */
+export const DEFAULT_KLINE_ENRICH_BATCH = 100;
+
+export function serverKlineEnrichCap(): number {
+  const raw = Number(process.env.GMGN_MAX_KLINE_ENRICH_CAP);
+  if (Number.isFinite(raw) && raw >= 1) return Math.min(Math.floor(raw), 5000);
+  return 2000;
+}
 
 /** Valeurs entry / high / low sont en échelle MCap (USD GMGN × 1e6), pas en USD brut. */
 export interface WalletPurchasePreview {
@@ -28,33 +32,50 @@ export interface WalletPurchasePreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
-  /** Présent quand l’achat provient d’un fetch multi-wallets. */
+  /** Présent quand l'achat provient d'un fetch multi-wallets. */
   sourceWallet?: string;
   /** Montant notionnel estimé de l'achat (USD/SOL). */
   spentUsd?: number | null;
   spentSol?: number | null;
 }
 
-/**
- * Retourne un timestamp Unix en **secondes**.
- * GMGN renvoie souvent des millisecondes (≈ 1,7e12) ; comparer tel quel à `fromMs/1000` exclut tous les événements.
- */
-export function rowTimestampSec(row: WalletActivityRow): number {
-  const r = row as WalletActivityRow & { ts?: number; block_time?: number; time?: number };
-  const candidates = [r.timestamp, r.ts, r.block_time, r.time];
-  for (const t of candidates) {
-    if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) continue;
-    if (t >= 1_000_000_000_000) return Math.floor(t / 1000);
-    return Math.floor(t);
-  }
-  return 0;
+export interface BuildPurchasePreviewsOptions {
+  debugLog?: string[];
+  /**
+   * Budget max de tokens à enrichir avec klines (mode lot).
+   * Si absent, comportement legacy (100 hors plage 24 h, ou tous en plage courte).
+   */
+  klineEnrichTotalCap?: number;
+  /** Indice de départ du lot courant (0, 100, …). */
+  klineEnrichOffset?: number;
+  /** Taille du lot (défaut {@link DEFAULT_KLINE_ENRICH_BATCH}). */
+  klineEnrichBatchSize?: number;
+  /**
+   * Si true : ne renvoie que `purchasePatches` pour le lot [offset, offset+batch) ∩ [0, cap),
+   * sans reconstruire la liste complète (évite doublons d'appels GMGN sur les lots déjà faits).
+   */
+  klineSliceOnly?: boolean;
 }
 
-export function tokenMint(row: WalletActivityRow): string | null {
-  const a = row.token?.address ?? row.token_address;
-  if (typeof a === 'string' && a.length > 0) return a;
-  return null;
+export interface BuildWalletPurchasePreviewsMeta {
+  totalPurchases: number;
+  klineSliceOffset: number;
+  klineSliceBatchSize: number;
+  klineEnrichCap: number;
+  enrichedCountThisRequest: number;
+  /** Plafond serveur appliqué au budget utilisateur. */
+  serverMaxKlineCap: number;
 }
+
+export interface BuildWalletPurchasePreviewsResult {
+  /** Liste complète (vide si `klineSliceOnly`). */
+  purchases: WalletPurchasePreview[];
+  /** Mises à jour pour un lot suivant (si `klineSliceOnly`). */
+  purchasePatches?: WalletPurchasePreview[];
+  meta?: BuildWalletPurchasePreviewsMeta;
+}
+
+export { collectSolanaBuysInRange, rowTimestampSec, tokenMint } from '@/lib/gmgn/collect-solana-buys-in-range';
 
 function tokenDisplayName(row: WalletActivityRow): string {
   const sym = row.token?.symbol?.trim();
@@ -73,106 +94,86 @@ function parsePriceUsd(row: WalletActivityRow): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function isBuy(row: WalletActivityRow): boolean {
-  const et = row.event_type?.toLowerCase();
-  if (et === 'buy') return true;
-  const side = row.side?.toLowerCase();
-  if (side === 'buy') return true;
-  return false;
+function previewFromRowBase(
+  row: WalletActivityRow,
+  rounded: { entry: number; high: number; low: number },
+  name: string,
+  purchasedAt: string,
+  truncatedKlines: boolean,
+  spentUsd: number | null,
+  spentSol: number | null
+): WalletPurchasePreview {
+  const mint = tokenMint(row);
+  if (!mint) {
+    throw new Error('previewFromRowBase: missing mint');
+  }
+  return {
+    tokenAddress: mint,
+    name,
+    purchasedAt,
+    entryPrice: rounded.entry,
+    high: rounded.high,
+    low: rounded.low,
+    truncatedKlines,
+    spentUsd,
+    spentSol,
+  };
 }
 
 /**
- * Collect buy activities in [fromMs, toMs], dedupe by mint (earliest buy in window).
+ * Construit les previews GMGN pour un wallet (liste complète et/ou patch de lot).
+ * Utiliser `buildPurchasePreviews` pour l'API legacy qui ne renvoie que le tableau.
  */
-function normalizeActivityPage(data: WalletActivityPage): WalletActivityRow[] {
-  const d = data as unknown as { activities?: unknown; list?: unknown };
-  if (Array.isArray(d.activities)) return d.activities as WalletActivityRow[];
-  if (Array.isArray(d.list)) return d.list as WalletActivityRow[];
-  return [];
-}
-
-export async function collectSolanaBuysInRange(
-  walletAddress: string,
-  fromMs: number,
-  toMs: number
-): Promise<WalletActivityRow[]> {
-  const fromSec = Math.floor(fromMs / 1000);
-  const toSec = Math.floor(toMs / 1000);
-  const spanMs = Math.max(0, toMs - fromMs);
-  const maxPages =
-    spanMs <= 3 * 86400000 ? MAX_ACTIVITY_PAGES_SHORT_RANGE : MAX_ACTIVITY_PAGES;
-  const collected: WalletActivityRow[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < maxPages; page += 1) {
-    const data = await fetchWalletActivityPage(CHAIN_SOL, walletAddress, {
-      limit: 50,
-      cursor,
-      types: ['buy'],
-    });
-    const activities = normalizeActivityPage(data);
-    const pageTimestamps = activities
-      .map((row) => rowTimestampSec(row))
-      .filter((ts) => ts > 0);
-
-    for (const row of activities) {
-      if (!isBuy(row)) continue;
-      const ts = rowTimestampSec(row);
-      if (ts < fromSec || ts > toSec) continue;
-      collected.push(row);
-    }
-
-    if (pageTimestamps.length > 1) {
-      const firstTs = pageTimestamps[0];
-      const lastTs = pageTimestamps[pageTimestamps.length - 1];
-      const seemsDescending = firstTs >= lastTs;
-      const oldestTs = Math.min(...pageTimestamps);
-
-      // Si l'API page du plus récent vers le plus ancien, on peut stopper dès
-      // qu'on est entièrement sous la borne basse (plus rien d'utile après).
-      if (seemsDescending && oldestTs < fromSec) break;
-    }
-
-    const next = data.next;
-    if (!next || activities.length === 0) break;
-    cursor = next;
-  }
-
-  const byMint = new Map<string, WalletActivityRow>();
-  for (const row of collected) {
-    const mint = tokenMint(row);
-    if (!mint) continue;
-    const ts = rowTimestampSec(row);
-    const prev = byMint.get(mint);
-    if (!prev || rowTimestampSec(prev) > ts) {
-      byMint.set(mint, row);
-    }
-  }
-  return [...byMint.values()].sort((a, b) => rowTimestampSec(a) - rowTimestampSec(b));
-}
-
-export async function buildPurchasePreviews(
+export async function buildWalletPurchasePreviews(
   walletAddress: string,
   fromMs: number,
   toMs: number,
-  options?: { debugLog?: string[] }
-): Promise<WalletPurchasePreview[]> {
+  options?: BuildPurchasePreviewsOptions
+): Promise<BuildWalletPurchasePreviewsResult> {
   const log = (line: string) => {
     options?.debugLog?.push(line);
   };
 
   const rows = await collectSolanaBuysInRange(walletAddress, fromMs, toMs);
   log(`wallet_activity: ${rows.length} achat(s) après filtre / dédup`);
-  const nowMs = Date.now();
-  const endMs = Math.min(toMs, nowMs);
+  const endMs = Math.min(toMs, Date.now());
   const spanMs = Math.max(0, endMs - fromMs);
-  const maxKlineEnrich = spanMs <= SHORT_RANGE_FULL_KLINE_MS ? rows.length : MAX_KLINE_ENRICH;
-  const out: WalletPurchasePreview[] = [];
-  let klineCount = 0;
-  let solUsdSpot: number | null | undefined;
 
-  for (const row of rows) {
+  const sliceOnly = options?.klineSliceOnly === true;
+  const userCapRaw = options?.klineEnrichTotalCap;
+  const useBatchCap = typeof userCapRaw === 'number' && Number.isFinite(userCapRaw) && userCapRaw >= 1;
+  const rowsWithMint = rows.filter((r) => tokenMint(r) !== null);
+  const klineEnrichCap = useBatchCap
+    ? Math.min(Math.floor(userCapRaw as number), serverKlineEnrichCap(), rowsWithMint.length)
+    : 0;
+  const offset = useBatchCap ? Math.max(0, Math.floor(options?.klineEnrichOffset ?? 0)) : 0;
+  const batchSize = useBatchCap
+    ? Math.max(1, Math.floor(options?.klineEnrichBatchSize ?? DEFAULT_KLINE_ENRICH_BATCH))
+    : 0;
+  const batchEndExclusive = useBatchCap
+    ? Math.min(offset + batchSize, klineEnrichCap, rowsWithMint.length)
+    : 0;
+
+  const legacyMaxKlineEnrich =
+    spanMs <= SHORT_RANGE_FULL_KLINE_MS ? rowsWithMint.length : MAX_KLINE_ENRICH;
+
+  const purchases: WalletPurchasePreview[] = [];
+  const purchasePatches: WalletPurchasePreview[] = [];
+  let enrichedThisRequest = 0;
+
+  let solUsdSpot: number | null | undefined;
+  let legacyKlineCount = 0;
+
+  async function buildPreviewForRow(
+    row: WalletActivityRow,
+    idx: number,
+    opts: { useBatchCap: boolean }
+  ): Promise<WalletPurchasePreview> {
     const mint = tokenMint(row);
-    if (!mint) continue;
+    if (!mint) {
+      throw new Error('buildPreviewForRow: missing mint');
+    }
+
     const tsSec = rowTimestampSec(row);
     const purchaseMs = tsSec * 1000;
     const entryPrice = parsePriceUsd(row);
@@ -185,8 +186,30 @@ export async function buildPurchasePreviews(
     let low = entryPrice;
     let truncatedKlines = false;
 
-    if (klineCount < maxKlineEnrich && purchaseMs < endMs) {
-      klineCount += 1;
+    let shouldFetchKline = false;
+    if (opts.useBatchCap) {
+      if (idx >= klineEnrichCap && purchaseMs < endMs) {
+        truncatedKlines = true;
+        log(`── ${name} | ${mint.slice(0, 8)}… | hors budget kline (cap=${klineEnrichCap})`);
+      } else if (idx < klineEnrichCap && purchaseMs < endMs) {
+        if (idx >= offset && idx < batchEndExclusive) {
+          shouldFetchKline = true;
+        } else {
+          truncatedKlines = true;
+        }
+      }
+    } else {
+      if (legacyKlineCount < legacyMaxKlineEnrich && purchaseMs < endMs) {
+        legacyKlineCount += 1;
+        shouldFetchKline = true;
+      } else if (legacyKlineCount >= legacyMaxKlineEnrich && purchaseMs < endMs) {
+        truncatedKlines = true;
+        log(`── ${name} | ${mint.slice(0, 8)}… | kline ignoré (limite ${legacyMaxKlineEnrich} tokens)`);
+      }
+    }
+
+    if (shouldFetchKline) {
+      enrichedThisRequest += 1;
       const resolution = pickKlineResolution(purchaseMs, endMs);
       const klineDebug =
         options?.debugLog !== undefined
@@ -210,12 +233,7 @@ export async function buildPurchasePreviews(
       });
       high = agg.high;
       low = agg.low;
-      log(
-        `   → agg_usd high=${String(agg.high)} low=${String(agg.low)} (candles=${candles.length})`
-      );
-    } else if (klineCount >= maxKlineEnrich && purchaseMs < endMs) {
-      truncatedKlines = true;
-      log(`── ${name} | ${mint.slice(0, 8)}… | kline ignoré (limite ${maxKlineEnrich} tokens)`);
+      log(`   → agg_usd high=${String(agg.high)} low=${String(agg.low)} (candles=${candles.length})`);
     }
 
     const rawEntry = entryPrice > 0 ? entryPrice : 0;
@@ -238,18 +256,59 @@ export async function buildPurchasePreviews(
       spentSol = mergedNotional.sol;
     }
 
-    out.push({
-      tokenAddress: mint,
-      name,
-      purchasedAt,
-      entryPrice: rounded.entry,
-      high: rounded.high,
-      low: rounded.low,
-      truncatedKlines,
-      spentUsd,
-      spentSol,
-    });
+    return previewFromRowBase(row, rounded, name, purchasedAt, truncatedKlines, spentUsd, spentSol);
   }
 
-  return out;
+  if (useBatchCap && sliceOnly) {
+    for (let idx = offset; idx < batchEndExclusive; idx += 1) {
+      const row = rowsWithMint[idx];
+      const preview = await buildPreviewForRow(row, idx, { useBatchCap: true });
+      purchasePatches.push(preview);
+    }
+    return {
+      purchases: [],
+      purchasePatches,
+      meta: {
+        totalPurchases: rowsWithMint.length,
+        klineSliceOffset: offset,
+        klineSliceBatchSize: batchSize,
+        klineEnrichCap,
+        enrichedCountThisRequest: enrichedThisRequest,
+        serverMaxKlineCap: serverKlineEnrichCap(),
+      },
+    };
+  }
+
+  let outIdx = 0;
+  for (const row of rows) {
+    const mint = tokenMint(row);
+    if (!mint) continue;
+    const idx = outIdx;
+    outIdx += 1;
+    const preview = await buildPreviewForRow(row, idx, { useBatchCap });
+    purchases.push(preview);
+  }
+
+  const meta: BuildWalletPurchasePreviewsMeta | undefined = useBatchCap
+    ? {
+        totalPurchases: purchases.length,
+        klineSliceOffset: offset,
+        klineSliceBatchSize: batchSize,
+        klineEnrichCap,
+        enrichedCountThisRequest: enrichedThisRequest,
+        serverMaxKlineCap: serverKlineEnrichCap(),
+      }
+    : undefined;
+
+  return { purchases, meta };
+}
+
+export async function buildPurchasePreviews(
+  walletAddress: string,
+  fromMs: number,
+  toMs: number,
+  options?: BuildPurchasePreviewsOptions
+): Promise<WalletPurchasePreview[]> {
+  const r = await buildWalletPurchasePreviews(walletAddress, fromMs, toMs, options);
+  return r.purchases;
 }
