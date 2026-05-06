@@ -20,10 +20,7 @@ model User {
   ruggers            Rugger[]
   fundingChainCache  FundingChainCache[]
   watchlistWallets   WatchlistWallet[]
-  notifications      Notification[]
   walletMetadata     WalletMetadata[]
-  pnlWallets         PnlWallet[]
-  pnlBackgrounds     PnlBackground[]
   telegramChannels   TelegramChannel[]
   telegramPnlFavorites TelegramPnlFavorite[]
   telegramMtprotoSession        TelegramMtprotoSession?
@@ -147,33 +144,6 @@ model WalletMetadata {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("wallet_metadata")
-}
-
-model PnlWallet {
-  id            String   @id @default(dbgenerated("gen_random_uuid()"))
-  userId        String   @map("user_id")
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  walletAddress String   @map("wallet_address")
-  label         String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @default(now()) @map("updated_at")
-
-  @@unique([userId, walletAddress])
-  @@index([userId])
-  @@map("pnl_wallets")
-}
-
-model PnlBackground {
-  id         String   @id @default(dbgenerated("gen_random_uuid()"))
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name       String?
-  imageData  String   @map("image_data")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @map("updated_at")
-
-  @@index([userId])
-  @@map("pnl_backgrounds")
 }
 
 model Session {
@@ -421,27 +391,6 @@ model WatchlistWallet {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("watchlist_wallets")
-}
-
-model Notification {
-  id             String    @id @default(dbgenerated("gen_random_uuid()"))
-  userId         String    @map("user_id")
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           String    @default("watchlist_buy")
-  walletAddress  String    @map("wallet_address")
-  walletLabel    String?   @map("wallet_label")
-  tokenAddress   String?   @map("token_address")
-  tokenSymbol    String?   @map("token_symbol")
-  amountSol      Decimal?  @map("amount_sol") @db.Decimal(18, 9)
-  txSignature    String    @map("tx_signature")
-  occurredAt     DateTime  @map("occurred_at")
-  readAt         DateTime? @map("read_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-
-  @@unique([userId, walletAddress, txSignature])
-  @@index([userId, readAt])
-  @@index([userId, createdAt])
-  @@map("notifications")
 }
 
 model HeliusWebhookSync {

@@ -174,91 +174,94 @@ export default function RuggerDetailPage() {
           <ArrowLeft className="size-4" />
           Retour aux ruggers
         </Link>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between overflow-hidden">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
-                {rugger.name ?? (rugger.walletAddress ? `${rugger.walletAddress.slice(0, 10)}…` : `Rugger ${rugger.id.slice(0, 8)}`)}
-              </h1>
-              <div className="flex items-center gap-1.5">
-                <StatusBadge statusId={rugger.statusId} />
-                <span
-                  className={cn(
-                    'shrink-0 rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide',
-                    rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                    rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                    rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
-                    rugger.walletType === 'buyer' &&
-                      'bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-200'
-                  )}
-                >
-                  {walletTypeLabel[rugger.walletType]}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {STATUS_ORDER.indexOf(rugger.statusId) > 0 && (
-                  <Button type="button" variant="outline" size="sm" onClick={handleRetrogradeStatus} className="gap-1">
-                    <ChevronLeft className="size-4" />
-                    Revenir à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) - 1]]}
-                  </Button>
-                )}
-                {STATUS_ORDER.indexOf(rugger.statusId) < STATUS_ORDER.length - 1 && (
-                  <Button type="button" variant="outline" size="sm" onClick={handleAdvanceStatus} className="gap-1">
-                    Passer à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) + 1]]}
-                    <ChevronRight className="size-4" />
-                  </Button>
-                )}
-              </div>
-            </div>
-            <div
-              className={cn(
-                'min-w-0 overflow-x-hidden wrap-break-word',
-                !isHeaderExpanded && 'max-h-24 overflow-y-hidden sm:max-h-none sm:overflow-visible',
-                isHeaderExpanded && 'max-h-[50vh] overflow-y-auto'
-              )}
-            >
-              {rugger.description ? (
-                safeUserHttpUrl(rugger.description) ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const text = rugger.description;
-                      if (text) void openSafeUserHttpUrlInNewTab(text);
-                    }}
-                    className="block w-full break-all text-left text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
+                  {rugger.name ?? (rugger.walletAddress ? `${rugger.walletAddress.slice(0, 10)}…` : `Rugger ${rugger.id.slice(0, 8)}`)}
+                </h1>
+                <div className="flex items-center gap-1.5">
+                  <StatusBadge statusId={rugger.statusId} />
+                  <span
+                    className={cn(
+                      'shrink-0 rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide',
+                      rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                      rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+                      rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
+                      rugger.walletType === 'buyer' &&
+                        'bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-200'
+                    )}
                   >
-                    {rugger.description}
-                  </button>
-                ) : (
-                  <p className="text-sm text-muted-foreground wrap-break-word">{rugger.description}</p>
-                )
-              ) : null}
-              {(rugger.volumeMin != null || rugger.volumeMax != null) && (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
-                </p>
-              )}
-              {rugger.notes?.trim() ? (
-                <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">{rugger.notes}</p>
-              ) : null}
-              {rugger.walletAddress ? (
-                <p className="mt-2 break-all font-mono text-sm text-muted-foreground">{rugger.walletAddress}</p>
-              ) : (
-                <p className="mt-2 text-sm text-muted-foreground">Aucun wallet principal défini</p>
-              )}
+                    {walletTypeLabel[rugger.walletType]}
+                  </span>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+                  {STATUS_ORDER.indexOf(rugger.statusId) > 0 && (
+                    <Button type="button" variant="outline" size="sm" onClick={handleRetrogradeStatus} className="gap-1">
+                      <ChevronLeft className="size-4" />
+                      Revenir à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) - 1]]}
+                    </Button>
+                  )}
+                  {STATUS_ORDER.indexOf(rugger.statusId) < STATUS_ORDER.length - 1 && (
+                    <Button type="button" variant="outline" size="sm" onClick={handleAdvanceStatus} className="gap-1">
+                      Passer à {STATUS_LABELS[STATUS_ORDER[STATUS_ORDER.indexOf(rugger.statusId) + 1]]}
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
-            <Button type="button" variant="ghost" size="sm" className="mt-1 sm:hidden" onClick={() => setIsHeaderExpanded((v) => !v)}>
-              {isHeaderExpanded ? 'Voir moins' : 'Voir plus'}
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+                <Pencil className="size-4 mr-1" />Modifier
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleDeleteRugger}>
+                <Trash2 className="size-4 mr-1" />Supprimer
+              </Button>
+            </div>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2 sm:flex-nowrap">
-            <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-              <Pencil className="size-4 mr-1" />Modifier
-            </Button>
-            <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleDeleteRugger}>
-              <Trash2 className="size-4 mr-1" />Supprimer
-            </Button>
+
+          <div
+            className={cn(
+              'min-w-0 space-y-2 wrap-break-word overflow-x-hidden',
+              !isHeaderExpanded && 'max-sm:max-h-28 max-sm:overflow-y-hidden',
+              isHeaderExpanded && 'max-sm:max-h-[50vh] max-sm:overflow-y-auto'
+            )}
+          >
+            {rugger.description ? (
+              safeUserHttpUrl(rugger.description) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = rugger.description;
+                    if (text) void openSafeUserHttpUrlInNewTab(text);
+                  }}
+                  className="block w-full break-all text-left text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+                >
+                  {rugger.description}
+                </button>
+              ) : (
+                <p className="text-sm text-muted-foreground wrap-break-word">{rugger.description}</p>
+              )
+            ) : null}
+            {(rugger.volumeMin != null || rugger.volumeMax != null) && (
+              <p className="text-sm text-muted-foreground">
+                Intervalle volume : {rugger.volumeMin ?? '—'} – {rugger.volumeMax ?? '—'}
+              </p>
+            )}
+            {rugger.notes?.trim() ? (
+              <p className="whitespace-pre-wrap wrap-break-word text-sm text-muted-foreground">{rugger.notes}</p>
+            ) : null}
+            {rugger.walletAddress ? (
+              <p className="break-all font-mono text-sm text-muted-foreground">{rugger.walletAddress}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Aucun wallet principal défini</p>
+            )}
           </div>
+          <Button type="button" variant="ghost" size="sm" className="self-start sm:hidden" onClick={() => setIsHeaderExpanded((v) => !v)}>
+            {isHeaderExpanded ? 'Voir moins' : 'Voir plus'}
+          </Button>
         </div>
       </header>
 
