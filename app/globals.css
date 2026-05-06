@@ -123,3 +123,27 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Barre indéterminée — classement Telegram + filtre GMGN Mayhem */
+@keyframes telegram-mayhem-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@layer utilities {
+  .animate-telegram-mayhem-bar {
+    animation: telegram-mayhem-indeterminate 1.2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-telegram-mayhem-bar {
+      animation: none;
+      transform: translateX(0);
+      opacity: 0.85;
+    }
+  }
+}

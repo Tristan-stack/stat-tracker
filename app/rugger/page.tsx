@@ -211,11 +211,19 @@ export default function RuggerPage() {
 
   return (
     <div className="min-w-0 overflow-x-hidden space-y-10 p-6 sm:p-8">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Ruggers</h1>
-        <p className="text-muted-foreground">
-          Gère tes wallets (ruggers). Clique sur un rugger pour voir ses tokens et sa rentabilité.
-        </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Ruggers</h1>
+          <p className="text-muted-foreground">
+            Gère tes wallets (ruggers). Clique sur un rugger pour voir ses tokens et sa rentabilité.
+          </p>
+        </div>
+        <Link
+          href="/rugger/telegram"
+          className="inline-flex shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+        >
+          Leaderboard Telegram PnL
+        </Link>
       </header>
 
       <section>

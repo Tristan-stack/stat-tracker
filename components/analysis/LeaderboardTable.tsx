@@ -8,6 +8,11 @@ import type { WalletSource, CrossRuggerMatch } from '@/types/analysis';
 import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Search, X } from 'lucide-react';
 import CrossRuggerBadge from '@/components/analysis/CrossRuggerBadge';
 import WalletActions from '@/components/analysis/WalletActions';
+import {
+  canOpenSolanaAddressOrMint,
+  openGmgnSolAddressInNewTab,
+  openSolscanAccountInNewTab,
+} from '@/lib/open-trusted-solana-external';
 
 interface LeaderboardWallet {
   id: string;
@@ -437,24 +442,24 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                                     ? <Check className="size-3.5 text-green-600 dark:text-green-400" />
                                     : <Copy className="size-3.5 text-muted-foreground" />}
                                 </button>
-                                <a
-                                  href={`https://solscan.io/account/${w.walletAddress}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="rounded-md border border-border/80 bg-muted/40 p-1.5 text-primary hover:bg-muted"
+                                <button
+                                  type="button"
+                                  onClick={() => void openSolscanAccountInNewTab(w.walletAddress)}
+                                  className="rounded-md border border-border/80 bg-muted/40 p-1.5 text-primary hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
                                   title="Solscan"
+                                  disabled={!canOpenSolanaAddressOrMint(w.walletAddress)}
                                 >
                                   <ExternalLink className="size-3.5" />
-                                </a>
-                                <a
-                                  href={`https://gmgn.ai/sol/address/${w.walletAddress}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="rounded-md border border-border/80 bg-muted/40 px-2 py-1.5 text-xs font-medium text-primary hover:bg-muted"
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void openGmgnSolAddressInNewTab(w.walletAddress)}
+                                  className="rounded-md border border-border/80 bg-muted/40 px-2 py-1.5 text-xs font-medium text-primary hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
                                   title="GMGN"
+                                  disabled={!canOpenSolanaAddressOrMint(w.walletAddress)}
                                 >
                                   GMGN
-                                </a>
+                                </button>
                                 <WalletActions walletAddress={w.walletAddress} sourceRuggerId={ruggerId} />
                                 {crossMatch && (
                                   <CrossRuggerBadge ruggerNames={crossMatch.ruggerNames} ruggerIds={crossMatch.ruggerIds} />

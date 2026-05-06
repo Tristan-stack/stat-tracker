@@ -26,6 +26,8 @@ export interface GmgnPreviewRow {
   entryStr: string;
   highStr: string;
   lowStr: string;
+  /** Minutes entrée → creux (API token-tracking). */
+  entryToLowMinutes?: number | null;
   sourceWallet?: string;
 }
 
@@ -37,6 +39,7 @@ interface GmgnPurchasePreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
+  entryToLowMinutes?: number | null;
   sourceWallet?: string;
 }
 
@@ -86,6 +89,7 @@ function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow
     entryStr: formatGmgnDecimalString(p.entryPrice),
     highStr: formatGmgnDecimalString(p.high),
     lowStr: formatGmgnDecimalString(p.low),
+    entryToLowMinutes: p.entryToLowMinutes ?? null,
     sourceWallet: p.sourceWallet,
   }));
 }

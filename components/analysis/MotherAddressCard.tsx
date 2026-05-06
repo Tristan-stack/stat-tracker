@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AnalysisMotherAddress } from '@/types/analysis';
 import { Check, ExternalLink, X } from 'lucide-react';
+import { canOpenSolscanAccount, openSolscanAccountInNewTab } from '@/lib/open-trusted-solana-external';
 
 interface MotherAddressCardProps {
   ruggerId: string;
@@ -58,9 +59,15 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="font-mono text-xs truncate">{truncateAddress(m.address)}</span>
-                <a href={`https://solscan.io/account/${m.address}`} target="_blank" rel="noopener noreferrer" className="shrink-0 text-primary hover:text-primary/80">
+                <button
+                  type="button"
+                  onClick={() => void openSolscanAccountInNewTab(m.address)}
+                  className="shrink-0 text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                  aria-label="Ouvrir sur Solscan"
+                  disabled={!canOpenSolscanAccount(m.address)}
+                >
                   <ExternalLink className="size-3.5" />
-                </a>
+                </button>
               </div>
               {m.validated && (
                 <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">

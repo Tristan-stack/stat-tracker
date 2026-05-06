@@ -23,7 +23,7 @@ describe('requireUser', () => {
     const result = await requireUser(req);
     expect('response' in result).toBe(true);
     if ('response' in result) {
-      expect(result.response.status).toBe(401);
+      expect(result.response?.status).toBe(401);
     }
   });
 

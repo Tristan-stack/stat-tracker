@@ -10,6 +10,13 @@ import { getMaxGainPercent, getMaxLossPercent } from '@/lib/token-calculations';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import type { Token } from '@/types/token';
 import { StatsSummary } from '@/components/StatsSummary';
+import {
+  canOpenSolanaAddressOrMint,
+  openGmgnSolAddressInNewTab,
+  openGmgnSolTokenInNewTab,
+  openSolscanAccountInNewTab,
+  openSolscanTokenInNewTab,
+} from '@/lib/open-trusted-solana-external';
 
 /** Entrée = plafond +X %. High = TP sécurisé −X % seul. Low = creux d’origine seul. */
 const SECURE_MARGIN_PCT = 2;
@@ -215,12 +222,24 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
               : <Copy className="size-3.5 text-muted-foreground" />}
           </button>
           <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', sourceBadgeStyle[wallet.source])}>{wallet.source}</span>
-          <a href={`https://solscan.io/account/${wallet.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
+          <button
+            type="button"
+            onClick={() => void openSolscanAccountInNewTab(wallet.walletAddress)}
+            className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+            title="Solscan"
+            disabled={!canOpenSolanaAddressOrMint(wallet.walletAddress)}
+          >
             <ExternalLink className="size-4" />
-          </a>
-          <a href={`https://gmgn.ai/sol/address/${wallet.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:text-primary/80 font-medium" title="GMGN">
+          </button>
+          <button
+            type="button"
+            onClick={() => void openGmgnSolAddressInNewTab(wallet.walletAddress)}
+            className="text-xs text-primary hover:text-primary/80 font-medium disabled:pointer-events-none disabled:opacity-40"
+            title="GMGN"
+            disabled={!canOpenSolanaAddressOrMint(wallet.walletAddress)}
+          >
             GMGN
-          </a>
+          </button>
           <WalletActions walletAddress={wallet.walletAddress} />
         </div>
 
@@ -255,9 +274,17 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
             {wallet.fundingChain.map((addr, i) => (
               <span key={`${addr}-${i}`} className="flex items-center gap-1">
                 {i > 0 && <span className="text-muted-foreground">→</span>}
-                <a href={`https://solscan.io/account/${addr}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-primary hover:underline">
-                  {truncateAddress(addr)}
-                </a>
+                {canOpenSolanaAddressOrMint(addr) ? (
+                  <button
+                    type="button"
+                    onClick={() => void openSolscanAccountInNewTab(addr)}
+                    className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                  >
+                    {truncateAddress(addr)}
+                  </button>
+                ) : (
+                  <span className="font-mono text-xs text-muted-foreground">{truncateAddress(addr)}</span>
+                )}
               </span>
             ))}
           </div>
@@ -316,12 +343,24 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1">
-                          <a href={`https://solscan.io/token/${p.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
+                          <button
+                            type="button"
+                            onClick={() => void openSolscanTokenInNewTab(p.tokenAddress)}
+                            className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                            title="Solscan"
+                            disabled={!canOpenSolanaAddressOrMint(p.tokenAddress)}
+                          >
                             <ExternalLink className="size-3.5" />
-                          </a>
-                          <a href={`https://gmgn.ai/sol/token/${p.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:text-primary/80 font-medium" title="GMGN">
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void openGmgnSolTokenInNewTab(p.tokenAddress)}
+                            className="text-[10px] font-medium text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                            title="GMGN"
+                            disabled={!canOpenSolanaAddressOrMint(p.tokenAddress)}
+                          >
                             GMGN
-                          </a>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -425,12 +464,24 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1">
-                            <a href={`https://solscan.io/token/${t.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" title="Solscan">
+                            <button
+                              type="button"
+                              onClick={() => void openSolscanTokenInNewTab(t.tokenAddress)}
+                              className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                              title="Solscan"
+                              disabled={!canOpenSolanaAddressOrMint(t.tokenAddress)}
+                            >
                               <ExternalLink className="size-3.5" />
-                            </a>
-                            <a href={`https://gmgn.ai/sol/token/${t.tokenAddress}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:text-primary/80 font-medium" title="GMGN">
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openGmgnSolTokenInNewTab(t.tokenAddress)}
+                              className="text-[10px] font-medium text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                              title="GMGN"
+                              disabled={!canOpenSolanaAddressOrMint(t.tokenAddress)}
+                            >
                               GMGN
-                            </a>
+                            </button>
                           </div>
                         </td>
                       </tr>

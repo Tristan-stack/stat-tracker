@@ -28,16 +28,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { BarChart3, Eye, Layers, LogOut, User, Wallet, TrendingUp } from 'lucide-react';
+import { BarChart3, Eye, Layers, LogOut, User, Wallet } from 'lucide-react';
 import { useSession, signOut } from '@/lib/auth-client';
-import NotificationBell from '@/components/notifications/NotificationBell';
 
 const links = [
   { href: '/', label: 'Stat tracking', icon: BarChart3 },
   { href: '/rugger', label: 'Ruggers', icon: Wallet },
   { href: '/watchlist', label: 'Watchlist', icon: Eye },
   { href: '/wallet-comparison', label: 'Comparaison wallets', icon: Layers },
-  { href: '/pnl', label: 'PnL', icon: TrendingUp },
 ];
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
@@ -182,9 +180,6 @@ export default function SidebarLayout({
       <SidebarInset className="overflow-x-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
-          <div className="ml-auto flex items-center gap-1">
-            <NotificationBell />
-          </div>
         </header>
         <div className="min-w-0 flex-1 overflow-auto">{children}</div>
       </SidebarInset>

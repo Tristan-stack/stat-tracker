@@ -2,6 +2,7 @@ import {
   aggregateHighLowFromKlines,
   fetchTokenKline,
   gmgnGet,
+  minutesFromPurchaseToLowEstablished,
   parseCandleOpenMs,
   pickKlineResolution,
   type KlineCandle,
@@ -18,6 +19,8 @@ export interface TokenTrackingPreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
+  /** Minutes entre l’achat et la première bougie où le creux agrégé est atteint. */
+  entryToLowMinutes?: number | null;
 }
 
 function parseUsd(v: unknown): number {
@@ -194,14 +197,27 @@ export async function buildTokenTrackingPreviews(
       }
     }
     const rounded = sanitizeUsdToMcapPrices(entry, highUsd, agg.low);
+    const purchasedAtIso = new Date(meta.createdAtMs ?? firstOpenMs ?? fromMs).toISOString();
+    const purchasedMs = new Date(purchasedAtIso).getTime();
+    const entryToLowMinutes =
+      candles.length > 0 && !Number.isNaN(purchasedMs)
+        ? minutesFromPurchaseToLowEstablished(
+            candles,
+            rounded.entry,
+            rounded.low,
+            purchasedMs,
+            resolution
+          )
+        : null;
     out.push({
       tokenAddress: mint,
       name: meta.name,
-      purchasedAt: new Date(meta.createdAtMs ?? firstOpenMs ?? fromMs).toISOString(),
+      purchasedAt: purchasedAtIso,
       entryPrice: rounded.entry,
       high: rounded.high,
       low: rounded.low,
       truncatedKlines: candles.length === 0,
+      entryToLowMinutes,
     });
   }
 

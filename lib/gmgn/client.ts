@@ -309,10 +309,9 @@ export function aggregateHighLowFromKlines(
     return { high: p, low: p };
   }
 
+  /** Toujours la résolution demandée à l’API ; l’inférence sur 2 bougies est souvent fausse (trous GMGN → durée entrée→creux sous-estimée). */
   const resolutionMs =
-    opts !== undefined
-      ? inferResolutionMsFromCandles(candles) ?? klineResolutionToMs(opts.resolutionHint)
-      : null;
+    opts !== undefined ? klineResolutionToMs(opts.resolutionHint) : inferResolutionMsFromCandles(candles);
   const purchaseMsForLow = opts?.purchaseMs;
   const filterLowByPurchase =
     purchaseMsForLow !== undefined && resolutionMs !== null && resolutionMs > 0;
@@ -356,6 +355,53 @@ export function aggregateHighLowFromKlines(
     low = Math.min(low, fallbackPrice);
   }
   return { high, low };
+}
+
+/**
+ * Durée entre l’instant d’entrée (`entryMs`, ex. achat) et la première fin de bougie
+ * où le minimum cumulé (prix d’entrée + lows des bougies après entrée) atteint `targetLow`
+ * (typiquement le plus bas MCap agrégé affiché). Unités : minutes ; `null` si indéterminable.
+ */
+export function minutesFromPurchaseToLowEstablished(
+  candles: KlineCandle[],
+  entryPrice: number,
+  targetLow: number,
+  entryMs: number,
+  resolutionHint: string
+): number | null {
+  if (candles.length === 0) return null;
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(targetLow) || targetLow <= 0) return null;
+  if (!Number.isFinite(entryMs) || entryMs < 0) return null;
+
+  const resolutionMs = klineResolutionToMs(resolutionHint);
+  if (!Number.isFinite(resolutionMs) || resolutionMs <= 0) return null;
+
+  const eps = Math.max(1e-12, Math.abs(targetLow) * 1e-9);
+
+  if (entryPrice <= targetLow + eps) return 0;
+
+  const sorted = [...candles]
+    .map((c) => ({ c, openMs: parseCandleOpenMs(c) }))
+    .filter((x): x is { c: KlineCandle; openMs: number } => x.openMs !== null)
+    .sort((a, b) => a.openMs - b.openMs);
+
+  let runningMin = entryPrice;
+
+  for (const { c, openMs } of sorted) {
+    const ext = candlePriceExtent(c as KlineCandle & Record<string, unknown>);
+    if (!ext) continue;
+    const candleEndMs = openMs + resolutionMs;
+    if (candleEndMs <= entryMs) continue;
+
+    runningMin = Math.min(runningMin, ext.low);
+    if (runningMin <= targetLow + eps) {
+      const minutes = (candleEndMs - entryMs) / 60_000;
+      if (!Number.isFinite(minutes) || minutes < 0) return null;
+      return minutes;
+    }
+  }
+
+  return null;
 }
 
 export function pickKlineResolution(fromMs: number, toMs: number): string {

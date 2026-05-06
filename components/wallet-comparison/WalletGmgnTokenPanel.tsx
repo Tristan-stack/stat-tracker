@@ -9,6 +9,13 @@ import type { Token } from '@/types/token';
 import { StatsSummary } from '@/components/StatsSummary';
 import WalletActions from '@/components/analysis/WalletActions';
 import { Check, Copy, ExternalLink, LineChart, Loader2, X } from 'lucide-react';
+import {
+  canOpenSolanaAddressOrMint,
+  openGmgnSolAddressInNewTab,
+  openGmgnSolTokenInNewTab,
+  openSolscanAccountInNewTab,
+  openSolscanTokenInNewTab,
+} from '@/lib/open-trusted-solana-external';
 
 const SECURE_MARGIN_PCT = 2;
 
@@ -146,23 +153,23 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                 <Copy className="size-3.5 shrink-0 text-muted-foreground" />
               )}
             </button>
-            <a
-              href={`https://solscan.io/account/${walletAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:text-primary/80"
+            <button
+              type="button"
+              onClick={() => void openSolscanAccountInNewTab(walletAddress)}
+              className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
               title="Solscan"
+              disabled={!canOpenSolanaAddressOrMint(walletAddress)}
             >
               <ExternalLink className="size-4" />
-            </a>
-            <a
-              href={`https://gmgn.ai/sol/address/${walletAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-medium text-primary hover:text-primary/80"
+            </button>
+            <button
+              type="button"
+              onClick={() => void openGmgnSolAddressInNewTab(walletAddress)}
+              className="text-xs font-medium text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+              disabled={!canOpenSolanaAddressOrMint(walletAddress)}
             >
               GMGN
-            </a>
+            </button>
             <div className="relative shrink-0">
               <WalletActions walletAddress={walletAddress} />
             </div>
@@ -305,22 +312,22 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-1">
-                              <a
-                                href={`https://solscan.io/token/${t.tokenAddress}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-primary hover:text-primary/80"
+                              <button
+                                type="button"
+                                onClick={() => void openSolscanTokenInNewTab(t.tokenAddress)}
+                                className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                                disabled={!canOpenSolanaAddressOrMint(t.tokenAddress)}
                               >
                                 <ExternalLink className="size-3.5" />
-                              </a>
-                              <a
-                                href={`https://gmgn.ai/sol/token/${t.tokenAddress}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] font-medium text-primary hover:text-primary/80"
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void openGmgnSolTokenInNewTab(t.tokenAddress)}
+                                className="text-[10px] font-medium text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                                disabled={!canOpenSolanaAddressOrMint(t.tokenAddress)}
                               >
                                 GMGN
-                              </a>
+                              </button>
                             </div>
                           </td>
                         </tr>

@@ -15,6 +15,11 @@ export interface Token {
   statusId?: StatusId;
   /** Date d’achat (ISO) — optionnel ; tri/filtre via coalesce avec createdAt côté API. */
   purchasedAt?: string;
+  /**
+   * Minutes entre l’instant d’achat et la première fin de bougie où le creux (low) agrégé est atteint,
+   * d’après les klines GMGN au dernier import / refresh. Absent si non calculable.
+   */
+  entryToLowMinutes?: number | null;
   /** Mint Solana — optionnel (import GMGN). */
   tokenAddress?: string;
   /** Exclu des statistiques et simulations (ligne toujours visible dans le tableau). */

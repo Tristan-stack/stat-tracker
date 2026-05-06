@@ -13,6 +13,7 @@ interface DbToken {
   entry_price: number;
   high: number;
   low: number;
+  entry_to_low_minutes: number | null;
   target_exit_percent: number;
   status_id: StatusId;
   created_at: string;
@@ -104,7 +105,7 @@ export async function GET(
   const total = Number(countRows[0]?.count ?? '0');
 
   const selectCols =
-    'id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, created_at, purchased_at, token_address, token_name';
+    'id, rugger_id, name, entry_price, high, low, entry_to_low_minutes, target_exit_percent, status_id, created_at, purchased_at, token_address, token_name';
   const orderBy = `order by coalesce(purchased_at, created_at) desc`;
   const rows = fetchAll
     ? await query<DbToken>(
@@ -140,6 +141,9 @@ export async function GET(
     if (row.purchased_at) t.purchasedAt = new Date(row.purchased_at).toISOString();
     if (row.token_address) t.tokenAddress = row.token_address;
     if (row.token_name) t.tokenName = row.token_name;
+    if (row.entry_to_low_minutes != null && Number.isFinite(row.entry_to_low_minutes)) {
+      t.entryToLowMinutes = row.entry_to_low_minutes;
+    }
     return t;
   });
 
@@ -202,9 +206,9 @@ export async function POST(
   const rowsToInsert: (string | number | null)[] = [];
   const placeholders: string[] = [];
   cleaned.forEach((token, index) => {
-    const base = index * 11;
+    const base = index * 12;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12})`
     );
     const purchasedIso = parseOptionalIsoToParam(token.purchasedAt);
     const tokenAddr =
@@ -214,6 +218,10 @@ export async function POST(
     const tokenLabel =
       typeof token.tokenName === 'string' && token.tokenName.trim() !== ''
         ? token.tokenName.trim()
+        : null;
+    const entryToLowMinutes =
+      typeof token.entryToLowMinutes === 'number' && Number.isFinite(token.entryToLowMinutes)
+        ? token.entryToLowMinutes
         : null;
     rowsToInsert.push(
       crypto.randomUUID(),
@@ -226,14 +234,15 @@ export async function POST(
       ruggerStatusId,
       purchasedIso,
       tokenAddr,
-      tokenLabel
+      tokenLabel,
+      entryToLowMinutes
     );
   });
 
   await query<DbToken>(
     `
       insert into rugger_tokens
-        (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, purchased_at, token_address, token_name)
+        (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, purchased_at, token_address, token_name, entry_to_low_minutes)
       values ${placeholders.join(', ')}
     `,
     rowsToInsert

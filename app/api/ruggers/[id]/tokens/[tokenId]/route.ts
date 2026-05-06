@@ -3,31 +3,34 @@ import { query } from '@/lib/db';
 import { requireUser } from '@/lib/auth-session';
 import { ruggerExistsForUser } from '@/lib/rugger-access';
 
-export async function PATCH(
-  req: NextRequest,
-  context: { params: Promise<{ id: string; tokenId: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+type RuggerTokenPatchBody = {
+  targetExitPercent?: number;
+  entryPrice?: number;
+  high?: number;
+  low?: number;
+  purchasedAt?: string | null;
+  tokenAddress?: string | null;
+  name?: string;
+  tokenName?: string | null;
+  entryToLowMinutes?: number | null;
+};
 
-  const { id: ruggerId, tokenId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
+function isMissingEntryToLowColumnError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!/entry_to_low/i.test(msg)) return false;
+  const code =
+    err !== null && typeof err === 'object' && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : '';
+  if (code === '42703') return true;
+  return /does not exist|undefined_column|42703/i.test(msg);
+}
 
-  const body = (await req.json()) as {
-    targetExitPercent?: number;
-    entryPrice?: number;
-    high?: number;
-    low?: number;
-    purchasedAt?: string | null;
-    tokenAddress?: string | null;
-    /** Mint / identifiant canonique. */
-    name?: string;
-    tokenName?: string | null;
-  };
-
+/** Construit SET … pour `rugger_tokens` ; `omitEntryToLow` si la colonne n’existe pas encore en base. */
+function buildRuggerTokenPatchParts(
+  body: RuggerTokenPatchBody,
+  opts?: { omitEntryToLow?: boolean }
+): NextResponse | { clauses: string[]; values: (number | string | null)[]; nextParam: number } {
   const setClauses: string[] = [];
   const values: (number | string | null)[] = [];
   let paramIndex = 1;
@@ -112,21 +115,80 @@ export async function PATCH(
     }
   }
 
+  if (!opts?.omitEntryToLow && body.entryToLowMinutes !== undefined) {
+    if (body.entryToLowMinutes === null) {
+      setClauses.push(`entry_to_low_minutes = $${paramIndex++}`);
+      values.push(null);
+    } else if (typeof body.entryToLowMinutes === 'number' && Number.isFinite(body.entryToLowMinutes)) {
+      setClauses.push(`entry_to_low_minutes = $${paramIndex++}`);
+      values.push(body.entryToLowMinutes);
+    } else {
+      return NextResponse.json({ error: 'entryToLowMinutes must be a finite number or null' }, { status: 400 });
+    }
+  }
+
   if (setClauses.length === 0) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
   }
 
-  values.push(tokenId, ruggerId);
-  const rows = await query<{ id: string }>(
-    `update rugger_tokens set ${setClauses.join(', ')} where id = $${paramIndex++} and rugger_id = $${paramIndex} returning id`,
-    values
-  );
+  return { clauses: setClauses, values, nextParam: paramIndex };
+}
 
-  if (rows.length === 0) {
-    return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ id: string; tokenId: string }> }
+) {
+  const auth = await requireUser(req);
+  if ('response' in auth) return auth.response;
+  const { userId } = auth;
+
+  const { id: ruggerId, tokenId } = await context.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) {
+    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ ok: true });
+  const body = (await req.json()) as RuggerTokenPatchBody;
+
+  const runUpdate = async (omitEntryToLow: boolean) => {
+    const built = buildRuggerTokenPatchParts(body, { omitEntryToLow });
+    if (built instanceof NextResponse) return { error: built as NextResponse };
+    const { clauses, values, nextParam } = built;
+    const idParam = nextParam;
+    const ruggerParam = nextParam + 1;
+    const execValues = [...values, tokenId, ruggerId];
+    const sql = `update rugger_tokens set ${clauses.join(', ')} where id = $${idParam} and rugger_id = $${ruggerParam} returning id`;
+    const rows = await query<{ id: string }>(sql, execValues);
+    return { rows };
+  };
+
+  try {
+    const first = await runUpdate(false);
+    if ('error' in first) return first.error;
+    if (first.rows.length === 0) {
+      return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (!isMissingEntryToLowColumnError(e) || body.entryToLowMinutes === undefined) {
+      console.error('[PATCH rugger token]', e);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+    try {
+      const second = await runUpdate(true);
+      if ('error' in second) return second.error;
+      if (second.rows.length === 0) {
+        return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        ok: true,
+        warning:
+          'Colonne entry_to_low_minutes absente : high/low mis à jour. Exécutez `npx prisma migrate dev` pour activer les métriques klines associées.',
+      });
+    } catch (e2) {
+      console.error('[PATCH rugger token retry]', e2);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+  }
 }
 
 export async function DELETE(

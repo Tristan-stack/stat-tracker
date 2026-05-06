@@ -20,13 +20,114 @@ model User {
   ruggers            Rugger[]
   fundingChainCache  FundingChainCache[]
   watchlistWallets   WatchlistWallet[]
-  notifications      Notification[]
   walletMetadata     WalletMetadata[]
-  pnlWallets         PnlWallet[]
-  pnlBackgrounds     PnlBackground[]
+  telegramChannels   TelegramChannel[]
+  telegramPnlFavorites TelegramPnlFavorite[]
+  telegramMtprotoSession        TelegramMtprotoSession?
+  telegramMtprotoLoginChallenge TelegramMtprotoLoginChallenge?
+  telegramMtprotoSendcodeLogs   TelegramMtprotoSendcodeLog[]
 
   @@unique([email])
   @@map("user")
+}
+
+/** Session GramJS utilisateur MTProto ; `encryptedPayload` = AES-GCM opaque. */
+model TelegramMtprotoSession {
+  userId            String   @id @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encryptedPayload  String   @map("encrypted_payload")
+  /** Masque UX (ex. ***1234). */
+  phoneHint         String?  @map("phone_hint")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("telegram_mtproto_sessions")
+}
+
+/** Challenge OTP envoyé après sendCode ; TTL court. Une ligne par utilisateur auth. */
+model TelegramMtprotoLoginChallenge {
+  userId         String   @id @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneE164      String   @map("phone_e164")
+  phoneCodeHash  String   @map("phone_code_hash")
+  /** StringSession GramJS chiffrée juste après sendCode (même clé MTProto que phone_code_hash). */
+  encryptedPendingSession String? @map("encrypted_pending_session")
+  expiresAt      DateTime @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("telegram_mtproto_login_challenges")
+}
+
+model TelegramMtprotoSendcodeLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("telegram_mtproto_sendcode_logs")
+}
+
+model TelegramChannel {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username  String   // sans @ ni domaine ; ex. rugpilotprofits
+  label     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  messages  TelegramPnlMessage[]
+  pnlFavoriteTokens TelegramPnlFavorite[]
+
+  @@unique([userId, username])
+  @@index([userId])
+  @@map("telegram_channels")
+}
+
+model TelegramPnlFavorite {
+  id        String          @id @default(dbgenerated("gen_random_uuid()"))
+  userId    String          @map("user_id")
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId String          @map("channel_id")
+  channel   TelegramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  tokenMint String          @map("token_mint")
+  tokenName String?         @map("token_name")
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@unique([userId, channelId, tokenMint])
+  @@index([userId, channelId])
+  @@map("telegram_pnl_favorites")
+}
+
+model TelegramPnlMessage {
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  channelId  String   @map("channel_id")
+  channel    TelegramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  messageId  BigInt   @map("message_id")
+  postedAt   DateTime @map("posted_at")
+  rawText    String   @map("raw_text")
+  parserUsed String   @map("parser_used") // regex | gemini | failed
+  tokenMint  String?  @map("token_mint")
+  tokenName  String?  @map("token_name")
+  investedSol Float?  @map("invested_sol")
+  soldSol     Float? @map("sold_sol")
+  profitSol   Float? @map("profit_sol")
+  profitPct   Float? @map("profit_pct")
+  parseError  String? @map("parse_error")
+  parsedAt   DateTime @default(now()) @map("parsed_at")
+
+  @@unique([channelId, messageId])
+  @@index([channelId, postedAt])
+  @@map("telegram_pnl_messages")
+}
+
+/** Cache serveur : classification Pump Mayhem via GMGN (TTL `expires_at`). */
+model GmgnPumpMayhemCache {
+  mint         String   @id @map("mint")
+  isPumpMayhem Boolean  @map("is_pump_mayhem")
+  expiresAt    DateTime @map("expires_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("gmgn_pump_mayhem_cache")
 }
 
 model WalletMetadata {
@@ -43,33 +144,6 @@ model WalletMetadata {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("wallet_metadata")
-}
-
-model PnlWallet {
-  id            String   @id @default(dbgenerated("gen_random_uuid()"))
-  userId        String   @map("user_id")
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  walletAddress String   @map("wallet_address")
-  label         String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @default(now()) @map("updated_at")
-
-  @@unique([userId, walletAddress])
-  @@index([userId])
-  @@map("pnl_wallets")
-}
-
-model PnlBackground {
-  id         String   @id @default(dbgenerated("gen_random_uuid()"))
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name       String?
-  imageData  String   @map("image_data")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @map("updated_at")
-
-  @@index([userId])
-  @@map("pnl_backgrounds")
 }
 
 model Session {
@@ -181,6 +255,8 @@ model RuggerToken {
   entryPrice        Float     @map("entry_price")
   high              Float
   low               Float
+  /** Minutes entre l’achat et l’atteinte du creux (klines GMGN), si calculé. */
+  entryToLowMinutes Float?    @map("entry_to_low_minutes")
   targetExitPercent Float     @map("target_exit_percent")
   statusId          String    @default("verification") @map("status_id")
   status            Status    @relation(fields: [statusId], references: [id])
@@ -315,27 +391,6 @@ model WatchlistWallet {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("watchlist_wallets")
-}
-
-model Notification {
-  id             String    @id @default(dbgenerated("gen_random_uuid()"))
-  userId         String    @map("user_id")
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           String    @default("watchlist_buy")
-  walletAddress  String    @map("wallet_address")
-  walletLabel    String?   @map("wallet_label")
-  tokenAddress   String?   @map("token_address")
-  tokenSymbol    String?   @map("token_symbol")
-  amountSol      Decimal?  @map("amount_sol") @db.Decimal(18, 9)
-  txSignature    String    @map("tx_signature")
-  occurredAt     DateTime  @map("occurred_at")
-  readAt         DateTime? @map("read_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-
-  @@unique([userId, walletAddress, txSignature])
-  @@index([userId, readAt])
-  @@index([userId, createdAt])
-  @@map("notifications")
 }
 
 model HeliusWebhookSync {
