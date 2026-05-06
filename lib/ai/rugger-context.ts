@@ -10,6 +10,7 @@ interface DbRuggerToken {
   entry_price: number;
   high: number;
   low: number;
+  entry_to_low_minutes: number | null;
   target_exit_percent: number;
   status_id: string;
   purchased_at: string | null;
@@ -79,6 +80,9 @@ function toToken(row: DbRuggerToken): Token {
     targetExitPercent: row.target_exit_percent,
     statusId: row.status_id as Token['statusId'],
     purchasedAt: row.purchased_at ?? row.created_at,
+    ...(row.entry_to_low_minutes != null && Number.isFinite(row.entry_to_low_minutes)
+      ? { entryToLowMinutes: row.entry_to_low_minutes }
+      : {}),
   };
 }
 
@@ -100,6 +104,7 @@ export async function loadRuggerAiContext(ruggerId: string): Promise<RuggerAiCon
         entry_price,
         high,
         low,
+        entry_to_low_minutes,
         target_exit_percent,
         status_id,
         purchased_at,

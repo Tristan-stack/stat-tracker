@@ -145,12 +145,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   );
   const ruggerStatusId = statusRows[0]?.status_id ?? 'verification';
 
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
   const placeholders: string[] = [];
   toInsert.forEach((token, idx) => {
-    const base = idx * 11;
+    const base = idx * 12;
     placeholders.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12})`
     );
     values.push(
       crypto.randomUUID(),
@@ -163,13 +163,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       ruggerStatusId,
       new Date(token.purchasedAt).toISOString(),
       token.tokenAddress,
-      token.tokenName ?? token.tokenAddress
+      token.tokenName ?? token.tokenAddress,
+      null
     );
   });
 
   await query(
     `INSERT INTO rugger_tokens
-      (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, purchased_at, token_address, token_name)
+      (id, rugger_id, name, entry_price, high, low, target_exit_percent, status_id, purchased_at, token_address, token_name, entry_to_low_minutes)
      VALUES ${placeholders.join(', ')}`,
     values
   );

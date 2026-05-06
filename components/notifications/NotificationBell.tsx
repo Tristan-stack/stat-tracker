@@ -57,6 +57,10 @@ export default function NotificationBell() {
   const { data: session } = useSession();
   const isAuth = Boolean(session?.user);
 
+  /** Évite mismatch SSR/client : session Radix / IDs diffèrent entre serveur et premier paint client. */
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => setHasMounted(true), []);
+
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -116,6 +120,10 @@ export default function NotificationBell() {
       setIsLoading(false);
     }
   }, [unreadCount, fetchNotifications]);
+
+  if (!hasMounted) {
+    return <span className="inline-block size-8 shrink-0" aria-hidden />;
+  }
 
   if (!isAuth) return null;
 

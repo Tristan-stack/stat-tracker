@@ -86,6 +86,7 @@ interface GmgnPurchasePreview {
   high: number;
   low: number;
   truncatedKlines: boolean;
+  entryToLowMinutes?: number | null;
   sourceWallet?: string;
 }
 
@@ -124,6 +125,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
   const prevRuggerIdForFetchRef = useRef<string | null>(null);
   const [gmgnRefreshError, setGmgnRefreshError] = useState<string | null>(null);
+  const [gmgnRefreshInfo, setGmgnRefreshInfo] = useState<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
   const [refreshingTokenIds, setRefreshingTokenIds] = useState<Set<string>>(() => new Set());
   const [unfilteredRuggerTokens, setUnfilteredRuggerTokens] = useState<Token[]>([]);
@@ -464,6 +466,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         return;
       }
       setGmgnRefreshError(null);
+      setGmgnRefreshInfo(null);
       setRefreshingTokenIds((prev) => new Set(prev).add(token.id));
       const fromMs = localGmgnAllTimeRange().fromMs;
       const toMs = Date.now();
@@ -479,17 +482,42 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
           return;
         }
         const p = data.purchases[0];
+        const patchPayload: Record<string, unknown> = {
+          high: p.high,
+          low: p.low,
+          tokenName: p.name,
+          purchasedAt: p.purchasedAt,
+        };
+        if (typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)) {
+          patchPayload.entryToLowMinutes = p.entryToLowMinutes;
+        }
         const patchRes = await fetch(`/api/ruggers/${id}/tokens/${token.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ high: p.high, low: p.low, tokenName: p.name, purchasedAt: p.purchasedAt }),
+          body: JSON.stringify(patchPayload),
         });
         if (!patchRes.ok) return;
+        const patchJson = (await patchRes.json()) as { ok?: boolean; warning?: string };
+        if (typeof patchJson.warning === 'string' && patchJson.warning.trim() !== '') {
+          setGmgnRefreshInfo(patchJson.warning.trim());
+        }
+        type RefreshMerge = Pick<Token, 'high' | 'low' | 'tokenName' | 'purchasedAt'> & {
+          entryToLowMinutes?: number;
+        };
+        const merged: RefreshMerge = {
+          high: p.high,
+          low: p.low,
+          tokenName: p.name,
+          purchasedAt: p.purchasedAt,
+        };
+        if (typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)) {
+          merged.entryToLowMinutes = p.entryToLowMinutes;
+        }
         setTokensPage((prev) =>
-          prev ? { ...prev, tokens: prev.tokens.map((t) => t.id === token.id ? { ...t, high: p.high, low: p.low, tokenName: p.name, purchasedAt: p.purchasedAt } : t) } : prev
+          prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === token.id ? { ...t, ...merged } : t)) } : prev
         );
         setAllTokensForStats((prev) =>
-          prev.map((t) => t.id === token.id ? { ...t, high: p.high, low: p.low, tokenName: p.name, purchasedAt: p.purchasedAt } : t)
+          prev.map((t) => (t.id === token.id ? { ...t, ...merged } : t))
         );
         void loadAllRuggerTokensUnfiltered(id).then(setUnfilteredRuggerTokens);
       } finally {
@@ -542,9 +570,19 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         const high = parseGmgnDecimalString(p.highStr);
         const low = parseGmgnDecimalString(p.lowStr);
         return {
-          id: crypto.randomUUID(), name: p.tokenAddress, tokenName: p.name,
-          entryPrice: entryPrice > 0 ? entryPrice : 1e-12, high: high > 0 ? high : 1e-12, low: low > 0 ? low : 1e-12,
-          targetExitPercent: DEFAULT_GMGN_TARGET_PERCENT, purchasedAt: p.purchasedAt, tokenAddress: p.tokenAddress,
+          id: crypto.randomUUID(),
+          name: p.tokenAddress,
+          tokenName: p.name,
+          entryPrice: entryPrice > 0 ? entryPrice : 1e-12,
+          high: high > 0 ? high : 1e-12,
+          low: low > 0 ? low : 1e-12,
+          targetExitPercent: DEFAULT_GMGN_TARGET_PERCENT,
+          purchasedAt: p.purchasedAt,
+          tokenAddress: p.tokenAddress,
+          entryToLowMinutes:
+            typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)
+              ? p.entryToLowMinutes
+              : null,
         };
       });
       const response = await fetch(`/api/ruggers/${id}/tokens`, {
@@ -704,6 +742,11 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         {gmgnRefreshError && (
           <p className="text-sm text-destructive" role="alert">
             {gmgnRefreshError}
+          </p>
+        )}
+        {gmgnRefreshInfo && !gmgnRefreshError && (
+          <p className="text-sm text-amber-800 dark:text-amber-200" role="status">
+            {gmgnRefreshInfo}
           </p>
         )}
         {rugger.walletType === 'buyer' && !rugger.walletAddress?.trim() && activeTokens.length > 0 && (

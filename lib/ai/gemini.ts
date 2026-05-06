@@ -34,6 +34,33 @@ interface GeminiModelListResponse {
 const MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
 let cachedModels: { at: number; values: string[] } | null = null;
 
+/** Ordre de préférence si l’API ne impose pas autre chose ; aucun .env requis. */
+const DEFAULT_GEMINI_MODEL_ORDER = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-pro-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+] as const;
+
+const MIN_TIMEOUT_MS = 8_000;
+const MAX_TIMEOUT_MS = 120_000;
+
+function resolveRequestTimeoutMs(): number {
+  const raw = process.env.GEMINI_REQUEST_TIMEOUT_MS?.trim();
+  const parsed = raw !== undefined && raw !== '' ? Number(raw) : NaN;
+  const fallback = 30_000;
+  const n = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, n));
+}
+
+function logRuggerGemini(payload: Record<string, unknown>): void {
+  const line = JSON.stringify({ scope: 'rugger-gemini', ts: new Date().toISOString(), ...payload });
+  if (payload.event === 'generate_ok') console.info(line);
+  else console.warn(line);
+}
+
 function normalizeModelName(model: string): string {
   return model.replace(/^models\//, '').trim();
 }
@@ -41,11 +68,16 @@ function normalizeModelName(model: string): string {
 async function listGenerateContentModels(apiKey: string): Promise<string[]> {
   const now = Date.now();
   if (cachedModels && now - cachedModels.at < MODEL_CACHE_TTL_MS) return cachedModels.values;
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
-    { method: 'GET' }
-  );
-  if (!response.ok) return [];
+  const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(listUrl, { method: 'GET' });
+  if (!response.ok) {
+    logRuggerGemini({
+      event: 'list_models_failed',
+      httpStatus: response.status,
+      hint: 'fallback sur la liste de modèles statique',
+    });
+    return [];
+  }
   const data = (await response.json()) as GeminiModelListResponse;
   const values =
     data.models
@@ -53,7 +85,44 @@ async function listGenerateContentModels(apiKey: string): Promise<string[]> {
       .map((item) => normalizeModelName(item.name ?? ''))
       .filter((item) => item !== '') ?? [];
   cachedModels = { at: now, values };
+  logRuggerGemini({ event: 'list_models_ok', modelCount: values.length });
   return values;
+}
+
+function buildModelCandidates(discovered: string[]): string[] {
+  const override = normalizeModelName(process.env.GEMINI_MODEL?.trim() ?? '');
+  const preferred = [
+    ...(override !== '' ? [override] : []),
+    ...DEFAULT_GEMINI_MODEL_ORDER,
+  ].map((item) => normalizeModelName(item));
+  const unique = preferred.filter((item, index, array) => item !== '' && array.indexOf(item) === index);
+  if (discovered.length === 0) {
+    logRuggerGemini({
+      event: 'model_selection',
+      mode: 'static_only',
+      candidates: unique.slice(0, 8),
+    });
+    return unique;
+  }
+  const intersection = unique.filter((item) => discovered.includes(item));
+  if (intersection.length > 0) {
+    logRuggerGemini({
+      event: 'model_selection',
+      mode: 'intersection',
+      candidates: intersection,
+      discoveredCount: discovered.length,
+      hasOverride: override !== '',
+    });
+    return intersection;
+  }
+  logRuggerGemini({
+    event: 'model_selection',
+    mode: 'static_fallback_no_intersection',
+    discoveredSample: discovered.slice(0, 8),
+    candidates: unique.slice(0, 8),
+    hasOverride: override !== '',
+  });
+  return unique;
 }
 
 function toGeminiContents(messages: AiChatMessage[]): GeminiContent[] {
@@ -147,7 +216,7 @@ export async function generateRuggerAiResponse(
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
   const fallbackStrategy = buildFallbackStrategy(context);
   const buildFallbackResponse = (reason: string): RuggerAiChatResponse => ({
-    answer: `Recommandation fallback locale utilisée. Cause Gemini: ${reason}.`,
+    answer: `Stratégie de secours (calcul local, sans Gemini). Motif : ${reason}.`,
     strategy: fallbackStrategy,
     context: {
       tokenCount: context.tokenCount,
@@ -157,68 +226,113 @@ export async function generateRuggerAiResponse(
   });
   if (!apiKey) return buildFallbackResponse("clé API absente côté serveur (GOOGLE_API_KEY ou GEMINI_API_KEY)");
 
+  const timeoutMs = resolveRequestTimeoutMs();
   const discoveredModels = await listGenerateContentModels(apiKey);
-  const preferredCandidates = [
-    process.env.GEMINI_MODEL?.trim(),
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.0-flash',
-  ]
-    .map((item) => normalizeModelName(item ?? ''))
-    .filter((item) => item !== '');
-  const modelCandidates = (
-    discoveredModels.length > 0
-      ? preferredCandidates.filter((item) => discoveredModels.includes(item))
-      : preferredCandidates
-  ).filter((item, index, array) => array.indexOf(item) === index);
+  const modelCandidates = buildModelCandidates(discoveredModels);
   if (modelCandidates.length === 0) {
     return buildFallbackResponse('aucun modèle Gemini compatible generateContent trouvé (ListModels)');
   }
+
+  const failureNotes: string[] = [];
   let response: Response | null = null;
-  let lastErrorMessage = 'erreur Gemini inconnue';
 
   for (const model of modelCandidates) {
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), 12000);
-    try {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            contents: toGeminiContents(messages),
-            systemInstruction: {
-              parts: [{ text: buildSystemPrompt(context) }],
-            },
-            generationConfig: {
-              temperature: 0.2,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
-      if (response.ok) break;
-      const status = response.status;
-      let details = '';
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const abortController = new AbortController();
+      const timer = setTimeout(() => abortController.abort(), timeoutMs);
+      const started = Date.now();
+      logRuggerGemini({
+        event: 'generate_attempt',
+        ruggerId: context.ruggerId,
+        model,
+        attempt,
+        maxAttempts,
+        timeoutMs,
+      });
       try {
-        details = (await response.text()).slice(0, 300);
-      } catch {
-        details = '';
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortController.signal,
+            body: JSON.stringify({
+              contents: toGeminiContents(messages),
+              systemInstruction: {
+                parts: [{ text: buildSystemPrompt(context) }],
+              },
+              generationConfig: {
+                temperature: 0.2,
+                responseMimeType: 'application/json',
+              },
+            }),
+          }
+        );
+        const elapsedMs = Date.now() - started;
+        if (response.ok) {
+          logRuggerGemini({
+            event: 'generate_ok',
+            ruggerId: context.ruggerId,
+            model,
+            attempt,
+            elapsedMs,
+          });
+          clearTimeout(timer);
+          break;
+        }
+        const status = response.status;
+        let details = '';
+        try {
+          details = (await response.text()).slice(0, 280);
+        } catch {
+          details = '';
+        }
+        const note = `${model} HTTP ${status}${details ? ` — ${details}` : ''}`;
+        failureNotes.push(note);
+        logRuggerGemini({
+          event: 'generate_http_error',
+          ruggerId: context.ruggerId,
+          model,
+          attempt,
+          elapsedMs,
+          httpStatus: status,
+          detailSnippet: details.slice(0, 120),
+        });
+        response = null;
+        clearTimeout(timer);
+        break;
+      } catch (err) {
+        const elapsedMs = Date.now() - started;
+        const isAbort = err instanceof Error && err.name === 'AbortError';
+        const note = isAbort
+          ? `${model} timeout après ${timeoutMs}ms (tentative ${attempt}/${maxAttempts})`
+          : `${model} erreur réseau: ${err instanceof Error ? err.message : String(err)}`;
+        logRuggerGemini({
+          event: 'generate_fetch_error',
+          ruggerId: context.ruggerId,
+          model,
+          attempt,
+          elapsedMs,
+          isAbort,
+          errorName: err instanceof Error ? err.name : 'unknown',
+        });
+        response = null;
+        clearTimeout(timer);
+        if (isAbort && attempt < maxAttempts) {
+          continue;
+        }
+        failureNotes.push(note);
+        break;
       }
-      lastErrorMessage = `${model} HTTP ${status}${details ? ` - ${details}` : ''}`;
-      response = null;
-      if (status !== 429) break;
-    } catch {
-      lastErrorMessage = `${model} erreur réseau/timeout`;
-      response = null;
-    } finally {
-      clearTimeout(timeout);
     }
+    if (response) break;
   }
+
+  const lastErrorMessage =
+    failureNotes.length > 0
+      ? failureNotes.slice(-3).join(' | ')
+      : 'erreur Gemini inconnue';
 
   if (!response) return buildFallbackResponse(lastErrorMessage);
 
