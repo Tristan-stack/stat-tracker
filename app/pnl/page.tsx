@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { safeImageOrBlobUrl } from '@/lib/safe-browser-url';
+import { isPnlBackgroundRowId } from '@/lib/pnl-background-id';
 
 type DayMode = 'today' | 'custom';
 type BackgroundPreset = 'green-glow' | 'blue-gradient' | 'violet-neon';
@@ -95,6 +97,7 @@ export default function PnlPage() {
   const [selectedDay, setSelectedDay] = useState<Date | undefined>(new Date());
   const [backgroundPreset, setBackgroundPreset] = useState<BackgroundPreset>('green-glow');
   const [uploadedBackgroundUrl, setUploadedBackgroundUrl] = useState<string | null>(null);
+  const [selectedSavedBackgroundId, setSelectedSavedBackgroundId] = useState<string | null>(null);
   const [savedBackgrounds, setSavedBackgrounds] = useState<SavedPnlBackground[]>([]);
   const [isBackgroundsLoading, setIsBackgroundsLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -112,6 +115,13 @@ export default function PnlPage() {
     if (!resolvedDay) return 'Choisir un jour';
     return format(resolvedDay, 'EEEE, d MMMM yyyy', { locale: fr });
   }, [resolvedDay]);
+
+  const previewBackgroundUrl = useMemo(() => {
+    if (selectedSavedBackgroundId && isPnlBackgroundRowId(selectedSavedBackgroundId)) {
+      return `/api/pnl/backgrounds/${encodeURIComponent(selectedSavedBackgroundId)}/image`;
+    }
+    return safeImageOrBlobUrl(uploadedBackgroundUrl);
+  }, [selectedSavedBackgroundId, uploadedBackgroundUrl]);
 
   const filteredSavedWallets = useMemo(() => {
     const needle = walletSearchInput.trim().toLowerCase();
@@ -212,6 +222,7 @@ export default function PnlPage() {
         return;
       }
       const url = URL.createObjectURL(file);
+      setSelectedSavedBackgroundId(null);
       setUploadedBackgroundUrl(url);
       setError(null);
       const res = await fetch('/api/pnl/backgrounds', {
@@ -230,7 +241,9 @@ export default function PnlPage() {
   };
 
   const selectSavedBackground = (background: SavedPnlBackground) => {
-    setUploadedBackgroundUrl(background.image_data);
+    if (!isPnlBackgroundRowId(background.id)) return;
+    setUploadedBackgroundUrl(null);
+    setSelectedSavedBackgroundId(background.id);
   };
 
   const removeSavedBackground = async (id: string) => {
@@ -245,7 +258,10 @@ export default function PnlPage() {
       setError(data.error ?? `Erreur ${res.status}`);
       return;
     }
-    if (Array.isArray(data.backgrounds)) setSavedBackgrounds(data.backgrounds);
+    if (Array.isArray(data.backgrounds)) {
+      setSavedBackgrounds(data.backgrounds);
+      setSelectedSavedBackgroundId((prev) => (prev === id ? null : prev));
+    }
   };
 
   const generateCard = async () => {
@@ -453,7 +469,16 @@ export default function PnlPage() {
                 <p className="text-sm font-medium">Background</p>
                 <div className="flex flex-wrap gap-2">
                   {(['green-glow', 'blue-gradient', 'violet-neon'] as const).map((preset) => (
-                    <Button key={preset} type="button" variant={backgroundPreset === preset ? 'default' : 'outline'} onClick={() => setBackgroundPreset(preset)}>
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant={backgroundPreset === preset ? 'default' : 'outline'}
+                      onClick={() => {
+                        setBackgroundPreset(preset);
+                        setUploadedBackgroundUrl(null);
+                        setSelectedSavedBackgroundId(null);
+                      }}
+                    >
                       {preset}
                     </Button>
                   ))}
@@ -470,18 +495,29 @@ export default function PnlPage() {
                     <p className="text-xs text-muted-foreground">Aucun background sauvegardé.</p>
                   ) : (
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                      {savedBackgrounds.map((bg) => (
+                      {savedBackgrounds.map((bg) => {
+                        const thumbApiSrc = isPnlBackgroundRowId(bg.id)
+                          ? `/api/pnl/backgrounds/${encodeURIComponent(bg.id)}/image`
+                          : null;
+                        const isThumbSelected = selectedSavedBackgroundId === bg.id;
+                        return (
                         <div key={bg.id} className="space-y-1">
                           <button
                             type="button"
                             onClick={() => selectSavedBackground(bg)}
                             className={cn(
                               'relative aspect-video w-full overflow-hidden rounded-md border',
-                              uploadedBackgroundUrl === bg.image_data ? 'ring-2 ring-primary' : ''
+                              isThumbSelected ? 'ring-2 ring-primary' : ''
                             )}
                             title={bg.name ?? 'Background'}
                           >
-                            <img src={bg.image_data} alt={bg.name ?? 'Background'} className="h-full w-full object-cover" />
+                            {thumbApiSrc ? (
+                              <img src={thumbApiSrc} alt={bg.name ?? 'Background'} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
+                                Image invalide
+                              </div>
+                            )}
                           </button>
                           <Button
                             type="button"
@@ -493,7 +529,8 @@ export default function PnlPage() {
                             Supprimer
                           </Button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -539,9 +576,17 @@ export default function PnlPage() {
                     className={cn(
                       'relative overflow-hidden rounded-2xl border border-white/10 text-white shadow-2xl',
                       'aspect-video w-full',
-                      !uploadedBackgroundUrl && getBackgroundStyle(backgroundPreset)
+                      !previewBackgroundUrl && getBackgroundStyle(backgroundPreset)
                     )}
-                    style={uploadedBackgroundUrl ? { backgroundImage: `url(${uploadedBackgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+                    style={
+                      previewBackgroundUrl
+                        ? {
+                            backgroundImage: `url(${previewBackgroundUrl})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                          }
+                        : undefined
+                    }
                   >
                     <div className="absolute inset-0 bg-black/10" />
                     <div className="absolute inset-y-0 left-0 w-[62%] bg-linear-to-r from-black/90 via-black/55 to-transparent" />

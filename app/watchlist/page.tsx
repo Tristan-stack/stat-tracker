@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { WatchlistWallet } from '@/types/watchlist';
 import type { Rugger } from '@/types/rugger';
 import { Check, Copy, ExternalLink, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
+import { canOpenSolscanAccount, openSolscanAccountInNewTab } from '@/lib/open-trusted-solana-external';
 
 function truncateAddress(addr: string) {
   if (addr.length <= 14) return addr;
@@ -187,9 +188,15 @@ export default function WatchlistPage() {
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-xs">{truncateAddress(w.walletAddress)}</span>
-                      <a href={`https://solscan.io/account/${w.walletAddress}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
+                      <button
+                        type="button"
+                        onClick={() => void openSolscanAccountInNewTab(w.walletAddress)}
+                        className="text-primary hover:text-primary/80 disabled:pointer-events-none disabled:opacity-40"
+                        aria-label="Solscan"
+                        disabled={!canOpenSolscanAccount(w.walletAddress)}
+                      >
                         <ExternalLink className="size-3.5" />
-                      </a>
+                      </button>
                     </div>
                   </td>
                   <td className="px-3 py-2">

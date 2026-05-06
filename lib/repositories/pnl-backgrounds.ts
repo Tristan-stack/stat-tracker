@@ -34,3 +34,17 @@ export async function deletePnlBackground(args: { userId: string; id: string }):
   );
 }
 
+export async function getPnlBackgroundForUser(args: {
+  userId: string;
+  id: string;
+}): Promise<PnlBackgroundRow | null> {
+  const rows = await query<PnlBackgroundRow>(
+    `SELECT id, name, image_data, created_at, updated_at
+     FROM pnl_backgrounds
+     WHERE user_id = $1 AND id = $2
+     LIMIT 1`,
+    [args.userId, args.id]
+  );
+  return rows[0] ?? null;
+}
+

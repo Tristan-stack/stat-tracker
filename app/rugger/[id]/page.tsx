@@ -11,6 +11,8 @@ import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES } from '@/types/rugger';
 import { ArrowLeft, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { safeUserHttpUrl } from '@/lib/safe-browser-url';
+import { openSafeUserHttpUrlInNewTab } from '@/lib/open-trusted-solana-external';
 import RuggerTokensTab from '@/components/rugger/RuggerTokensTab';
 import RuggerNetworkTab from '@/components/rugger/RuggerNetworkTab';
 import RuggerBuyersTab from '@/components/rugger/RuggerBuyersTab';
@@ -216,10 +218,17 @@ export default function RuggerDetailPage() {
               )}
             >
               {rugger.description ? (
-                /^https?:\/\//i.test(rugger.description.trim()) ? (
-                  <a href={rugger.description.trim()} target="_blank" rel="noopener noreferrer" className="block break-all text-sm text-primary underline underline-offset-2 hover:text-primary/80">
+                safeUserHttpUrl(rugger.description) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = rugger.description;
+                      if (text) void openSafeUserHttpUrlInNewTab(text);
+                    }}
+                    className="block w-full break-all text-left text-sm text-primary underline underline-offset-2 hover:text-primary/80"
+                  >
                     {rugger.description}
-                  </a>
+                  </button>
                 ) : (
                   <p className="text-sm text-muted-foreground wrap-break-word">{rugger.description}</p>
                 )

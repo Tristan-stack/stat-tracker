@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Bell, Check, ExternalLink, Wallet } from 'lucide-react';
 import { useSession } from '@/lib/auth-client';
+import { canOpenSolanaTx, openSolscanTxInNewTab } from '@/lib/open-trusted-solana-external';
 
 const POLL_INTERVAL_MS = 30_000;
 const LIST_LIMIT = 20;
@@ -213,15 +214,18 @@ export default function NotificationBell() {
                       </p>
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <span className="tabular-nums">{formatRelative(n.occurredAt)}</span>
-                        <a
-                          href={`https://solscan.io/tx/${n.txSignature}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-0.5 hover:text-foreground"
-                        >
-                          <ExternalLink className="size-3" />
-                          tx
-                        </a>
+                        {canOpenSolanaTx(n.txSignature) ? (
+                          <button
+                            type="button"
+                            onClick={() => void openSolscanTxInNewTab(n.txSignature)}
+                            className="inline-flex items-center gap-0.5 hover:text-foreground"
+                          >
+                            <ExternalLink className="size-3" />
+                            tx
+                          </button>
+                        ) : (
+                          <span className="tabular-nums opacity-60">tx</span>
+                        )}
                       </div>
                     </div>
                     {isUnread && (
