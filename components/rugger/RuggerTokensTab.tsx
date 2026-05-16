@@ -5,6 +5,7 @@ import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
 import GmgnTokenAddSection, { type GmgnPreviewRow } from '@/components/GmgnTokenAddSection';
 import { TokenImportExport } from '@/components/TokenImportExport';
+import RuggerAiAssistant from '@/components/rugger/RuggerAiAssistant';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -655,6 +656,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
           />
         }
       />
+      <RuggerAiAssistant ruggerId={id} tokenCount={tokensForStats.length} />
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -3,17 +3,27 @@ import { requireUser } from '@/lib/auth-session';
 import { buildTokenTrackingPreviews } from '@/lib/gmgn/token-tracking';
 
 const MAX_TOKENS = 30;
+const SOLANA_MINT_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function normalizeTokenList(addresses: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of addresses) {
-    const a = raw.trim();
-    if (a === '' || seen.has(a)) continue;
-    seen.add(a);
-    out.push(a);
+    const chunks = raw
+      .split(/[\s,;]+/)
+      .map((item) => item.trim())
+      .filter((item) => item !== '');
+    for (const chunk of chunks) {
+      if (seen.has(chunk)) continue;
+      seen.add(chunk);
+      out.push(chunk);
+    }
   }
   return out;
+}
+
+function isLikelySolanaMint(value: string): boolean {
+  return SOLANA_MINT_REGEX.test(value);
 }
 
 export async function POST(req: NextRequest) {
@@ -66,6 +76,15 @@ export async function POST(req: NextRequest) {
   }
   if (tokenList.length > MAX_TOKENS) {
     return NextResponse.json({ error: `Too many tokens (max ${MAX_TOKENS})` }, { status: 400 });
+  }
+  const invalidTokens = tokenList.filter((token) => !isLikelySolanaMint(token));
+  if (invalidTokens.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Invalid token mint format: ${invalidTokens.slice(0, 5).join(', ')}${invalidTokens.length > 5 ? ', ...' : ''}`,
+      },
+      { status: 400 }
+    );
   }
 
   try {

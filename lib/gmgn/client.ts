@@ -176,14 +176,21 @@ async function fetchTokenKlineOnce(
   from: number,
   to: number
 ): Promise<KlineCandle[]> {
-  const data = await gmgnGet<TokenKlineData | Record<string, unknown>>('/v1/market/token_kline', {
-    chain,
-    address: tokenAddress,
-    resolution,
-    from,
-    to,
-  });
-  return normalizeKlineList(data);
+  const attempts: Array<Record<string, string | number>> = [
+    { chain, address: tokenAddress, resolution, from, to },
+    { chain, token_address: tokenAddress, resolution, from, to },
+  ];
+  let lastError: Error | null = null;
+  for (const query of attempts) {
+    try {
+      const data = await gmgnGet<TokenKlineData | Record<string, unknown>>('/v1/market/token_kline', query);
+      return normalizeKlineList(data);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  if (lastError) throw lastError;
+  return [];
 }
 
 export type FetchTokenKlineDebug = {
