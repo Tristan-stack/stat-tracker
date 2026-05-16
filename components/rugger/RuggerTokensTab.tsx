@@ -447,6 +447,19 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
     [id, reloadTokens]
   );
 
+  const handleChangeHigh = useCallback(
+    async (tokenId: string, nextHigh: number) => {
+      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ high: nextHigh }),
+      });
+      if (!response.ok) return;
+      await reloadTokens();
+    },
+    [id, reloadTokens]
+  );
+
   const handleDeleteToken = useCallback(
     async (tokenId: string) => {
       if (!window.confirm('Supprimer ce token ?')) return;
@@ -823,6 +836,7 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
                 tokens={tokensWithMetrics}
                 onChangeTarget={handleChangeTarget}
                 onChangeEntryPrice={handleChangeEntryPrice}
+                onChangeHigh={handleChangeHigh}
                 onRefreshToken={handleRefreshTokenFromGmgn}
                 refreshingTokenIds={refreshingTokenIds}
                 onDeleteToken={handleDeleteToken}

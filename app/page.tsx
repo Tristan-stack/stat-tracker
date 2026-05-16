@@ -108,6 +108,14 @@ export default function Home() {
     );
   }, []);
 
+  const handleChangeHigh = useCallback((id: string, nextHigh: number) => {
+    setTokens((prev) =>
+      prev.map((token) =>
+        token.id === id ? { ...token, high: nextHigh } : token
+      )
+    );
+  }, []);
+
   const handleToggleHidden = useCallback((id: string) => {
     setTokens((prev) =>
       prev.map((token) =>
@@ -367,6 +375,7 @@ export default function Home() {
                 tokens={tokensWithMetrics}
                 onChangeTarget={handleChangeTarget}
                 onChangeEntryPrice={handleChangeEntryPrice}
+                onChangeHigh={handleChangeHigh}
                 onToggleHidden={handleToggleHidden}
               />
             </>

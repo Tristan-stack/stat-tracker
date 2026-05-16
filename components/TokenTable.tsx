@@ -182,6 +182,7 @@ export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onChangeTarget: (id: string, nextPercent: number) => void;
   onChangeEntryPrice: (id: string, nextPrice: number) => void;
+  onChangeHigh: (id: string, nextHigh: number) => void;
   onRefreshToken?: (token: TokenWithMetrics) => void;
   refreshingTokenIds?: Set<string>;
   onDeleteToken?: (id: string) => void;
@@ -205,6 +206,7 @@ export function TokenTable({
   tokens,
   onChangeTarget,
   onChangeEntryPrice,
+  onChangeHigh,
   onRefreshToken,
   refreshingTokenIds,
   onDeleteToken,
@@ -453,7 +455,14 @@ export function TokenTable({
                     className="w-24"
                   />
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">{formatNum(t.high)}</td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                  <InlineNumericInput
+                    value={t.high}
+                    onChange={(n) => onChangeHigh(t.id, n)}
+                    min={t.entryPrice}
+                    className="w-24"
+                  />
+                </td>
                 <td className="px-2 py-3 text-center align-middle sm:px-3 sm:py-4">
                   <span
                     className={cn(
