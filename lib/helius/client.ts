@@ -1,3 +1,4 @@
+import { countTokenCreationsFromEnhancedTxs } from '@/lib/helius/token-creator-detect';
 import { throttleHelius } from '@/lib/helius/throttle';
 
 const HELIUS_BASE = 'https://api.helius.xyz';
@@ -263,3 +264,126 @@ export async function getEnhancedTransactionsByAddress(
 
 export const DUST_SOL_THRESHOLD = 0.01;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
+
+// ---------------------------------------------------------------------------
+// Raw transaction (RPC getTransaction) — utilisé par le tracer 7Srsw pour
+// lire les input accounts d'une instruction non parsée.
+// ---------------------------------------------------------------------------
+
+/**
+ * En `jsonParsed`, les instructions de programmes connus exposent un champ
+ * `parsed` (type + info). Les programmes custom (non parsés, ex. 7Srsw)
+ * exposent seulement `programId`, `accounts: string[]` et `data`.
+ * `accounts` contient les clés publiques déjà résolues, lookup tables comprises.
+ */
+export interface RawInstruction {
+  programId: string;
+  accounts: string[];
+  data?: string;
+  parsed?: unknown;
+}
+
+export interface RawInnerInstructions {
+  index: number;
+  instructions: RawInstruction[];
+}
+
+export interface RawTransactionMeta {
+  err: unknown;
+  fee?: number;
+  preBalances?: number[];
+  postBalances?: number[];
+  innerInstructions?: RawInnerInstructions[];
+}
+
+export interface RawTransactionMessage {
+  instructions: RawInstruction[];
+  accountKeys: Array<{ pubkey: string; signer: boolean; writable: boolean; source?: string } | string>;
+}
+
+export interface RawTransaction {
+  transaction: {
+    message: RawTransactionMessage;
+    signatures: string[];
+  };
+  meta: RawTransactionMeta | null;
+  blockTime: number | null;
+  slot: number;
+}
+
+export async function getRawTransaction(signature: string): Promise<RawTransaction> {
+  return heliusRpc<RawTransaction>('getTransaction', [
+    signature,
+    { maxSupportedTransactionVersion: 0, encoding: 'jsonParsed' },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// DAS — détection des créateurs de tokens
+// ---------------------------------------------------------------------------
+
+interface DasSearchAssetsResult {
+  total?: number;
+  limit?: number;
+  page?: number;
+  items?: Array<{ id: string }>;
+}
+
+function dasTotal(result: DasSearchAssetsResult | null | undefined): number {
+  if (typeof result?.total === 'number' && Number.isFinite(result.total) && result.total > 0) {
+    return result.total;
+  }
+  return Array.isArray(result?.items) ? result.items.length : 0;
+}
+
+/**
+ * Compte les assets dont `address` est créditée comme créateur on-chain.
+ *
+ * Helius DAS expose deux filtres complémentaires :
+ *  - `creatorAddress` : adresses présentes dans le tableau `creators` du
+ *    metadata Metaplex (typique des launchpads pumpfun / letsbonk).
+ *  - `authorityAddress` : update authority (cas des tokens créés via raw
+ *    `initializeMint` sans Metaplex ou avec metadata renoncée).
+ *
+ * On interroge les deux en parallèle et on renvoie le max (les ensembles
+ * peuvent se chevaucher). `tokenType: 'all'` est obligatoire pour searchAssets.
+ *
+ * Si DAS renvoie 0, repli sur l'historique enrichi Helius (TOKEN_MINT / CREATE)
+ * — cas typique pump.fun où le wallet n'est pas indexé comme Metaplex creator.
+ */
+export async function getCreatedAssetsCount(address: string): Promise<number> {
+  const dasCount = await getDasCreatedAssetsCount(address);
+  if (dasCount > 0) return dasCount;
+  return getEnhancedTokenCreationCount(address);
+}
+
+async function getDasCreatedAssetsCount(address: string): Promise<number> {
+  const [creatorRes, authorityRes] = await Promise.all([
+    heliusRpc<DasSearchAssetsResult>('searchAssets', {
+      creatorAddress: address,
+      tokenType: 'all',
+      page: 1,
+      limit: 1,
+    }).catch(() => null),
+    heliusRpc<DasSearchAssetsResult>('searchAssets', {
+      authorityAddress: address,
+      tokenType: 'all',
+      page: 1,
+      limit: 1,
+    }).catch(() => null),
+  ]);
+
+  return Math.max(dasTotal(creatorRes), dasTotal(authorityRes));
+}
+
+async function getEnhancedTokenCreationCount(address: string): Promise<number> {
+  try {
+    const [mintTxs, createTxs] = await Promise.all([
+      getEnhancedTransactionsByAddress(address, { type: 'TOKEN_MINT' }),
+      getEnhancedTransactionsByAddress(address, { type: 'CREATE' }),
+    ]);
+    return countTokenCreationsFromEnhancedTxs([...mintTxs, ...createTxs], address);
+  } catch {
+    return 0;
+  }
+}

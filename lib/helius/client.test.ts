@@ -53,6 +53,148 @@ describe('helius client', () => {
     });
   });
 
+  describe('getCreatedAssetsCount', () => {
+    function mockDasPair(
+      creatorResult: Record<string, unknown> | null,
+      authorityResult: Record<string, unknown> | null,
+      enhanced?: { mint?: unknown[]; create?: unknown[] }
+    ): ReturnType<typeof vi.spyOn> {
+      return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/addresses/') && urlStr.includes('/transactions')) {
+          const type = new URL(urlStr).searchParams.get('type');
+          const list =
+            type === 'TOKEN_MINT'
+              ? (enhanced?.mint ?? [])
+              : type === 'CREATE'
+                ? (enhanced?.create ?? [])
+                : [];
+          return new Response(JSON.stringify(list), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const body = JSON.parse((init?.body as string) ?? '{}') as {
+          params?: Record<string, unknown>;
+        };
+        const isCreator = body.params && 'creatorAddress' in body.params;
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: isCreator ? (creatorResult ?? {}) : (authorityResult ?? {}),
+          }),
+          { status: 200 }
+        );
+      });
+    }
+
+    it('renvoie le total renvoyé par DAS searchAssets (creatorAddress)', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ total: 17, items: [{ id: 'mint-1' }] }, { total: 0 });
+
+      const count = await getCreatedAssetsCount('CreatorWallet');
+      expect(count).toBe(17);
+    });
+
+    it('détecte via authorityAddress quand creatorAddress renvoie 0', async () => {
+      // Cas typique : token créé via raw initializeMint, l'adresse est update
+      // authority mais ne figure pas dans le tableau creators du metadata.
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ total: 0 }, { total: 3, items: [{ id: 'mint-x' }] });
+
+      const count = await getCreatedAssetsCount('AuthorityWallet');
+      expect(count).toBe(3);
+    });
+
+    it('retombe sur items.length quand total est absent', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ items: [{ id: 'mint-1' }] }, {});
+
+      const count = await getCreatedAssetsCount('CreatorWallet');
+      expect(count).toBe(1);
+    });
+
+    it('renvoie 0 quand les deux queries sont vides', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({}, {});
+
+      const count = await getCreatedAssetsCount('NoCreatorHere');
+      expect(count).toBe(0);
+    });
+
+    it('renvoie le max des deux quand les deux matchent (anti-double-count)', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ total: 5 }, { total: 5 });
+
+      const count = await getCreatedAssetsCount('BothCreatorAndAuthority');
+      expect(count).toBe(5);
+    });
+
+    it('envoie creatorAddress ET authorityAddress avec tokenType all', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      const fetchSpy = mockDasPair({ total: 0 }, { total: 0 });
+
+      await getCreatedAssetsCount('WalletXYZ');
+
+      const allCalls = fetchSpy.mock.calls as Array<[unknown, RequestInit | undefined]>;
+      const rpcCalls = allCalls.filter((call) => {
+        const init = call[1];
+        return typeof init?.body === 'string' && init.body.includes('searchAssets');
+      });
+      expect(rpcCalls).toHaveLength(2);
+      const bodies = rpcCalls.map((call) =>
+        JSON.parse(call[1]!.body as string)
+      ) as Array<{ method: string; params: Record<string, unknown> }>;
+      const params = bodies.map((b) => b.params);
+      expect(params).toContainEqual({
+        creatorAddress: 'WalletXYZ',
+        tokenType: 'all',
+        page: 1,
+        limit: 1,
+      });
+      expect(params).toContainEqual({
+        authorityAddress: 'WalletXYZ',
+        tokenType: 'all',
+        page: 1,
+        limit: 1,
+      });
+    });
+
+    it('détecte via TOKEN_MINT enrichi quand DAS renvoie 0', async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ total: 0 }, { total: 0 }, {
+        mint: [
+          {
+            type: 'TOKEN_MINT',
+            feePayer: 'PumpCreator',
+            signature: 'mintSig1',
+            timestamp: 1,
+            source: 'PUMP_FUN',
+            description: '',
+            fee: 0,
+            slot: 1,
+            nativeTransfers: [],
+            tokenTransfers: [],
+            events: {},
+          },
+        ],
+      });
+
+      const count = await getCreatedAssetsCount('PumpCreator');
+      expect(count).toBe(1);
+    });
+
+    it("renvoie 0 quand DAS et l'historique enrichi sont vides", async () => {
+      const { getCreatedAssetsCount } = await import('./client');
+      mockDasPair({ total: 0 }, { total: 0 });
+
+      const count = await getCreatedAssetsCount('Wallet');
+      expect(count).toBe(0);
+    });
+  });
+
   describe('heliusRest', () => {
     it('sends a POST request to the REST API', async () => {
       const { heliusRest } = await import('./client');

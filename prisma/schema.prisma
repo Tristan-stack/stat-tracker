@@ -19,6 +19,7 @@ model User {
   accounts      Account[]
   ruggers            Rugger[]
   fundingChainCache  FundingChainCache[]
+  addressTraceCache  AddressTraceCache[]
   watchlistWallets   WatchlistWallet[]
   walletMetadata     WalletMetadata[]
   telegramChannels   TelegramChannel[]
@@ -376,6 +377,24 @@ model FundingChainCache {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("funding_chain_cache")
+}
+
+/** Cache du tra\u00e7age d'adresse (Address Tracer). Cl\u00e9 d'unicit\u00e9 = (user, type, start, fen\u00eatre en lamports). */
+model AddressTraceCache {
+  id           String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tracerType   String   @map("tracer_type")
+  startAddress String   @map("start_address")
+  minLamports  BigInt   @map("min_lamports")
+  maxLamports  BigInt   @map("max_lamports")
+  journalJson  String   @map("journal_json")
+  stoppedBy    String?  @map("stopped_by")
+  resolvedAt   DateTime @default(now()) @map("resolved_at")
+
+  @@unique([userId, tracerType, startAddress, minLamports, maxLamports])
+  @@index([userId])
+  @@map("address_trace_cache")
 }
 
 model WatchlistWallet {
