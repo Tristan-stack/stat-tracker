@@ -40,6 +40,8 @@ export interface TokenValidationResult {
   stats: TokenValidationStats;
 }
 
+const PUMPFUN_SOURCE = 'PUMP_FUN';
+
 const IGNORED_MINTS = new Set([
   'So11111111111111111111111111111111111111112',  // Wrapped SOL
   'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
@@ -79,6 +81,7 @@ export async function discoverRuggerTokens(
     if (txs.length === 0) break;
 
     for (const tx of txs) {
+      if (tx.source !== PUMPFUN_SOURCE) continue;
       collectTokenMintCandidates(tx, walletLc, byAddress);
     }
 
