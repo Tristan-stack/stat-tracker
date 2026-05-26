@@ -11,6 +11,7 @@ import { scoreWallets, type ScoringInput, type ScoringResult } from '@/lib/analy
 import { solveCombinations, type WalletTokenSet } from '@/lib/analysis/combinations';
 import {
   discoverRuggerTokens,
+  filterPumpfunTokensOnly,
   validateTokensByCrossReference,
 } from '@/lib/analysis/discover-rugger-tokens';
 import { query } from '@/lib/db';
@@ -702,7 +703,7 @@ async function discoverAndValidateTokenUniverse(
   emit('progress', { phase: 'discovering_rugger_tokens', percent: 5 });
   const allCandidateTokens = discoverFromRuggerWallet
     ? await discoverRuggerTokens(ruggerWallet ?? '', registeredTokens)
-    : registeredTokens;
+    : await filterPumpfunTokensOnly(registeredTokens);
   emit('tokens_discovered', {
     candidateCount: allCandidateTokens.length,
     registeredCount: registeredTokens.length,

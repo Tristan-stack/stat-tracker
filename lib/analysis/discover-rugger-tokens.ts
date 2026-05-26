@@ -5,6 +5,7 @@ import {
   getEnhancedTransactionsByAddress,
   type HeliusEnhancedTransaction,
 } from '@/lib/helius/client';
+import { isPumpfunMint } from '@/lib/gmgn/pumpfun-mint';
 import { getTokenBuyers } from '@/lib/helius/token-buyers';
 
 interface TokenInput {
@@ -89,7 +90,19 @@ export async function discoverRuggerTokens(
     if (!before || txs.length < 100) break;
   }
 
-  return Array.from(byAddress.values());
+  const candidates = Array.from(byAddress.values());
+  return filterPumpfunTokensOnly(candidates);
+}
+
+export async function filterPumpfunTokensOnly(tokens: TokenInput[]): Promise<TokenInput[]> {
+  if (tokens.length === 0) return [];
+
+  const rows = await runWithConcurrency(tokens, DEFAULT_CONCURRENCY, async (token) => {
+    const ok = await isPumpfunMint(token.address);
+    return ok ? token : null;
+  });
+
+  return rows.filter((token): token is TokenInput => token !== null);
 }
 
 function collectTokenMintCandidates(
