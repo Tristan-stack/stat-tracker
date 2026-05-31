@@ -21,6 +21,8 @@ model User {
   fundingChainCache  FundingChainCache[]
   addressTraceCache  AddressTraceCache[]
   watchlistWallets   WatchlistWallet[]
+  pnlWallets         PnlWallet[]
+  pnlBackgrounds     PnlBackground[]
   walletMetadata     WalletMetadata[]
   telegramChannels   TelegramChannel[]
   telegramPnlFavorites TelegramPnlFavorite[]
@@ -410,6 +412,33 @@ model WatchlistWallet {
   @@unique([userId, walletAddress])
   @@index([userId])
   @@map("watchlist_wallets")
+}
+
+model PnlWallet {
+  id            String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress String   @map("wallet_address")
+  label         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, walletAddress])
+  @@index([userId])
+  @@map("pnl_wallets")
+}
+
+model PnlBackground {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String?
+  imageData String   @map("image_data")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("pnl_backgrounds")
 }
 
 model HeliusWebhookSync {
