@@ -18,6 +18,13 @@ import { query } from '@/lib/db';
 
 const ANALYSIS_CONCURRENCY = Number(process.env.ANALYSIS_CONCURRENCY ?? '3');
 const FUNDING_BATCH_SIZE = 10;
+/**
+ * Budget temps du pipeline (ms). Au-delà, les phases lourdes (cross-validation,
+ * recovery wallet-centric, funding) sautent les éléments restants pour rester
+ * sous la limite Vercel Hobby de 60 s ; le scoring/persist s'exécute quand même
+ * (résultat partiel mais cohérent). Surchargeable par env si retour sur Pro.
+ */
+const ANALYSIS_BUDGET_MS = Number(process.env.ANALYSIS_BUDGET_MS ?? '50000');
 const GLOBAL_CANDIDATE_FACTOR = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_FACTOR ?? '50');
 const GLOBAL_CANDIDATE_MAX = Number(process.env.ANALYSIS_GLOBAL_CANDIDATE_MAX ?? '600');
 const STRICT_COVERAGE_THRESHOLD = Number(process.env.STRICT_COVERAGE_THRESHOLD ?? '40');
@@ -184,6 +191,8 @@ export async function runAnalysisPipeline(
   const mcapMin = opts.mcapMin;
   const mcapMax = opts.mcapMax;
 
+  const deadline = Date.now() + ANALYSIS_BUDGET_MS;
+
   try {
     await updateAnalysisStatus(analysisId, 'running', 0, 'Starting analysis...');
     emit('started', { analysisId, mode, tokenCount: tokens.length });
@@ -202,6 +211,7 @@ export async function runAnalysisPipeline(
         inactiveThresholdHours,
         mcapMin,
         mcapMax,
+        deadline,
         emit
       );
     } else if (mode === 'token_hunting') {
@@ -214,6 +224,7 @@ export async function runAnalysisPipeline(
         inactiveThresholdHours,
         mcapMin,
         mcapMax,
+        deadline,
         emit
       );
     } else if (mode === 'funding') {
@@ -233,10 +244,18 @@ export async function runAnalysisPipeline(
         inactiveThresholdHours,
         mcapMin,
         mcapMax,
+        deadline,
         emit
       );
     }
     const { mergedWallets, effectiveTokens } = modeRun;
+    const partial = Date.now() > deadline;
+    if (partial) {
+      emit('partial', {
+        analysisId,
+        message: 'Budget temps atteint (Hobby) : analyse partielle, relance pour compléter.',
+      });
+    }
 
     emit('progress', { phase: 'scoring', percent: 90 });
     await updateAnalysisStatus(analysisId, 'running', 90, 'Computing scores...');
@@ -255,7 +274,7 @@ export async function runAnalysisPipeline(
       ? Math.max(...scoredWallets.map((s) => s.consistency))
       : 0;
 
-    await finalizeAnalysis(analysisId, effectiveTokens.length, buyerCount);
+    await finalizeAnalysis(analysisId, effectiveTokens.length, buyerCount, partial);
 
     emit('complete', {
       analysisId,
@@ -263,6 +282,7 @@ export async function runAnalysisPipeline(
       motherCount,
       topConsistency: Math.round(topConsistency * 10) / 10,
       overlapCount,
+      partial,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -281,12 +301,14 @@ async function runTokenMode(
   inactiveThresholdHours: number,
   mcapMin: number | undefined,
   mcapMax: number | undefined,
+  deadline: number,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
     tokens,
     { ruggerWallet, discoverFromRuggerWallet: true },
     buyerLimit,
+    deadline,
     emit
   );
 
@@ -329,6 +351,7 @@ async function runTokenMode(
       fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       toMs: Date.now(),
       maxCandidates: Math.max(1, rankedWallets.length || 1),
+      deadline,
       onProgress: (current, total) => {
         const pct = 48 + Math.round((current / Math.max(1, total)) * 20);
         emit('progress', {
@@ -379,12 +402,14 @@ async function runTokenHuntingMode(
   inactiveThresholdHours: number,
   mcapMin: number | undefined,
   mcapMax: number | undefined,
+  deadline: number,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const { buyers: initialBuyers, tokens: effectiveTokens } = await discoverAndValidateTokenUniverse(
     tokens,
     { ruggerWallet: null, discoverFromRuggerWallet: false },
     buyerLimit,
+    deadline,
     emit
   );
 
@@ -424,6 +449,7 @@ async function runTokenHuntingMode(
       fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       toMs: Date.now(),
       maxCandidates: Math.max(1, rankedWallets.length || 1),
+      deadline,
       onProgress: (current, total) => {
         const pct = 48 + Math.round((current / Math.max(1, total)) * 20);
         emit('progress', {
@@ -517,6 +543,7 @@ async function runCombinedMode(
   inactiveThresholdHours: number,
   mcapMin: number | undefined,
   mcapMax: number | undefined,
+  deadline: number,
   emit: EmitFn
 ): Promise<ModeRunResult> {
   const {
@@ -526,6 +553,7 @@ async function runCombinedMode(
     tokens,
     { ruggerWallet, discoverFromRuggerWallet: true },
     buyerLimit,
+    deadline,
     emit
   );
 
@@ -573,6 +601,7 @@ async function runCombinedMode(
       fromMs: Date.now() - WALLET_CENTRIC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       toMs: Date.now(),
       maxCandidates: Math.max(1, rankedWallets.length || 1),
+      deadline,
       onProgress: (current, total) => {
         const pct = 48 + Math.round((current / Math.max(1, total)) * 4);
         emit('progress', {
@@ -658,6 +687,8 @@ async function runCombinedMode(
   if (tokenOnlyWallets.length > 0) {
     const totalBatches = Math.ceil(tokenOnlyWallets.length / FUNDING_BATCH_SIZE);
     for (let i = 0; i < tokenOnlyWallets.length; i += FUNDING_BATCH_SIZE) {
+      // Budget temps atteint : on arrête le funding (résultat partiel, évite le timeout Hobby).
+      if (Date.now() > deadline) break;
       const batch = tokenOnlyWallets.slice(i, i + FUNDING_BATCH_SIZE);
       const batchNum = Math.floor(i / FUNDING_BATCH_SIZE) + 1;
 
@@ -697,6 +728,7 @@ async function discoverAndValidateTokenUniverse(
   registeredTokens: TokenInput[],
   opts: DiscoverTokenUniverseOpts,
   buyerLimit: number,
+  deadline: number,
   emit: EmitFn
 ): Promise<{ tokens: TokenInput[]; buyers: DiscoveredBuyer[] }> {
   const { ruggerWallet, discoverFromRuggerWallet } = opts;
@@ -717,6 +749,7 @@ async function discoverAndValidateTokenUniverse(
       buyerLimit,
       excludeWallets: ruggerWallet ? [ruggerWallet] : [],
       concurrency: ANALYSIS_CONCURRENCY,
+      deadline,
       onProgress: (current, total) => {
         const pct = 10 + Math.round((current / total) * 30);
         emit('progress', {
@@ -1127,13 +1160,15 @@ async function updateAnalysisStatus(
 async function finalizeAnalysis(
   analysisId: string,
   tokenCount: number,
-  buyerCount: number
+  buyerCount: number,
+  partial = false
 ): Promise<void> {
+  const label = partial ? 'Complete (partiel — budget temps atteint)' : 'Complete';
   await query(
     `UPDATE wallet_analyses
-     SET status = 'completed', progress = 100, progress_label = 'Complete',
+     SET status = 'completed', progress = 100, progress_label = $4,
          token_count = $2, buyer_count = $3, completed_at = NOW()
      WHERE id = $1`,
-    [analysisId, tokenCount, buyerCount]
+    [analysisId, tokenCount, buyerCount, label]
   );
 }

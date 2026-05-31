@@ -5,6 +5,8 @@ import { mergeWalletPreviewsToBestBuyPerMint } from '@/lib/gmgn/merge-best-buy-p
 import { buildPurchasePreviews } from '@/lib/gmgn/wallet-purchases';
 import { computeBestEntryOnCommonMints } from '@/lib/wallet-comparison/best-entry-on-common-mints';
 
+export const maxDuration = 60;
+
 const MAX_WALLETS = 10;
 const DEFAULT_RANGE_MS = 180 * 24 * 60 * 60 * 1000;
 const CONCURRENCY = 2;

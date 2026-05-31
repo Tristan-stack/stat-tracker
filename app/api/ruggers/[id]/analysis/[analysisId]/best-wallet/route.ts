@@ -15,6 +15,8 @@ import {
 } from '@/lib/analysis/best-wallet-cache';
 import { runWithConcurrency } from '@/lib/analysis/async-pool';
 
+export const maxDuration = 60;
+
 const DEFAULT_TP_MIN_PERCENT = 80;
 const DEFAULT_TOKEN_LIMIT = 20;
 const MAX_TOKEN_LIMIT = 40;

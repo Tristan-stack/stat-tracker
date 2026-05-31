@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import { query } from '@/lib/db';
 
 const HELIUS_BASE = 'https://api.helius.xyz';
@@ -161,9 +162,16 @@ export async function syncWatchlistToHelius(): Promise<SyncWatchlistResult> {
   return { webhookId: newId, addressCount: addresses.length, action: 'created' };
 }
 
-/** Fire-and-forget wrapper used from CRUD endpoints; swallows errors and logs them. */
+/**
+ * Planifie le sync après la réponse via `after()` (pattern serverless correct, supporté
+ * sur Vercel Hobby) plutôt qu'un `void` non-awaité qui serait tué à la fin de la requête.
+ */
 export function syncWatchlistToHeliusAsync(): void {
-  void syncWatchlistToHelius().catch((err) => {
-    console.error('syncWatchlistToHelius (async) failed', err);
+  after(async () => {
+    try {
+      await syncWatchlistToHelius();
+    } catch (err) {
+      console.error('syncWatchlistToHelius (after) failed', err);
+    }
   });
 }

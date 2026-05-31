@@ -6,8 +6,17 @@ import {
 } from '@/lib/gmgn/first-buy-notional';
 
 const CHAIN_SOL = 'sol';
-const MAX_ACTIVITY_PAGES = 80;
-const MAX_ACTIVITY_PAGES_SHORT_RANGE = 250;
+
+function envInt(name: string, def: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : def;
+}
+
+// Caps abaissés pour rester < 60 s sur Vercel Hobby (throttle GMGN ~650 ms/page).
+const MAX_ACTIVITY_PAGES = envInt('GMGN_MAX_ACTIVITY_PAGES', 50);
+const MAX_ACTIVITY_PAGES_SHORT_RANGE = envInt('GMGN_MAX_ACTIVITY_PAGES_SHORT', 60);
+/** Budget temps d'un collect (ms) : on coupe (truncated) avant le timeout de fonction. */
+const COLLECT_BUDGET_MS = envInt('GMGN_COLLECT_BUDGET_MS', 45000);
 
 export type TradeSide = 'buy' | 'sell';
 
@@ -87,11 +96,17 @@ export async function collectSolanaTradesInRange(
   const maxPages = spanMs <= 3 * 86400000 ? MAX_ACTIVITY_PAGES_SHORT_RANGE : MAX_ACTIVITY_PAGES;
 
   const rows: PnlTradeRow[] = [];
+  const deadline = Date.now() + COLLECT_BUDGET_MS;
   let cursor: string | undefined;
   let reachedWindowStart = false;
   let exhausted = false;
+  let timedOut = false;
 
   for (let page = 0; page < maxPages; page += 1) {
+    if (Date.now() > deadline) {
+      timedOut = true;
+      break;
+    }
     const data = await fetchWalletActivityPage(CHAIN_SOL, walletAddress, {
       limit: 50,
       cursor,
@@ -139,6 +154,6 @@ export async function collectSolanaTradesInRange(
     cursor = next;
   }
 
-  const truncated = !reachedWindowStart && !exhausted;
+  const truncated = timedOut || (!reachedWindowStart && !exhausted);
   return { rows, truncated };
 }

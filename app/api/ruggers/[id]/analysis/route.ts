@@ -5,7 +5,8 @@ import { query } from '@/lib/db';
 import { runAnalysisPipeline, type PipelineOpts } from '@/lib/analysis/run-analysis';
 import type { AnalysisMode } from '@/types/analysis';
 
-export const maxDuration = 300;
+// Vercel Hobby plafonne maxDuration à 60s ; l'analyse longue est découpée en steps (voir route /step).
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 const VALID_MODES: AnalysisMode[] = ['token', 'funding', 'combined', 'token_hunting'];

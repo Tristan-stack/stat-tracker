@@ -32,6 +32,8 @@ interface RecoverWalletCentricBuyersOpts {
   maxCandidates?: number;
   concurrency?: number;
   onProgress?: (current: number, total: number) => void;
+  /** Budget temps (epoch ms) : au-delà, on saute les wallets restants (résultat partiel). */
+  deadline?: number;
 }
 
 /**
@@ -161,6 +163,12 @@ export async function recoverWalletCentricBuyers(
       return null;
     }
     if (isKnownExchange(walletAddress)) {
+      completed += 1;
+      opts?.onProgress?.(completed, total);
+      return null;
+    }
+    // Budget temps dépassé : on saute (résultat partiel, évite le timeout 60 s Hobby).
+    if (opts?.deadline !== undefined && Date.now() > opts.deadline) {
       completed += 1;
       opts?.onProgress?.(completed, total);
       return null;

@@ -13,6 +13,8 @@ import {
 import { getCreatedAssetsCount } from '@/lib/helius/client';
 import type { AddressTraceHop, AddressTraceStoppedBy, TracerType } from '@/types/address-trace';
 
+export const maxDuration = 60;
+
 interface ParsedInput {
   startAddress: string;
   minSol: number;

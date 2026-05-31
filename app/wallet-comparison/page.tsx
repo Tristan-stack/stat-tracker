@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import type { WatchlistWallet } from '@/types/watchlist';
 import type { Rugger } from '@/types/rugger';
 import type { CachedWalletComparison, CompareResponseSnapshot } from '@/lib/wallet-comparison/session-comparison-cache';
+import type { BestBuyPerMint } from '@/lib/gmgn/merge-best-buy-per-mint';
 import {
   clearWalletComparisonSessionCache,
   getWalletComparisonSessionCache,
@@ -234,108 +235,81 @@ export default function WalletComparisonPage() {
 
     setIsComparing(true);
     try {
-      const res = await fetch('/api/wallet-comparison', {
+      // Pilotage côté client : un appel GMGN par wallet (chacun < 60 s sur Hobby),
+      // puis un appel finalize (calcul pur) pour agréger la comparaison.
+      setProgress({ totalWallets: walletSnapshot.length, index: 0, currentWallet: null });
+      appendLog(`Comparaison : ${walletSnapshot.length} wallet(s), GMGN sur la période sélectionnée.`);
+
+      const okMaps: { walletAddress: string; map: BestBuyPerMint[] }[] = [];
+      const skipped: Array<{ walletAddress: string; error: string }> = [];
+
+      for (let i = 0; i < walletSnapshot.length; i += 1) {
+        if (controller.signal.aborted) {
+          setInfoMessage('Comparaison annulée.');
+          appendLog('Annulé.');
+          setProgress(null);
+          return;
+        }
+        const walletAddress = walletSnapshot[i]!;
+        setProgress({ totalWallets: walletSnapshot.length, index: i + 1, currentWallet: walletAddress });
+        appendLog(`GMGN ${i + 1}/${walletSnapshot.length} — ${walletAddress.slice(0, 8)}…`);
+
+        const res = await fetch('/api/wallet-comparison/wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({ walletAddress, fromMs: bounds.fromMs, toMs: bounds.toMs }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          skipped.push({ walletAddress, error: data.error ?? `Erreur ${res.status}` });
+          appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${(data.error ?? res.status).toString().slice(0, 120)}`);
+          continue;
+        }
+        const data = (await res.json()) as
+          | { ok: true; walletAddress: string; map: BestBuyPerMint[] }
+          | { ok: false; walletAddress: string; error: string };
+        if (data.ok) {
+          okMaps.push({ walletAddress, map: data.map });
+          appendLog(`${data.map.length} mint(s) retenu(s) après dédup.`);
+        } else {
+          skipped.push({ walletAddress, error: data.error });
+          appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${data.error.slice(0, 120)}`);
+        }
+      }
+
+      if (okMaps.length < 2) {
+        setError('Pas assez de wallets exploitables après les appels GMGN.');
+        setProgress(null);
+        return;
+      }
+
+      appendLog('Calcul de l’intersection et du classement…');
+      const finRes = await fetch('/api/wallet-comparison/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({
-          walletAddresses: selectedWallets,
-          fromMs: bounds.fromMs,
-          toMs: bounds.toMs,
-          stream: true,
-        }),
+        body: JSON.stringify({ wallets: okMaps, skipped, fromMs: bounds.fromMs, toMs: bounds.toMs }),
       });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? `Erreur ${res.status}`);
+      if (!finRes.ok) {
+        const data = (await finRes.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? `Erreur ${finRes.status}`);
+        setProgress(null);
         return;
       }
-
-      if (!res.body) {
-        setError('Réponse vide (flux).');
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed === '') continue;
-          const event = JSON.parse(trimmed) as
-            | { type: 'started'; totalWallets: number; message: string }
-            | {
-                type: 'progress';
-                message: string;
-                index?: number;
-                total?: number;
-                currentWallet?: string;
-              }
-            | {
-                type: 'wallet_done';
-                walletAddress: string;
-                ok: boolean;
-                mintCount?: number;
-                error?: string;
-                message?: string;
-              }
-            | { type: 'done'; payload: CompareResponse }
-            | { type: 'error'; error: string; partialFailures?: Array<{ walletAddress: string; error: string }> }
-            | { type: 'cancelled'; message?: string };
-
-          if (event.type === 'started') {
-            setProgress({
-              totalWallets: event.totalWallets,
-              index: 0,
-              currentWallet: null,
-            });
-            appendLog(event.message);
-          } else if (event.type === 'progress') {
-            appendLog(event.message);
-            if (event.total !== undefined && event.index !== undefined) {
-              setProgress({
-                totalWallets: event.total,
-                index: event.index,
-                currentWallet: event.currentWallet ?? null,
-              });
-            }
-          } else if (event.type === 'wallet_done') {
-            appendLog(event.message ?? (event.ok ? 'OK' : event.error ?? 'Erreur'));
-          } else if (event.type === 'done') {
-            setResult(event.payload);
-            setWalletHistory(recordWalletsUsed(walletSnapshot));
-            setSessionCache(
-              pushWalletComparisonSessionCache({
-                walletAddressesRequested: walletSnapshot,
-                fromMs: boundsSnapshot.fromMs,
-                toMs: boundsSnapshot.toMs,
-                result: event.payload,
-              })
-            );
-            appendLog('Comparaison terminée.');
-            setProgress(null);
-          } else if (event.type === 'error') {
-            setError(event.error);
-            if (event.partialFailures?.length) {
-              appendLog(`${event.partialFailures.length} wallet(s) en échec.`);
-            }
-            setProgress(null);
-          } else if (event.type === 'cancelled') {
-            setInfoMessage(event.message ?? 'Comparaison annulée.');
-            setProgress(null);
-            appendLog('Annulé.');
-          }
-        }
-      }
+      const payload = (await finRes.json()) as CompareResponse;
+      setResult(payload);
+      setWalletHistory(recordWalletsUsed(walletSnapshot));
+      setSessionCache(
+        pushWalletComparisonSessionCache({
+          walletAddressesRequested: walletSnapshot,
+          fromMs: boundsSnapshot.fromMs,
+          toMs: boundsSnapshot.toMs,
+          result: payload,
+        })
+      );
+      appendLog('Comparaison terminée.');
+      setProgress(null);
     } catch (err) {
       const isAbort =
         (err instanceof DOMException || err instanceof Error) && (err as Error).name === 'AbortError';

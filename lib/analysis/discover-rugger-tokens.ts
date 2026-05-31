@@ -26,6 +26,8 @@ interface ValidateTokensOpts {
   concurrency?: number;
   excludeWallets?: string[];
   onProgress?: ProgressCallback;
+  /** Budget temps (epoch ms) : au-delà, on saute les tokens restants (résultat partiel). */
+  deadline?: number;
 }
 
 export interface TokenValidationStats {
@@ -146,6 +148,12 @@ export async function validateTokensByCrossReference(
   let completed = 0;
   const total = allCandidates.length;
   const tokenBuyerRows = await runWithConcurrency(allCandidates, concurrency, async (token) => {
+    // Budget temps dépassé : on saute (résultat partiel, évite le timeout 60 s Hobby).
+    if (opts?.deadline !== undefined && Date.now() > opts.deadline) {
+      completed += 1;
+      opts?.onProgress?.(completed, total);
+      return { token, buyers: [] };
+    }
     const buyers = await getTokenBuyers(token.address, { buyerLimit });
     completed += 1;
     opts?.onProgress?.(completed, total);

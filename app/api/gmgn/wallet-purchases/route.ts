@@ -8,6 +8,8 @@ import {
   type WalletPurchasePreview,
 } from '@/lib/gmgn/wallet-purchases';
 
+export const maxDuration = 60;
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }

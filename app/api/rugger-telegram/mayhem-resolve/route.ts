@@ -4,7 +4,7 @@ import { resolvePumpMayhemWithCache } from '@/lib/gmgn/pump-mayhem-cache';
 import { telegramMayhemMintResolveCap } from '@/lib/rugger-telegram/mayhem-cap';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 type Body = {
   mints?: unknown;

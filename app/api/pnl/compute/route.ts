@@ -4,6 +4,8 @@ import { computeWalletPnl } from '@/lib/pnl/compute-wallet-pnl';
 import { fetchWalletBalance } from '@/lib/pnl/wallet-balance';
 import type { PnlComputeResponse, PnlRangePreset } from '@/types/pnl';
 
+export const maxDuration = 60;
+
 const VALID_PRESETS: PnlRangePreset[] = ['1d', '7d', '30d', 'custom'];
 
 export async function POST(req: NextRequest) {

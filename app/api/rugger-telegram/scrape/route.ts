@@ -9,8 +9,8 @@ import {
 import { telegramScrapeMaxMessages } from '@/lib/telegram/client';
 
 export const runtime = 'nodejs';
-/** Plages longues / canaux très actifs : augmente sur Vercel Pro ou scrape par morceaux. */
-export const maxDuration = 120;
+/** Vercel Hobby plafonne à 60s. Pour de gros canaux, scraper par morceaux (plages plus courtes). */
+export const maxDuration = 60;
 
 type ScrapeBody = {
   channelId?: string;
