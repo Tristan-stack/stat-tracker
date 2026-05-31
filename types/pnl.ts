@@ -82,7 +82,10 @@ export type PnlElementKey =
   | 'walletAddress'
   | 'dateRange';
 
+export type PnlCardOrientation = 'horizontal' | 'vertical';
+
 export interface PnlCardSettings {
+  orientation: PnlCardOrientation;
   textColor: string;
   fontFamily: string;
   visibleElements: Record<PnlElementKey, boolean>;

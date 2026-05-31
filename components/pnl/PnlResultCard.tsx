@@ -3,6 +3,7 @@
 import { useRef } from 'react';
 import PnlCard from '@/components/pnl/PnlCard';
 import PnlExportButton from '@/components/pnl/PnlExportButton';
+import type { DominantColor } from '@/lib/pnl/extract-dominant-color';
 import type { PnlCardSettings, PnlComputeResponse } from '@/types/pnl';
 
 interface PnlResultCardProps {
@@ -10,6 +11,7 @@ interface PnlResultCardProps {
   settings: PnlCardSettings;
   backgroundImageData: string | null;
   walletLabel: string | null;
+  dominantColor: DominantColor | null;
 }
 
 function safeFileName(label: string | null, address: string): string {
@@ -22,6 +24,7 @@ export default function PnlResultCard({
   settings,
   backgroundImageData,
   walletLabel,
+  dominantColor,
 }: PnlResultCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -33,6 +36,7 @@ export default function PnlResultCard({
         settings={settings}
         backgroundImageData={backgroundImageData}
         walletLabel={walletLabel}
+        dominantColor={dominantColor}
       />
       <div className="flex items-center justify-between gap-2">
         {data.warnings.length > 0 ? (

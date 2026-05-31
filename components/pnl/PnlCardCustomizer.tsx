@@ -83,8 +83,32 @@ export default function PnlCardCustomizer({
     }
   };
 
+  const isVertical = settings.orientation === 'vertical';
+
   return (
     <div className="space-y-5">
+      <div className="space-y-1.5">
+        <Label>Orientation</Label>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={!isVertical ? 'default' : 'outline'}
+            onClick={() => update({ orientation: 'horizontal' })}
+          >
+            Horizontale
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={isVertical ? 'default' : 'outline'}
+            onClick={() => update({ orientation: 'vertical' })}
+          >
+            Verticale
+          </Button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="pnl-text-color">Couleur du texte</Label>
@@ -93,8 +117,14 @@ export default function PnlCardCustomizer({
             type="color"
             value={settings.textColor}
             onChange={(e) => update({ textColor: e.target.value })}
-            className="h-9 w-full cursor-pointer p-1"
+            disabled={isVertical}
+            className="h-9 w-full cursor-pointer p-1 disabled:opacity-50"
           />
+          {isVertical && (
+            <p className="text-[11px] text-muted-foreground">
+              Auto (noir/blanc) selon le fond en mode vertical.
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="pnl-font">Police</Label>

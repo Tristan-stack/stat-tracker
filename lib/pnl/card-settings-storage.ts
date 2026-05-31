@@ -39,6 +39,7 @@ export const PNL_FONT_OPTIONS: { label: string; value: string }[] = [
 ];
 
 export const DEFAULT_PNL_CARD_SETTINGS: PnlCardSettings = {
+  orientation: 'horizontal',
   textColor: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
   selectedBackgroundId: null,
@@ -77,6 +78,7 @@ export function getPnlCardSettings(): PnlCardSettings {
     if (!isValidSettings(parsed)) return DEFAULT_PNL_CARD_SETTINGS;
     // Fusionne pour combler les clés d'éléments ajoutées après coup.
     return {
+      orientation: parsed.orientation === 'vertical' ? 'vertical' : 'horizontal',
       textColor: parsed.textColor,
       fontFamily: parsed.fontFamily,
       selectedBackgroundId:

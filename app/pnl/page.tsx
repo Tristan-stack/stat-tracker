@@ -16,6 +16,7 @@ import {
   savePnlCardSettings,
 } from '@/lib/pnl/card-settings-storage';
 import { combineResults } from '@/lib/pnl/combine-results';
+import { extractDominantColor, type DominantColor } from '@/lib/pnl/extract-dominant-color';
 import type {
   PnlBackground,
   PnlBackgroundMeta,
@@ -45,6 +46,9 @@ export default function PnlPage() {
   // Cache des images de fond chargées à la demande (id → data URL).
   const [bgImages, setBgImages] = useState<Record<string, string>>({});
   const bgLoadingRef = useRef<Set<string>>(new Set());
+
+  // Couleur dominante de l'image de fond sélectionnée (pour la carte verticale).
+  const [dominantColor, setDominantColor] = useState<DominantColor | null>(null);
 
   // Chargement initial.
   useEffect(() => {
@@ -149,6 +153,21 @@ export default function PnlPage() {
 
   const selectedBgImage = selectedBgId ? bgImages[selectedBgId] ?? null : null;
 
+  // Extrait la couleur dominante quand l'image de fond change (carte verticale).
+  useEffect(() => {
+    if (!selectedBgImage) {
+      setDominantColor(null);
+      return;
+    }
+    let cancelled = false;
+    void extractDominantColor(selectedBgImage).then((dc) => {
+      if (!cancelled) setDominantColor(dc);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBgImage]);
+
   const walletLabelByAddress = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const w of wallets) map.set(w.walletAddress, w.label);
@@ -230,6 +249,7 @@ export default function PnlPage() {
                   settings={settings}
                   backgroundImageData={selectedBgImage}
                   walletLabel={`Total · ${computed.length} wallet${computed.length > 1 ? 's' : ''}`}
+                  dominantColor={dominantColor}
                 />
               </div>
             );
@@ -245,6 +265,7 @@ export default function PnlPage() {
                   settings={settings}
                   backgroundImageData={selectedBgImage}
                   walletLabel={walletLabelByAddress.get(w.walletAddress) ?? null}
+                  dominantColor={dominantColor}
                 />
               ))}
           </div>
