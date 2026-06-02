@@ -28,6 +28,12 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+/** Convertit une couleur hex en `rgba()` avec l'alpha fourni (0–1). */
+export function hexToRgba(hex: string, alpha: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 /** Luminance perçue (0–255). */
 export function luminance(hex: string): number {
   const { r, g, b } = hexToRgb(hex);

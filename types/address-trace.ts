@@ -1,4 +1,4 @@
-export type TracerType = '7srsw';
+export type TracerType = '7srsw' | '7srsw-v2';
 
 export type AddressTraceStoppedBy =
   | 'completed'

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,12 @@ interface PnlCardCustomizerProps {
   onSettingsChange: (settings: PnlCardSettings) => void;
   backgrounds: PnlBackgroundMeta[];
   onBackgroundsChange: (backgrounds: PnlBackgroundMeta[]) => void;
+  /** Cache des data URLs des fonds (id → image), partagé avec la page. */
+  bgImages: Record<string, string>;
+  /** Demande le chargement de l'image d'un fond (pour la preview). */
+  onRequestBackgroundImage: (id: string) => void;
+  /** Insère une image déjà connue dans le cache (ex. juste uploadée). */
+  onCacheBackgroundImage: (id: string, imageData: string) => void;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -34,12 +40,22 @@ export default function PnlCardCustomizer({
   onSettingsChange,
   backgrounds,
   onBackgroundsChange,
+  bgImages,
+  onRequestBackgroundImage,
+  onCacheBackgroundImage,
 }: PnlCardCustomizerProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const update = (patch: Partial<PnlCardSettings>) => onSettingsChange({ ...settings, ...patch });
+
+  // Charge l'image de chaque fond pour afficher les vignettes en preview.
+  useEffect(() => {
+    for (const bg of backgrounds) {
+      if (!bgImages[bg.id]) onRequestBackgroundImage(bg.id);
+    }
+  }, [backgrounds, bgImages, onRequestBackgroundImage]);
 
   const toggleElement = (key: (typeof PNL_ELEMENT_KEYS)[number]) => {
     update({
@@ -66,6 +82,7 @@ export default function PnlCardCustomizer({
         return;
       }
       onBackgroundsChange([data.background, ...backgrounds]);
+      onCacheBackgroundImage(data.background.id, imageData);
       update({ selectedBackgroundId: data.background.id });
     } catch {
       setError('Erreur lors de la lecture du fichier');
@@ -205,14 +222,16 @@ export default function PnlCardCustomizer({
                 type="button"
                 onClick={() => update({ selectedBackgroundId: bg.id })}
                 className={cn(
-                  'flex h-16 w-24 items-center justify-center overflow-hidden rounded-md border bg-muted text-center text-[10px] text-muted-foreground',
+                  'flex h-16 w-24 items-center justify-center overflow-hidden rounded-md border bg-muted bg-cover bg-center text-center text-[10px] text-muted-foreground',
                   settings.selectedBackgroundId === bg.id
                     ? 'border-primary ring-2 ring-primary'
                     : 'border-input'
                 )}
+                style={bgImages[bg.id] ? { backgroundImage: `url(${bgImages[bg.id]})` } : undefined}
                 title={bg.name ?? bg.id}
               >
-                <span className="line-clamp-2 px-1">{bg.name ?? 'Image'}</span>
+                {/* Tant que l'image n'est pas chargée, on affiche le nom (fallback). */}
+                {!bgImages[bg.id] && <span className="line-clamp-2 px-1">{bg.name ?? 'Image'}</span>}
               </button>
               <button
                 type="button"

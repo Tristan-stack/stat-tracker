@@ -78,23 +78,33 @@ export default function PnlPage() {
     savePnlCardSettings(next);
   }, []);
 
+  // Charge l'image d'un fond (par id) dans le cache si pas déjà en cours.
+  const loadBackgroundImage = useCallback((id: string) => {
+    if (bgLoadingRef.current.has(id)) return;
+    bgLoadingRef.current.add(id);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/pnl/backgrounds/${id}`);
+        if (res.ok) {
+          const data = (await res.json()) as { background: PnlBackground };
+          setBgImages((prev) => ({ ...prev, [id]: data.background.imageData }));
+        }
+      } finally {
+        bgLoadingRef.current.delete(id);
+      }
+    })();
+  }, []);
+
+  // Insère une image déjà connue (ex. juste uploadée) sans refetch.
+  const cacheBackgroundImage = useCallback((id: string, imageData: string) => {
+    setBgImages((prev) => (prev[id] ? prev : { ...prev, [id]: imageData }));
+  }, []);
+
   // Charge l'image du fond sélectionné si pas encore en cache.
   const selectedBgId = settings.selectedBackgroundId;
   useEffect(() => {
-    if (!selectedBgId || bgImages[selectedBgId] || bgLoadingRef.current.has(selectedBgId)) return;
-    bgLoadingRef.current.add(selectedBgId);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/pnl/backgrounds/${selectedBgId}`);
-        if (res.ok) {
-          const data = (await res.json()) as { background: PnlBackground };
-          setBgImages((prev) => ({ ...prev, [selectedBgId]: data.background.imageData }));
-        }
-      } finally {
-        bgLoadingRef.current.delete(selectedBgId);
-      }
-    })();
-  }, [selectedBgId, bgImages]);
+    if (selectedBgId && !bgImages[selectedBgId]) loadBackgroundImage(selectedBgId);
+  }, [selectedBgId, bgImages, loadBackgroundImage]);
 
   const resolveBounds = useCallback((): { fromMs: number; toMs: number } | null => {
     const toMs = Date.now();
@@ -230,6 +240,9 @@ export default function PnlPage() {
             onSettingsChange={updateSettings}
             backgrounds={backgrounds}
             onBackgroundsChange={setBackgrounds}
+            bgImages={bgImages}
+            onRequestBackgroundImage={loadBackgroundImage}
+            onCacheBackgroundImage={cacheBackgroundImage}
           />
         </CardContent>
       </Card>

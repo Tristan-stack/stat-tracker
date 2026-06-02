@@ -78,7 +78,14 @@ type TraceEvent =
   | ErrorEvent
   | CancelledEvent;
 
-const TRACER_OPTIONS: Array<{ id: TracerType; label: string }> = [{ id: '7srsw', label: '7Srsw' }];
+const TRACER_OPTIONS: Array<{ id: TracerType; label: string }> = [
+  { id: '7srsw', label: '7Srsw' },
+  { id: '7srsw-v2', label: '7Srsw V2' },
+];
+
+function deobfuscatedLabel(tracerType: TracerType): string {
+  return tracerType === '7srsw-v2' ? '7Srsw V2 déjoué' : '7Srsw déjoué';
+}
 
 function truncateAddress(addr: string): string {
   if (addr.length <= 14) return addr;
@@ -283,7 +290,7 @@ export default function AddressTracerPage() {
             } else if (event.type === 'hop') {
               setHops((prev) => [...prev, event.hop]);
               appendLog(
-                `Hop ${event.hop.index} : ${truncateAddress(event.hop.from)} → ${truncateAddress(event.hop.to)} (${formatSol(event.hop.solAmount)} SOL)${event.hop.deobfuscated ? ' [7Srsw déjoué]' : ''}`
+                `Hop ${event.hop.index} : ${truncateAddress(event.hop.from)} → ${truncateAddress(event.hop.to)} (${formatSol(event.hop.solAmount)} SOL)${event.hop.deobfuscated ? ` [${deobfuscatedLabel(event.hop.tracerType)}]` : ''}`
               );
             } else if (event.type === 'done') {
               setStoppedBy(event.stoppedBy);
@@ -580,7 +587,7 @@ export default function AddressTracerPage() {
                         title={`Destinataire apparent : ${hop.apparentTo}`}
                       >
                         <ShieldAlert className="size-3" />
-                        7Srsw déjoué
+                        {deobfuscatedLabel(hop.tracerType)}
                       </span>
                     )}
                   </div>

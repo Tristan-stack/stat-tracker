@@ -4,6 +4,7 @@ import { forwardRef } from 'react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { formatPercent, formatSol, formatUsd, shortAddress } from '@/lib/pnl/format';
+import { hexToRgba } from '@/lib/pnl/extract-dominant-color';
 import type { PnlCardViewProps } from '@/components/pnl/PnlCard';
 import type { PnlElementKey } from '@/types/pnl';
 
@@ -31,6 +32,17 @@ const PnlCardVertical = forwardRef<HTMLDivElement, PnlCardViewProps>(function Pn
 
   const rangeLabel = `${format(data.fromMs, 'd MMM', { locale: fr })} — ${format(data.toMs, 'd MMM yyyy', { locale: fr })}`;
 
+  // Panneau d'infos : verre dépoli translucide quand une image de fond est présente,
+  // sinon aplat opaque (fallback sans image).
+  const hasImage = Boolean(backgroundImageData);
+  const infoPanelClass = `relative z-10 rounded-xl p-4${hasImage ? ' border backdrop-blur-md' : ''}`;
+  const infoPanelStyle = hasImage
+    ? {
+        backgroundColor: hexToRgba(panel, 0.45),
+        borderColor: (dominantColor?.isDark ?? false) ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)',
+      }
+    : { backgroundColor: panel };
+
   const stats: { key: PnlElementKey; label: string; value: string }[] = [];
   if (show('unrealized')) stats.push({ key: 'unrealized', label: 'PNL latent', value: formatUsd(pnl.unrealizedUsd) });
   if (show('winRate')) stats.push({ key: 'winRate', label: 'Winrate', value: formatPercent(pnl.winRatePercent) });
@@ -42,18 +54,28 @@ const PnlCardVertical = forwardRef<HTMLDivElement, PnlCardViewProps>(function Pn
   return (
     <div
       ref={ref}
-      className="flex aspect-[5/7] w-full max-w-[420px] flex-col gap-3 overflow-hidden rounded-2xl p-4 shadow-lg"
+      className="relative flex aspect-[5/7] w-full max-w-[420px] flex-col gap-3 overflow-hidden rounded-2xl p-4 shadow-lg"
       style={{ backgroundColor: base, color: textColor, fontFamily: settings.fontFamily }}
     >
+      {/* Fond : l'image elle-même, floutée et atténuée, remplit toute la carte.
+          `-inset-8` déborde pour que le flou des bords soit clippé par overflow-hidden. */}
+      {backgroundImageData && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-8 bg-cover bg-center"
+          style={{ backgroundImage: `url(${backgroundImageData})`, filter: 'blur(28px)', opacity: 0.45 }}
+        />
+      )}
+
       {/* En-tête léger : période */}
-      <div className="flex items-center justify-between text-xs font-medium opacity-80">
+      <div className="relative z-10 flex items-center justify-between text-xs font-medium opacity-80">
         <span className="uppercase tracking-wide">PNL</span>
         {show('dateRange') && <span>{rangeLabel}</span>}
       </div>
 
       {/* Image centrée */}
       <div
-        className="flex flex-1 items-center justify-center overflow-hidden rounded-xl"
+        className="relative z-10 flex flex-1 items-center justify-center overflow-hidden rounded-xl"
         style={{ backgroundColor: panel }}
       >
         {backgroundImageData ? (
@@ -61,7 +83,7 @@ const PnlCardVertical = forwardRef<HTMLDivElement, PnlCardViewProps>(function Pn
           <img
             src={backgroundImageData}
             alt=""
-            className="max-h-full max-w-full object-contain"
+            className="h-full w-full object-cover"
             style={{ imageRendering: 'auto' }}
           />
         ) : (
@@ -72,7 +94,7 @@ const PnlCardVertical = forwardRef<HTMLDivElement, PnlCardViewProps>(function Pn
       </div>
 
       {/* Bloc d'infos */}
-      <div className="rounded-xl p-4" style={{ backgroundColor: panel }}>
+      <div className={infoPanelClass} style={infoPanelStyle}>
         {show('walletLabel') && walletLabel && (
           <p className="truncate text-xl font-extrabold leading-tight">{walletLabel}</p>
         )}
