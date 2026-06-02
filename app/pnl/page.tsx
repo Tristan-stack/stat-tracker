@@ -22,6 +22,7 @@ import type {
   PnlBackgroundMeta,
   PnlCardSettings,
   PnlComputeResponse,
+  PnlMethod,
   PnlRangePreset,
   PnlWallet,
 } from '@/types/pnl';
@@ -37,6 +38,7 @@ export default function PnlPage() {
   const [backgrounds, setBackgrounds] = useState<PnlBackgroundMeta[]>([]);
   const [settings, setSettings] = useState<PnlCardSettings>(DEFAULT_PNL_CARD_SETTINGS);
   const [preset, setPreset] = useState<PnlRangePreset>('7d');
+  const [method, setMethod] = useState<PnlMethod>('gmgn');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [results, setResults] = useState<Record<string, PnlComputeResponse>>({});
   const [computing, setComputing] = useState(false);
@@ -142,6 +144,7 @@ export default function PnlPage() {
               fromMs: bounds.fromMs,
               toMs: bounds.toMs,
               preset,
+              method,
             }),
           });
           if (!res.ok) throw new Error(`compute ${w.walletAddress}`);
@@ -159,7 +162,7 @@ export default function PnlPage() {
     } finally {
       setComputing(false);
     }
-  }, [resolveBounds, wallets, preset]);
+  }, [resolveBounds, wallets, preset, method]);
 
   const selectedBgImage = selectedBgId ? bgImages[selectedBgId] ?? null : null;
 
@@ -212,6 +215,26 @@ export default function PnlPage() {
               dateRange={dateRange}
               onDateRangeChange={setDateRange}
             />
+            <div className="space-y-1.5">
+              <label htmlFor="pnl-method" className="text-sm font-medium">
+                Méthode de calcul
+              </label>
+              <select
+                id="pnl-method"
+                value={method}
+                onChange={(e) => setMethod(e.target.value as PnlMethod)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm"
+              >
+                <option value="gmgn">GMGN (détail par token, winrate)</option>
+                <option value="balance_delta">Delta de balance SOL (Helius, on-chain)</option>
+              </select>
+              {method === 'balance_delta' && (
+                <p className="text-[11px] text-muted-foreground">
+                  PNL = variation du solde SOL sur la période (frais inclus). Ne valorise pas les
+                  tokens encore détenus.
+                </p>
+              )}
+            </div>
             <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
               <input
                 type="checkbox"

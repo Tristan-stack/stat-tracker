@@ -46,8 +46,8 @@ export interface PnlResult {
   perToken: PnlTokenBreakdown[];
   /** true si la pagination GMGN a été tronquée (résultats partiels). */
   truncated: boolean;
-  /** Origine du calcul : endpoint GMGN dédié ou agrégation d'activité. */
-  source: 'gmgn_stats' | 'activity';
+  /** Origine du calcul : GMGN (stats/activité) ou delta de solde SOL on-chain (Helius). */
+  source: 'gmgn_stats' | 'activity' | 'balance_delta';
 }
 
 export interface PnlBalance {
@@ -65,9 +65,16 @@ export interface PnlComputeResponse {
   balance: PnlBalance | null;
   solUsd: number | null;
   warnings: string[];
+  /** Solde SOL au début de la période (méthode `balance_delta` uniquement). */
+  startBalanceSol?: number;
+  /** Solde SOL à la fin de la période (méthode `balance_delta` uniquement). */
+  endBalanceSol?: number;
 }
 
 export type PnlRangePreset = '1d' | '7d' | '30d' | 'custom';
+
+/** Méthode de calcul du PNL choisie par l'utilisateur. */
+export type PnlMethod = 'gmgn' | 'balance_delta';
 
 export type PnlElementKey =
   | 'realizedUsd'

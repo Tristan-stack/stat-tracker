@@ -51,7 +51,11 @@ export function combineResults(results: PnlComputeResponse[]): PnlComputeRespons
     winRatePercent = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : null;
   }
 
-  const allGmgn = pnls.every((p) => p.source === 'gmgn_stats');
+  const combinedSource: PnlResult['source'] = pnls.every((p) => p.source === 'balance_delta')
+    ? 'balance_delta'
+    : pnls.every((p) => p.source === 'gmgn_stats')
+      ? 'gmgn_stats'
+      : 'activity';
 
   const pnl: PnlResult = {
     realizedUsd: sumNullable(pnls.map((p) => p.realizedUsd)),
@@ -66,7 +70,7 @@ export function combineResults(results: PnlComputeResponse[]): PnlComputeRespons
     winRatePercent,
     perToken,
     truncated: pnls.some((p) => p.truncated),
-    source: allGmgn ? 'gmgn_stats' : 'activity',
+    source: combinedSource,
   };
 
   const warnings = Array.from(new Set(results.flatMap((r) => r.warnings)));

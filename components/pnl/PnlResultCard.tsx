@@ -43,7 +43,11 @@ export default function PnlResultCard({
           <p className="text-xs text-amber-600 dark:text-amber-500">{data.warnings[0]}</p>
         ) : (
           <span className="text-xs text-muted-foreground">
-            {data.pnl.source === 'gmgn_stats' ? 'Source : GMGN stats' : 'Source : activité GMGN'}
+            {data.pnl.source === 'gmgn_stats'
+              ? 'Source : GMGN stats'
+              : data.pnl.source === 'balance_delta'
+                ? 'Source : delta de balance (Helius)'
+                : 'Source : activité GMGN'}
           </span>
         )}
         <PnlExportButton nodeRef={cardRef} fileName={safeFileName(walletLabel, data.walletAddress)} />
