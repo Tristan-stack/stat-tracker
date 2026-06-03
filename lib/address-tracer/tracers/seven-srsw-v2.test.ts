@@ -7,6 +7,7 @@ vi.mock('@/lib/helius/client', () => ({
 
 import { getRawTransaction } from '@/lib/helius/client';
 import { sevenSrswV2Tracer, SEVEN_SRSW_V2_DECOY_PROGRAMS } from './seven-srsw-v2';
+import { SEVEN_SRSW_DECOY } from './seven-srsw';
 import { AddressTracerParseError } from './types';
 
 const mockGetRaw = vi.mocked(getRawTransaction);
@@ -22,6 +23,17 @@ function makeTrapInstruction(): RawInstruction {
   return {
     programId: DECOY_PROGRAM,
     accounts: [FEE_PAYER, SIGNER, REAL_RECIPIENT, SYSTEM_PROGRAM],
+    data: 'deadbeef',
+  };
+}
+
+// Piège V1 : leurre = adresse fixe en accounts[2], vrai destinataire en accounts[1].
+const V1_REAL_RECIPIENT = 'G1Tk6C934Hm6hohqoBprJk67RqzR3xqH6M63aTQUeC4N';
+
+function makeV1TrapInstruction(): RawInstruction {
+  return {
+    programId: 'CustomUnknownProgramId',
+    accounts: [FEE_PAYER, V1_REAL_RECIPIENT, SEVEN_SRSW_DECOY, SYSTEM_PROGRAM],
     data: 'deadbeef',
   };
 }
@@ -65,6 +77,23 @@ beforeEach(() => {
 });
 
 describe('sevenSrswV2Tracer.resolveRealRecipient', () => {
+  it('sur-ensemble V1 : délègue au leurre fixe 7Srsw et renvoie accounts[1]', async () => {
+    mockGetRaw.mockResolvedValueOnce(makeRawTx({ top: [makeV1TrapInstruction()] }));
+
+    const result = await sevenSrswV2Tracer.resolveRealRecipient(SEVEN_SRSW_DECOY, 'sigV1');
+
+    expect(result).toEqual({ recipient: V1_REAL_RECIPIENT, deobfuscated: true });
+    expect(mockGetRaw).toHaveBeenCalledWith('sigV1');
+  });
+
+  it('sur-ensemble V1 : throw quand le destinataire apparent est le leurre 7Srsw sans piège V1', async () => {
+    mockGetRaw.mockResolvedValueOnce(makeRawTx({ top: [] }));
+
+    await expect(
+      sevenSrswV2Tracer.resolveRealRecipient(SEVEN_SRSW_DECOY, 'sigV1none')
+    ).rejects.toBeInstanceOf(AddressTracerParseError);
+  });
+
   it('détecte le piège dans une instruction top-level et renvoie accounts[2]', async () => {
     mockGetRaw.mockResolvedValueOnce(makeRawTx({ top: [makeTrapInstruction()] }));
 

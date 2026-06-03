@@ -1,5 +1,6 @@
 import { getRawTransaction, type RawInstruction } from '@/lib/helius/client';
 import { AddressTracerParseError, type TracerStrategy } from './types';
+import { sevenSrswTracer, SEVEN_SRSW_DECOY } from './seven-srsw';
 
 /**
  * Programmes leurres « 7Srsw V2 ». Le motif d'obfuscation a évolué : le leurre
@@ -35,6 +36,13 @@ export const sevenSrswV2Tracer: TracerStrategy = {
   id: '7srsw-v2',
   label: '7Srsw V2',
   async resolveRealRecipient(apparentRecipient, signature) {
+    // Sur-ensemble V1 : le leurre V1 est une ADRESSE fixe. Si le destinataire
+    // apparent est ce leurre, on délègue à la stratégie V1 (vrai destinataire =
+    // compte #2). Couvre les chaînes qui mélangent ancien et nouveau motif.
+    if (apparentRecipient === SEVEN_SRSW_DECOY) {
+      return sevenSrswTracer.resolveRealRecipient(apparentRecipient, signature);
+    }
+
     const tx = await getRawTransaction(signature);
 
     const topLevel = tx.transaction?.message?.instructions ?? [];
@@ -49,13 +57,10 @@ export const sevenSrswV2Tracer: TracerStrategy = {
 
     const trap = all.find(instructionTrapsV2);
 
-    // Contrairement à 7Srsw V1, V2 n'a pas d'adresse-leurre déclencheuse :
-    // `resolveRealRecipient` est appelé sur CHAQUE tx suivie par le moteur. Si
-    // la tx ne contient aucune instruction au programme leurre V2, ce n'est pas
-    // une obfuscation V2 → pass-through (jamais de throw).
-    //
-    // Pour un futur tracer « sur-ensemble V1+V2 », cette branche pourrait
-    // déléguer à `sevenSrswTracer.resolveRealRecipient(apparentRecipient, signature)`.
+    // V2 (programme leurre) : `resolveRealRecipient` est appelé sur CHAQUE tx
+    // suivie par le moteur. Si la tx ne contient aucune instruction au programme
+    // leurre V2, ce n'est pas une obfuscation V2 → pass-through (jamais de throw).
+    // (Le cas V1 — adresse leurre fixe — est déjà traité plus haut.)
     if (!trap) {
       return { recipient: apparentRecipient, deobfuscated: false };
     }
