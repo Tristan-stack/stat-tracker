@@ -57,6 +57,6 @@ export const sevenSrswTracer: TracerStrategy = {
       );
     }
 
-    return { recipient: realRecipient, deobfuscated: true };
+    return { recipient: realRecipient, deobfuscated: true, variant: '7srsw' };
   },
 };

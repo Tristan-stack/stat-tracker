@@ -290,7 +290,7 @@ export default function AddressTracerPage() {
             } else if (event.type === 'hop') {
               setHops((prev) => [...prev, event.hop]);
               appendLog(
-                `Hop ${event.hop.index} : ${truncateAddress(event.hop.from)} → ${truncateAddress(event.hop.to)} (${formatSol(event.hop.solAmount)} SOL)${event.hop.deobfuscated ? ` [${deobfuscatedLabel(event.hop.tracerType)}]` : ''}`
+                `Hop ${event.hop.index} : ${truncateAddress(event.hop.from)} → ${truncateAddress(event.hop.to)} (${formatSol(event.hop.solAmount)} SOL)${event.hop.deobfuscated ? ` [${deobfuscatedLabel(event.hop.deobfuscatedVariant ?? event.hop.tracerType)}]` : ''}`
               );
             } else if (event.type === 'done') {
               setStoppedBy(event.stoppedBy);
@@ -587,7 +587,7 @@ export default function AddressTracerPage() {
                         title={`Destinataire apparent : ${hop.apparentTo}`}
                       >
                         <ShieldAlert className="size-3" />
-                        {deobfuscatedLabel(hop.tracerType)}
+                        {deobfuscatedLabel(hop.deobfuscatedVariant ?? hop.tracerType)}
                       </span>
                     )}
                   </div>

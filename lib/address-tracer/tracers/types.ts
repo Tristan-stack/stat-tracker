@@ -3,6 +3,12 @@ import type { TracerType } from '@/types/address-trace';
 export interface TracerResolution {
   recipient: string;
   deobfuscated: boolean;
+  /**
+   * Variante de leurre réellement déjouée (renseignée seulement si `deobfuscated`).
+   * Permet de distinguer V1 vs V2 quand le tracer V2 (sur-ensemble) résout un ancien
+   * leurre 7Srsw.
+   */
+  variant?: TracerType;
 }
 
 export interface TracerStrategy {

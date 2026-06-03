@@ -210,7 +210,7 @@ export async function stepAddress(opts: StepOpts): Promise<StepResult> {
   // leurre 7Srsw, géré ensuite par `resolveRealRecipient`).
   const latest = matches.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
 
-  const { recipient, deobfuscated } = await tracer.resolveRealRecipient(latest.to, latest.signature);
+  const { recipient, deobfuscated, variant } = await tracer.resolveRealRecipient(latest.to, latest.signature);
 
   if (isKnownExchange(recipient)) {
     return { kind: 'stop', stoppedBy: 'exchange' };
@@ -228,6 +228,7 @@ export async function stepAddress(opts: StepOpts): Promise<StepResult> {
     signature: latest.signature,
     timestamp: latest.timestamp,
     deobfuscated,
+    deobfuscatedVariant: variant,
     tracerType,
   };
 

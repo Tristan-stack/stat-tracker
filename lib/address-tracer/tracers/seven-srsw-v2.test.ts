@@ -82,7 +82,7 @@ describe('sevenSrswV2Tracer.resolveRealRecipient', () => {
 
     const result = await sevenSrswV2Tracer.resolveRealRecipient(SEVEN_SRSW_DECOY, 'sigV1');
 
-    expect(result).toEqual({ recipient: V1_REAL_RECIPIENT, deobfuscated: true });
+    expect(result).toEqual({ recipient: V1_REAL_RECIPIENT, deobfuscated: true, variant: '7srsw' });
     expect(mockGetRaw).toHaveBeenCalledWith('sigV1');
   });
 
@@ -99,7 +99,7 @@ describe('sevenSrswV2Tracer.resolveRealRecipient', () => {
 
     const result = await sevenSrswV2Tracer.resolveRealRecipient(APPARENT_RECIPIENT, 'sigA');
 
-    expect(result).toEqual({ recipient: REAL_RECIPIENT, deobfuscated: true });
+    expect(result).toEqual({ recipient: REAL_RECIPIENT, deobfuscated: true, variant: '7srsw-v2' });
     expect(mockGetRaw).toHaveBeenCalledWith('sigA');
   });
 

@@ -67,7 +67,7 @@ describe('sevenSrswTracer.resolveRealRecipient', () => {
 
     const result = await sevenSrswTracer.resolveRealRecipient(SEVEN_SRSW_DECOY, 'sigY');
 
-    expect(result).toEqual({ recipient: REAL_RECIPIENT, deobfuscated: true });
+    expect(result).toEqual({ recipient: REAL_RECIPIENT, deobfuscated: true, variant: '7srsw' });
     expect(mockGetRaw).toHaveBeenCalledWith('sigY');
   });
 

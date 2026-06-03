@@ -19,6 +19,8 @@ export interface AddressTraceHop {
   /** Unix seconds, depuis Helius/Solana. */
   timestamp: number;
   deobfuscated: boolean;
+  /** Variante de leurre déjouée pour ce saut (V1 vs V2). Absente si pas de déjouage. */
+  deobfuscatedVariant?: TracerType;
   tracerType: TracerType;
   /** Nombre de tokens fongibles dont `to` est crédité comme créateur on-chain (DAS). */
   toCreatorCount?: number;
