@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import type { PnlRangePreset } from '@/types/pnl';
 
-const PRESETS: { value: Exclude<PnlRangePreset, 'custom'>; label: string }[] = [
+const PRESETS: { value: Exclude<PnlRangePreset, 'custom' | 'day'>; label: string }[] = [
   { value: '1d', label: '1 jour' },
   { value: '7d', label: '7 jours' },
   { value: '30d', label: '30 jours' },
@@ -23,6 +23,8 @@ interface DurationSelectorProps {
   onPresetChange: (preset: PnlRangePreset) => void;
   dateRange: DateRange | undefined;
   onDateRangeChange: (range: DateRange | undefined) => void;
+  selectedDay: Date | undefined;
+  onSelectedDayChange: (day: Date | undefined) => void;
 }
 
 export default function DurationSelector({
@@ -30,8 +32,11 @@ export default function DurationSelector({
   onPresetChange,
   dateRange,
   onDateRangeChange,
+  selectedDay,
+  onSelectedDayChange,
 }: DurationSelectorProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [dayOpen, setDayOpen] = useState(false);
 
   const calendarLabel = useMemo(() => {
     if (dateRange?.from && dateRange?.to) {
@@ -39,6 +44,11 @@ export default function DurationSelector({
     }
     return 'Choisir une plage';
   }, [dateRange]);
+
+  const dayLabel = useMemo(
+    () => (selectedDay ? format(selectedDay, 'd MMMM yyyy', { locale: fr }) : 'Choisir un jour'),
+    [selectedDay]
+  );
 
   return (
     <div className="space-y-4">
@@ -52,6 +62,7 @@ export default function DurationSelector({
             onClick={() => {
               onPresetChange(p.value);
               onDateRangeChange(undefined);
+              onSelectedDayChange(undefined);
             }}
           >
             {p.label}
@@ -60,12 +71,59 @@ export default function DurationSelector({
         <Button
           type="button"
           size="sm"
+          variant={preset === 'day' ? 'default' : 'outline'}
+          onClick={() => {
+            onPresetChange('day');
+            onDateRangeChange(undefined);
+          }}
+        >
+          Jour précis
+        </Button>
+        <Button
+          type="button"
+          size="sm"
           variant={preset === 'custom' ? 'default' : 'outline'}
-          onClick={() => onPresetChange('custom')}
+          onClick={() => {
+            onPresetChange('custom');
+            onSelectedDayChange(undefined);
+          }}
         >
           Personnalisé
         </Button>
       </div>
+      {preset === 'day' && (
+        <div className="space-y-1">
+          <Label>Jour</Label>
+          <Popover open={dayOpen} onOpenChange={setDayOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(
+                  'min-w-[240px] justify-start text-left font-normal',
+                  !selectedDay && 'text-muted-foreground'
+                )}
+              >
+                <CalendarDays className="mr-2 size-4" />
+                {dayLabel}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                defaultMonth={selectedDay}
+                selected={selectedDay}
+                onSelect={(d) => {
+                  onSelectedDayChange(d);
+                  if (d) setDayOpen(false);
+                }}
+                disabled={{ after: new Date() }}
+                locale={fr}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
       {preset === 'custom' && (
         <div className="space-y-1">
           <Label>Plage (calendrier)</Label>

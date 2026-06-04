@@ -1,5 +1,19 @@
 /** Formatage partagé des montants pour les PNL cards. */
 
+import { format, isSameDay } from 'date-fns';
+import { fr } from 'date-fns/locale';
+
+/**
+ * Libellé de période pour la card. Affiche un seul jour quand la fenêtre
+ * couvre une seule journée (preset « Jour précis »), sinon une plage.
+ */
+export function formatRangeLabel(fromMs: number, toMs: number): string {
+  if (isSameDay(fromMs, toMs)) {
+    return format(fromMs, 'd MMM yyyy', { locale: fr });
+  }
+  return `${format(fromMs, 'd MMM', { locale: fr })} — ${format(toMs, 'd MMM yyyy', { locale: fr })}`;
+}
+
 export function formatUsd(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';
   const sign = value < 0 ? '-' : '';

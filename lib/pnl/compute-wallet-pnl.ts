@@ -137,7 +137,10 @@ export async function computeWalletPnl(
 ): Promise<{ result: PnlResult; warnings: string[]; solUsd: number | null }> {
   const warnings: string[] = [];
 
-  const statsPeriod = preset !== 'custom' ? GMGN_STATS_PERIODS[preset] : null;
+  // Seuls les presets relatifs (1d/7d/30d) sont couverts par GMGN wallet_stats.
+  // `day` (jour précis) et `custom` passent par l'agrégation d'activité sur [fromMs, toMs].
+  const statsPeriod =
+    preset === '1d' || preset === '7d' || preset === '30d' ? GMGN_STATS_PERIODS[preset] : null;
   if (statsPeriod) {
     try {
       const stats = await fetchWalletStats(CHAIN_SOL, walletAddress, statsPeriod);

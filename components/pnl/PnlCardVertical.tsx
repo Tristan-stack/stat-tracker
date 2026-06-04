@@ -1,9 +1,7 @@
 'use client';
 
 import { forwardRef } from 'react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { formatPercent, formatSol, formatUsd, shortAddress } from '@/lib/pnl/format';
+import { formatPercent, formatRangeLabel, formatSol, formatUsd, shortAddress } from '@/lib/pnl/format';
 import { hexToRgba } from '@/lib/pnl/extract-dominant-color';
 import type { PnlCardViewProps } from '@/components/pnl/PnlCard';
 import type { PnlElementKey } from '@/types/pnl';
@@ -30,7 +28,7 @@ const PnlCardVertical = forwardRef<HTMLDivElement, PnlCardViewProps>(function Pn
   const primaryRealized = showRealizedSol ? formatSol(realizedSol) : formatUsd(realizedUsd);
   const secondaryRealized = showRealizedSol && showRealizedUsd ? formatUsd(realizedUsd) : null;
 
-  const rangeLabel = `${format(data.fromMs, 'd MMM', { locale: fr })} — ${format(data.toMs, 'd MMM yyyy', { locale: fr })}`;
+  const rangeLabel = formatRangeLabel(data.fromMs, data.toMs);
 
   // Panneau d'infos : verre dépoli translucide quand une image de fond est présente,
   // sinon aplat opaque (fallback sans image).

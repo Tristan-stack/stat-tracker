@@ -1,9 +1,7 @@
 'use client';
 
 import { forwardRef } from 'react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { formatPercent, formatSol, formatUsd, shortAddress } from '@/lib/pnl/format';
+import { formatPercent, formatRangeLabel, formatSol, formatUsd, shortAddress } from '@/lib/pnl/format';
 import type { PnlCardViewProps } from '@/components/pnl/PnlCard';
 import type { PnlElementKey } from '@/types/pnl';
 
@@ -24,7 +22,7 @@ const PnlCardHorizontal = forwardRef<HTMLDivElement, PnlCardViewProps>(function 
   const primaryRealized = showRealizedSol ? formatSol(realizedSol) : formatUsd(realizedUsd);
   const secondaryRealized = showRealizedSol && showRealizedUsd ? formatUsd(realizedUsd) : null;
 
-  const rangeLabel = `${format(data.fromMs, 'd MMM', { locale: fr })} — ${format(data.toMs, 'd MMM yyyy', { locale: fr })}`;
+  const rangeLabel = formatRangeLabel(data.fromMs, data.toMs);
 
   const rows: { key: PnlElementKey; label: string; value: string }[] = [];
   if (show('unrealized'))

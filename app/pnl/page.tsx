@@ -27,7 +27,7 @@ import type {
   PnlWallet,
 } from '@/types/pnl';
 
-const PRESET_MS: Record<Exclude<PnlRangePreset, 'custom'>, number> = {
+const PRESET_MS: Record<'1d' | '7d' | '30d', number> = {
   '1d': 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
@@ -40,6 +40,7 @@ export default function PnlPage() {
   const [preset, setPreset] = useState<PnlRangePreset>('7d');
   const [method, setMethod] = useState<PnlMethod>('gmgn');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const [selectedDay, setSelectedDay] = useState<Date | undefined>();
   const [results, setResults] = useState<Record<string, PnlComputeResponse>>({});
   const [computing, setComputing] = useState(false);
   const [singleCard, setSingleCard] = useState(false);
@@ -109,21 +110,28 @@ export default function PnlPage() {
   }, [selectedBgId, bgImages, loadBackgroundImage]);
 
   const resolveBounds = useCallback((): { fromMs: number; toMs: number } | null => {
-    const toMs = Date.now();
+    const nowMs = Date.now();
     if (preset === 'custom') {
       if (!dateRange?.from || !dateRange?.to) return null;
       const fromMs = startOfDay(dateRange.from).getTime();
       const endMs = endOfDay(dateRange.to).getTime();
       if (fromMs > endMs) return null;
-      return { fromMs, toMs: Math.min(endMs, toMs) };
+      return { fromMs, toMs: Math.min(endMs, nowMs) };
     }
-    return { fromMs: toMs - PRESET_MS[preset], toMs };
-  }, [preset, dateRange]);
+    if (preset === 'day') {
+      if (!selectedDay) return null;
+      const fromMs = startOfDay(selectedDay).getTime();
+      const endMs = endOfDay(selectedDay).getTime();
+      if (fromMs > nowMs) return null;
+      return { fromMs, toMs: Math.min(endMs, nowMs) };
+    }
+    return { fromMs: nowMs - PRESET_MS[preset], toMs: nowMs };
+  }, [preset, dateRange, selectedDay]);
 
   const handleCompute = useCallback(async () => {
     const bounds = resolveBounds();
     if (!bounds) {
-      setError('Sélectionne une plage de dates valide.');
+      setError(preset === 'day' ? 'Sélectionne un jour valide.' : 'Sélectionne une plage de dates valide.');
       return;
     }
     if (wallets.length === 0) {
@@ -214,6 +222,8 @@ export default function PnlPage() {
               onPresetChange={setPreset}
               dateRange={dateRange}
               onDateRangeChange={setDateRange}
+              selectedDay={selectedDay}
+              onSelectedDayChange={setSelectedDay}
             />
             <div className="space-y-1.5">
               <label htmlFor="pnl-method" className="text-sm font-medium">
