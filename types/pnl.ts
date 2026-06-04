@@ -71,7 +71,7 @@ export interface PnlComputeResponse {
   endBalanceSol?: number;
 }
 
-export type PnlRangePreset = '1d' | '7d' | '30d' | 'day' | 'custom';
+export type PnlRangePreset = 'today' | '1d' | '7d' | '30d' | 'day' | 'custom';
 
 /** Méthode de calcul du PNL choisie par l'utilisateur. */
 export type PnlMethod = 'gmgn' | 'balance_delta';

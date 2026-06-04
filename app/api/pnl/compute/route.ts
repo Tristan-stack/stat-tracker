@@ -7,7 +7,7 @@ import type { PnlComputeResponse, PnlMethod, PnlRangePreset } from '@/types/pnl'
 
 export const maxDuration = 60;
 
-const VALID_PRESETS: PnlRangePreset[] = ['1d', '7d', '30d', 'day', 'custom'];
+const VALID_PRESETS: PnlRangePreset[] = ['today', '1d', '7d', '30d', 'day', 'custom'];
 const VALID_METHODS: PnlMethod[] = ['gmgn', 'balance_delta'];
 
 export async function POST(req: NextRequest) {

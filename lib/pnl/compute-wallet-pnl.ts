@@ -138,7 +138,7 @@ export async function computeWalletPnl(
   const warnings: string[] = [];
 
   // Seuls les presets relatifs (1d/7d/30d) sont couverts par GMGN wallet_stats.
-  // `day` (jour précis) et `custom` passent par l'agrégation d'activité sur [fromMs, toMs].
+  // `today`, `day` (jour précis) et `custom` passent par l'agrégation d'activité sur [fromMs, toMs].
   const statsPeriod =
     preset === '1d' || preset === '7d' || preset === '30d' ? GMGN_STATS_PERIODS[preset] : null;
   if (statsPeriod) {

@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import type { PnlRangePreset } from '@/types/pnl';
 
 const PRESETS: { value: Exclude<PnlRangePreset, 'custom' | 'day'>; label: string }[] = [
+  { value: 'today', label: "Aujourd'hui" },
   { value: '1d', label: '1 jour' },
   { value: '7d', label: '7 jours' },
   { value: '30d', label: '30 jours' },

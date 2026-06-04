@@ -111,6 +111,9 @@ export default function PnlPage() {
 
   const resolveBounds = useCallback((): { fromMs: number; toMs: number } | null => {
     const nowMs = Date.now();
+    if (preset === 'today') {
+      return { fromMs: startOfDay(nowMs).getTime(), toMs: nowMs };
+    }
     if (preset === 'custom') {
       if (!dateRange?.from || !dateRange?.to) return null;
       const fromMs = startOfDay(dateRange.from).getTime();
