@@ -14,7 +14,15 @@ import {
   filterPumpfunTokensOnly,
   validateTokensByCrossReference,
 } from '@/lib/analysis/discover-rugger-tokens';
-import { query } from '@/lib/db';
+import {
+  updateAnalysisStatus,
+  finalizeAnalysis,
+  upsertAnalysisMotherAddress,
+  upsertAnalysisBuyerWallet,
+  insertAnalysisBuyerPurchase,
+  loadWalletCentricCandidates,
+  loadHistoricalMaxCoverageByRugger as loadHistoricalMaxCoverageByRuggerForAnalysis,
+} from '@/features/analysis/repository';
 
 const ANALYSIS_CONCURRENCY = Number(process.env.ANALYSIS_CONCURRENCY ?? '3');
 const FUNDING_BATCH_SIZE = 10;
@@ -869,56 +877,6 @@ function mergeRecoveredBuyers(
   return { mergedBuyers, recoveredWalletAddresses };
 }
 
-async function loadWalletCentricCandidates(analysisId: string): Promise<string[]> {
-  const rows = await query<{ wallet_address: string }>(
-    `WITH target_rugger AS (
-       SELECT rugger_id
-       FROM wallet_analyses
-       WHERE id = $1
-     )
-     SELECT DISTINCT wallet_address
-     FROM (
-       SELECT rbw.wallet_address
-       FROM rugger_buyer_wallets rbw
-       JOIN target_rugger tr ON tr.rugger_id = rbw.rugger_id
-       UNION ALL
-       SELECT bw.wallet_address
-       FROM analysis_buyer_wallets bw
-       JOIN wallet_analyses wa ON wa.id = bw.analysis_id
-       JOIN target_rugger tr ON tr.rugger_id = wa.rugger_id
-       UNION ALL
-       SELECT ww.wallet_address
-       FROM watchlist_wallets ww
-       JOIN target_rugger tr ON tr.rugger_id = ww.source_rugger_id
-     ) candidate_wallets`,
-    [analysisId]
-  );
-  return rows.map((row) => row.wallet_address);
-}
-
-async function loadHistoricalMaxCoverageByRuggerForAnalysis(analysisId: string): Promise<Map<string, number>> {
-  const rows = await query<{ wallet_address: string; max_coverage: string | number }>(
-    `WITH target_rugger AS (
-       SELECT rugger_id
-       FROM wallet_analyses
-       WHERE id = $1
-     )
-     SELECT bw.wallet_address, MAX(bw.coverage_percent) AS max_coverage
-     FROM analysis_buyer_wallets bw
-     JOIN wallet_analyses wa ON wa.id = bw.analysis_id
-     JOIN target_rugger tr ON tr.rugger_id = wa.rugger_id
-     GROUP BY bw.wallet_address`,
-    [analysisId]
-  );
-  const out = new Map<string, number>();
-  for (const row of rows) {
-    const n = typeof row.max_coverage === 'number' ? row.max_coverage : Number(row.max_coverage);
-    if (!Number.isFinite(n)) continue;
-    out.set(row.wallet_address.toLowerCase(), n);
-  }
-  return out;
-}
-
 function selectTopCandidatesByCoverage(
   candidateWallets: string[],
   currentBuyers: DiscoveredBuyer[],
@@ -1070,14 +1028,8 @@ async function persistResults(
 
   const motherIdMap = new Map<string, string>();
   for (const [address, wallets] of motherAddresses) {
-    const rows = await query<{ id: string }>(
-      `INSERT INTO analysis_mother_addresses (id, analysis_id, address, wallets_funded)
-       VALUES (gen_random_uuid(), $1, $2, $3)
-       ON CONFLICT (analysis_id, address) DO UPDATE SET wallets_funded = $3
-       RETURNING id`,
-      [analysisId, address, wallets.size]
-    );
-    if (rows[0]) motherIdMap.set(address, rows[0].id);
+    const id = await upsertAnalysisMotherAddress(analysisId, address, wallets.size);
+    if (id) motherIdMap.set(address, id);
   }
 
   for (const w of mergedWallets) {
@@ -1085,90 +1037,43 @@ async function persistResults(
     const decision = decisions.get(w.walletAddress);
     const motherId = w.motherAddress ? motherIdMap.get(w.motherAddress) ?? null : null;
 
-    await query(
-      `INSERT INTO analysis_buyer_wallets
-       (id, analysis_id, wallet_address, source, mother_address_id,
-        tokens_bought, total_tokens, coverage_percent,
-        first_buy_at, last_buy_at, active_days, span_days_in_scope, consistency, weight,
-        avg_hold_duration_hours, funding_depth, funding_chain, mother_child_count, has_high_fanout_mother,
-        matching_confidence, inclusion_decision, risk_flag, risk_level, decision_reasons)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-       ON CONFLICT (analysis_id, wallet_address) DO UPDATE SET
-         source = $3, mother_address_id = $4,
-         tokens_bought = $5, total_tokens = $6, coverage_percent = $7,
-         first_buy_at = $8, last_buy_at = $9, active_days = $10, span_days_in_scope = $11,
-         consistency = $12, weight = $13,
-         avg_hold_duration_hours = $14, funding_depth = $15, funding_chain = $16,
-         mother_child_count = $17, has_high_fanout_mother = $18,
-         matching_confidence = $19, inclusion_decision = $20, risk_flag = $21, risk_level = $22, decision_reasons = $23`,
-      [
-        analysisId,
-        w.walletAddress,
-        w.source,
-        motherId,
-        score?.tokensBought ?? w.purchases.length,
-        score?.totalTokens ?? 0,
-        score?.coveragePercent ?? 0,
-        score?.firstBuyAt ?? null,
-        score?.lastBuyAt ?? null,
-        score?.activeDaysInScope ?? 0,
-        score?.spanDaysInScope ?? 0,
-        score?.consistency ?? 0,
-        score?.weight ?? 0,
-        score?.avgHoldDurationHours ?? null,
-        w.fundingDepth,
-        w.fundingChain ? JSON.stringify(w.fundingChain) : null,
-        w.motherChildCount,
-        w.hasHighFanoutMother,
-        decision?.matchingConfidence ?? 0,
-        decision?.inclusionDecision ?? 'included',
-        decision?.riskFlag ?? null,
-        decision?.riskLevel ?? null,
-        JSON.stringify(decision?.decisionReasons ?? ['high_coverage']),
-      ]
-    );
+    await upsertAnalysisBuyerWallet({
+      analysisId,
+      walletAddress: w.walletAddress,
+      source: w.source,
+      motherAddressId: motherId,
+      tokensBought: score?.tokensBought ?? w.purchases.length,
+      totalTokens: score?.totalTokens ?? 0,
+      coveragePercent: score?.coveragePercent ?? 0,
+      firstBuyAt: score?.firstBuyAt ?? null,
+      lastBuyAt: score?.lastBuyAt ?? null,
+      activeDays: score?.activeDaysInScope ?? 0,
+      spanDaysInScope: score?.spanDaysInScope ?? 0,
+      consistency: score?.consistency ?? 0,
+      weight: score?.weight ?? 0,
+      avgHoldDurationHours: score?.avgHoldDurationHours ?? null,
+      fundingDepth: w.fundingDepth,
+      fundingChain: w.fundingChain ?? null,
+      motherChildCount: w.motherChildCount,
+      hasHighFanoutMother: w.hasHighFanoutMother,
+      matchingConfidence: decision?.matchingConfidence ?? 0,
+      inclusionDecision: decision?.inclusionDecision ?? 'included',
+      riskFlag: decision?.riskFlag ?? null,
+      riskLevel: decision?.riskLevel ?? null,
+      decisionReasons: decision?.decisionReasons ?? ['high_coverage'],
+    });
 
     for (const p of w.purchases) {
-      await query(
-        `INSERT INTO analysis_buyer_purchases
-         (id, buyer_wallet_id, token_address, token_name, purchased_at, amount_sol)
-         SELECT gen_random_uuid(), bw.id, $2, $3, $4, $5
-         FROM analysis_buyer_wallets bw
-         WHERE bw.analysis_id = $1 AND bw.wallet_address = $6
-         ON CONFLICT (buyer_wallet_id, token_address) DO NOTHING`,
-        [analysisId, p.tokenAddress, p.tokenName, p.purchasedAt, p.amountSol, w.walletAddress]
-      );
+      await insertAnalysisBuyerPurchase({
+        analysisId,
+        walletAddress: w.walletAddress,
+        tokenAddress: p.tokenAddress,
+        tokenName: p.tokenName,
+        purchasedAt: p.purchasedAt,
+        amountSol: p.amountSol,
+      });
     }
   }
 
   return motherAddresses.size;
-}
-
-async function updateAnalysisStatus(
-  analysisId: string,
-  status: string,
-  progress: number,
-  progressLabel: string | null,
-  errorMessage?: string
-): Promise<void> {
-  await query(
-    `UPDATE wallet_analyses SET status = $2, progress = $3, progress_label = $4, error_message = $5 WHERE id = $1`,
-    [analysisId, status, progress, progressLabel, errorMessage ?? null]
-  );
-}
-
-async function finalizeAnalysis(
-  analysisId: string,
-  tokenCount: number,
-  buyerCount: number,
-  partial = false
-): Promise<void> {
-  const label = partial ? 'Complete (partiel — budget temps atteint)' : 'Complete';
-  await query(
-    `UPDATE wallet_analyses
-     SET status = 'completed', progress = 100, progress_label = $4,
-         token_count = $2, buyer_count = $3, completed_at = NOW()
-     WHERE id = $1`,
-    [analysisId, tokenCount, buyerCount, label]
-  );
 }

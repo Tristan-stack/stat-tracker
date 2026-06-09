@@ -1,11 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { RuggerBuyerOrigin, RuggerBuyerWallet } from '@/types/rugger-buyer';
 import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import {
+  useBuyers,
+  useAddBuyer,
+  useUpdateBuyer,
+  useDeleteBuyer,
+  useAggregateTokens,
+} from '@/features/ruggers/hooks/use-buyers';
 
 interface RuggerBuyersTabProps {
   ruggerId: string;
@@ -19,9 +26,17 @@ const ORIGIN_LABELS: Record<RuggerBuyerOrigin, string> = {
   scraping: 'Scraping',
 };
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : 'Erreur';
+}
+
 export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuyersTabProps) {
-  const [buyers, setBuyers] = useState<RuggerBuyerWallet[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: buyers = [], isLoading } = useBuyers(ruggerId);
+  const addBuyer = useAddBuyer(ruggerId);
+  const updateBuyer = useUpdateBuyer(ruggerId);
+  const deleteBuyer = useDeleteBuyer(ruggerId);
+  const aggregateTokens = useAggregateTokens(ruggerId);
+
   const [error, setError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [newAddress, setNewAddress] = useState('');
@@ -30,112 +45,61 @@ export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuye
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editNotes, setEditNotes] = useState('');
-  const [isAggregating, setIsAggregating] = useState(false);
   const [aggregateMessage, setAggregateMessage] = useState<string | null>(null);
 
-  const fetchBuyers = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/buyers`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { buyers: RuggerBuyerWallet[] };
-      setBuyers(data.buyers);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [ruggerId]);
-
-  useEffect(() => {
-    void fetchBuyers();
-  }, [fetchBuyers]);
-
-  const handleAddBuyer = useCallback(async () => {
+  const handleAddBuyer = async () => {
     setError(null);
     const walletAddress = newAddress.trim();
     if (walletAddress === '') {
       setError('Adresse wallet requise.');
       return;
     }
-    const res = await fetch(`/api/ruggers/${ruggerId}/buyers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    try {
+      await addBuyer.mutateAsync({
         walletAddress,
         label: newLabel.trim() || null,
         notes: newNotes.trim() || null,
-        origin: 'manual',
-      }),
-    });
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? 'Erreur');
-      return;
+      });
+      setNewAddress('');
+      setNewLabel('');
+      setNewNotes('');
+      setIsAdding(false);
+    } catch (e) {
+      setError(errorMessage(e));
     }
-    setNewAddress('');
-    setNewLabel('');
-    setNewNotes('');
-    setIsAdding(false);
-    await fetchBuyers();
-  }, [newAddress, newLabel, newNotes, ruggerId, fetchBuyers]);
+  };
 
-  const handleDeleteBuyer = useCallback(
-    async (buyer: RuggerBuyerWallet) => {
-      if (!window.confirm(`Supprimer le wallet acheteur "${buyer.walletAddress}" ?`)) return;
-      const res = await fetch(`/api/ruggers/${ruggerId}/buyers/${buyer.id}`, { method: 'DELETE' });
-      if (!res.ok) return;
-      await fetchBuyers();
-    },
-    [ruggerId, fetchBuyers]
-  );
+  const handleDeleteBuyer = async (buyer: RuggerBuyerWallet) => {
+    if (!window.confirm(`Supprimer le wallet acheteur "${buyer.walletAddress}" ?`)) return;
+    await deleteBuyer.mutateAsync(buyer.id).catch(() => {});
+  };
 
-  const startEdit = useCallback((buyer: RuggerBuyerWallet) => {
+  const startEdit = (buyer: RuggerBuyerWallet) => {
     setEditingId(buyer.id);
     setEditLabel(buyer.label ?? '');
     setEditNotes(buyer.notes ?? '');
-  }, []);
+  };
 
-  const handleUpdateBuyer = useCallback(
-    async (buyerId: string) => {
-      const res = await fetch(`/api/ruggers/${ruggerId}/buyers/${buyerId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: editLabel.trim() || null,
-          notes: editNotes.trim() || null,
-        }),
+  const handleUpdateBuyer = async (buyerId: string) => {
+    try {
+      await updateBuyer.mutateAsync({
+        buyerId,
+        label: editLabel.trim() || null,
+        notes: editNotes.trim() || null,
       });
-      if (!res.ok) return;
       setEditingId(null);
-      await fetchBuyers();
-    },
-    [ruggerId, editLabel, editNotes, fetchBuyers]
-  );
+    } catch {
+      // erreur ignorée : la ligne reste en édition
+    }
+  };
 
-  const handleAggregateTokens = useCallback(async () => {
-    setIsAggregating(true);
+  const handleAggregateTokens = async () => {
     setAggregateMessage(null);
     try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/buyers/aggregate-tokens`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = (await res.json()) as {
-        insertedCount?: number;
-        skippedExistingCount?: number;
-        sourceWalletCount?: number;
-        walletRanking?: Array<{ walletAddress: string; tokenCount: number; coveragePercent: number }>;
-        selectionStats?: Array<{ walletAddress: string; selectedTokenCount: number }>;
-        error?: string;
-      };
-      if (!res.ok) {
-        setAggregateMessage(data.error ?? 'Erreur pendant l’agrégation.');
-        return;
-      }
+      const data = await aggregateTokens.mutateAsync();
       const primaryWallet = data.walletRanking?.[0];
       const primarySelection = data.selectionStats?.[0];
-      const baseMessage =
-        `${data.insertedCount ?? 0} token(s) ajouté(s) depuis ${data.sourceWalletCount ?? 0} wallet(s). ${data.skippedExistingCount ?? 0} déjà présent(s).`;
+      const baseMessage = `${data.insertedCount ?? 0} token(s) ajouté(s) depuis ${data.sourceWalletCount ?? 0} wallet(s). ${data.skippedExistingCount ?? 0} déjà présent(s).`;
       const strategyMessage = primaryWallet
         ? ` Wallet prioritaire: ${primaryWallet.walletAddress} (${primaryWallet.coveragePercent.toFixed(1)}% de couverture).`
         : '';
@@ -144,19 +108,19 @@ export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuye
         : '';
       setAggregateMessage(`${baseMessage}${strategyMessage}${selectionMessage}`);
       onRuggerChange();
-    } finally {
-      setIsAggregating(false);
+    } catch (e) {
+      setAggregateMessage(errorMessage(e) || 'Erreur pendant l’agrégation.');
     }
-  }, [ruggerId, onRuggerChange]);
+  };
 
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">Wallets acheteurs</h2>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" className="gap-1" disabled={isAggregating} onClick={() => void handleAggregateTokens()}>
+          <Button type="button" variant="outline" size="sm" className="gap-1" disabled={aggregateTokens.isPending} onClick={() => void handleAggregateTokens()}>
             <Sparkles className="size-4" />
-            {isAggregating ? 'Agrégation…' : 'Générer les tokens du rugger'}
+            {aggregateTokens.isPending ? 'Agrégation…' : 'Générer les tokens du rugger'}
           </Button>
           <Button type="button" size="sm" className="gap-1" onClick={() => setIsAdding(true)}>
             <Plus className="size-4" />
@@ -185,7 +149,7 @@ export default function RuggerBuyersTab({ ruggerId, onRuggerChange }: RuggerBuye
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex gap-2">
-            <Button type="button" size="sm" onClick={() => void handleAddBuyer()}>Ajouter</Button>
+            <Button type="button" size="sm" disabled={addBuyer.isPending} onClick={() => void handleAddBuyer()}>Ajouter</Button>
             <Button type="button" variant="outline" size="sm" onClick={() => { setIsAdding(false); setError(null); }}>Annuler</Button>
           </div>
         </div>

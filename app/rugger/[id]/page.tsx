@@ -1,18 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import type { Rugger, WalletType, StatusId } from '@/types/rugger';
-import { STATUS_LABELS, STATUS_ORDER, STATUS_BADGE_STYLES } from '@/types/rugger';
+import type { WalletType } from '@/types/rugger';
+import { STATUS_LABELS, STATUS_ORDER } from '@/types/rugger';
 import { ArrowLeft, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { safeUserHttpUrl } from '@/lib/safe-browser-url';
 import { openSafeUserHttpUrlInNewTab } from '@/lib/open-trusted-solana-external';
+import { StatusBadge } from '@/features/ruggers/components/StatusBadge';
+import { RuggerForm } from '@/features/ruggers/components/RuggerForm';
+import { useRugger, useUpdateRugger, useDeleteRugger } from '@/features/ruggers/hooks/use-ruggers';
 import RuggerTokensTab from '@/components/rugger/RuggerTokensTab';
 import RuggerNetworkTab from '@/components/rugger/RuggerNetworkTab';
 import RuggerBuyersTab from '@/components/rugger/RuggerBuyersTab';
@@ -26,118 +28,48 @@ const walletTypeLabel: Record<WalletType, string> = {
   buyer: 'Wallet acheteur',
 };
 
-function StatusBadge({ statusId }: { statusId: StatusId }) {
-  return (
-    <span className={cn('rounded px-2 py-0.5 text-[11px] font-medium tracking-wide', STATUS_BADGE_STYLES[statusId])}>
-      {STATUS_LABELS[statusId]}
-    </span>
-  );
-}
-
 export default function RuggerDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const qc = useQueryClient();
   const id = typeof params.id === 'string' ? params.id : null;
 
-  const [rugger, setRugger] = useState<Rugger | null>(null);
-  const [isLoadingRugger, setIsLoadingRugger] = useState(true);
+  const { data: rugger, isLoading } = useRugger(id);
+  const updateRugger = useUpdateRugger();
+  const deleteRugger = useDeleteRugger();
+
   const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editWalletAddress, setEditWalletAddress] = useState('');
-  const [editWalletType, setEditWalletType] = useState<WalletType>('simple');
-  const [editNotes, setEditNotes] = useState('');
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<RuggerTab>('tokens');
 
-  const loadRugger = useCallback(async (ruggerId: string) => {
-    setIsLoadingRugger(true);
-    try {
-      const response = await fetch(`/api/ruggers/${ruggerId}`);
-      if (!response.ok) return;
-      const data = (await response.json()) as Rugger;
-      setRugger(data);
-    } finally {
-      setIsLoadingRugger(false);
-    }
-  }, []);
+  // Les onglets (tokens/buyers) modifient des données qui impactent le rugger
+  // (tokenCount, gains) : on invalide la query pour rafraîchir le header.
+  const handleRuggerChange = () => qc.invalidateQueries({ queryKey: ['ruggers'] });
 
-  useEffect(() => {
-    if (!id) return;
-    void loadRugger(id);
-  }, [id, loadRugger]);
-
-  useEffect(() => {
-    if (rugger && isEditing) {
-      setEditName(rugger.name ?? '');
-      setEditDescription(rugger.description ?? '');
-      setEditWalletAddress(rugger.walletAddress ?? '');
-      setEditWalletType(rugger.walletType);
-      setEditNotes(rugger.notes ?? '');
-    }
-  }, [rugger, isEditing]);
-
-  const handleUpdateRugger = useCallback(
-    async (event: React.FormEvent) => {
-      event.preventDefault();
-      if (!id) return;
-      const response = await fetch(`/api/ruggers/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editName.trim() || null,
-          description: editDescription.trim() || null,
-          walletAddress: editWalletAddress.trim() || null,
-          walletType: editWalletType,
-          notes: editNotes.trim() || null,
-        }),
-      });
-      if (!response.ok) return;
-      setIsEditing(false);
-      await loadRugger(id);
-    },
-    [id, editName, editDescription, editWalletAddress, editWalletType, editNotes, loadRugger]
-  );
-
-  const handleAdvanceStatus = useCallback(async () => {
+  const handleAdvanceStatus = async () => {
     if (!id || !rugger) return;
-    const currentIndex = STATUS_ORDER.indexOf(rugger.statusId);
-    if (currentIndex >= STATUS_ORDER.length - 1) return;
-    const nextStatus = STATUS_ORDER[currentIndex + 1];
-    const response = await fetch(`/api/ruggers/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statusId: nextStatus }),
-    });
-    if (!response.ok) return;
-    await loadRugger(id);
-  }, [id, rugger, loadRugger]);
+    const i = STATUS_ORDER.indexOf(rugger.statusId);
+    if (i >= STATUS_ORDER.length - 1) return;
+    await updateRugger.mutateAsync({ id, statusId: STATUS_ORDER[i + 1] }).catch(() => {});
+  };
 
-  const handleRetrogradeStatus = useCallback(async () => {
+  const handleRetrogradeStatus = async () => {
     if (!id || !rugger) return;
-    const currentIndex = STATUS_ORDER.indexOf(rugger.statusId);
-    if (currentIndex <= 0) return;
-    const prevStatus = STATUS_ORDER[currentIndex - 1];
-    const response = await fetch(`/api/ruggers/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statusId: prevStatus }),
-    });
-    if (!response.ok) return;
-    await loadRugger(id);
-  }, [id, rugger, loadRugger]);
+    const i = STATUS_ORDER.indexOf(rugger.statusId);
+    if (i <= 0) return;
+    await updateRugger.mutateAsync({ id, statusId: STATUS_ORDER[i - 1] }).catch(() => {});
+  };
 
-  const handleDeleteRugger = useCallback(async () => {
+  const handleDeleteRugger = async () => {
     if (!id || !rugger) return;
     if (!window.confirm(`Supprimer le rugger "${rugger.name ?? rugger.walletAddress ?? rugger.id}" ? Les tokens associés seront aussi supprimés.`)) return;
-    const response = await fetch(`/api/ruggers/${id}`, { method: 'DELETE' });
-    if (!response.ok) return;
-    router.push('/rugger');
-  }, [id, rugger, router]);
-
-  const handleRuggerChange = useCallback(() => {
-    if (id) void loadRugger(id);
-  }, [id, loadRugger]);
+    try {
+      await deleteRugger.mutateAsync(id);
+      router.push('/rugger');
+    } catch {
+      // erreur ignorée : on reste sur la page
+    }
+  };
 
   if (!id) {
     return (
@@ -147,7 +79,7 @@ export default function RuggerDetailPage() {
     );
   }
 
-  if (isLoadingRugger && !rugger) {
+  if (isLoading && !rugger) {
     return (
       <div className="p-6 sm:p-8">
         <p className="text-muted-foreground">Chargement…</p>
@@ -273,42 +205,17 @@ export default function RuggerDetailPage() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setIsEditing(false)}>Fermer</Button>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleUpdateRugger} className="flex flex-col gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-detail-name">Nom (optionnel)</Label>
-                  <Input id="edit-detail-name" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="ex. Rugger principal" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-detail-description">Description (optionnel)</Label>
-                  <Input id="edit-detail-description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="ex. Wallet principal CEX" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-detail-wallet">Adresse du wallet (optionnel)</Label>
-                  <Input id="edit-detail-wallet" value={editWalletAddress} onChange={(e) => setEditWalletAddress(e.target.value)} placeholder="0x..." />
-                  {editWalletType === 'buyer' && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Adresse Solana du wallet acheteur pour le montant du 1er achat dans le tableau des tokens.
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-detail-type">Type de wallet</Label>
-                  <select id="edit-detail-type" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={editWalletType} onChange={(e) => setEditWalletType(e.target.value as WalletType)}>
-                    <option value="exchange">Exchange</option>
-                    <option value="mother">Mère</option>
-                    <option value="simple">Simple</option>
-                    <option value="buyer">Wallet acheteur</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-detail-notes">Notes (optionnel)</Label>
-                  <textarea id="edit-detail-notes" className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes sur ce rugger…" />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Annuler</Button>
-                  <Button type="submit" size="sm">Enregistrer</Button>
-                </div>
-              </form>
+              <RuggerForm
+                idPrefix="edit-detail"
+                submitLabel="Enregistrer"
+                pending={updateRugger.isPending}
+                initial={rugger}
+                onCancel={() => setIsEditing(false)}
+                onSubmit={async (payload) => {
+                  await updateRugger.mutateAsync({ id, ...payload });
+                  setIsEditing(false);
+                }}
+              />
             </CardContent>
           </Card>
         </div>

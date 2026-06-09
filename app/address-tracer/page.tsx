@@ -27,6 +27,7 @@ import type {
   TracerType,
 } from '@/types/address-trace';
 import { solscanAccountHref, solscanTxHref } from '@/lib/solana-external-links';
+import { readNdjsonStream } from '@/lib/http/stream';
 
 interface LogEntry {
   time: Date;
@@ -260,23 +261,10 @@ export default function AddressTracerPage() {
           return;
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+        await readNdjsonStream(res.body, (raw) => {
+          const event = raw as TraceEvent;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed === '') continue;
-            const event = JSON.parse(trimmed) as TraceEvent;
-
-            if (event.type === 'started') {
+          if (event.type === 'started') {
               appendLog(
                 `Démarrage du traçage (${event.tracerType}) — fenêtre ${event.minSol}–${event.maxSol} SOL.`
               );
@@ -302,8 +290,7 @@ export default function AddressTracerPage() {
             } else if (event.type === 'cancelled') {
               setInfoMessage(event.message ?? 'Traçage annulé.');
             }
-          }
-        }
+        });
       } catch (err) {
         const isAbort =
           (err instanceof DOMException || err instanceof Error) && (err as Error).name === 'AbortError';

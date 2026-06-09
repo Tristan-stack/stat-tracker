@@ -14,7 +14,26 @@ import {
   suggestSnipeMode,
 } from '@/lib/token-calculations';
 import { inferActivityHoursFromTokens } from '@/lib/infer-activity-hours';
-import type { Token, TokenWithMetrics, ExitMode } from '@/types/token';
+import {
+  MAX_TPS,
+  WALLET_SLOTS,
+  FEE_EUR_PER_PAIR,
+  DEFAULT_TP,
+  parseDecimal,
+  parseTakeProfits,
+  mcapToPercent,
+  autoInitialSellPercentFromTarget,
+  resolveTpsForToken,
+  simulateTokenMultiTp,
+  simulateTokenSimpleRealistic,
+  getMultiTpSimulation,
+  getMultiTpSimulationWalletAmounts,
+  getLocalDayKey,
+  type TakeProfitInput,
+  type TakeProfitParsed,
+  type BestWorstDaySummary,
+} from '@/lib/token-simulation';
+import type { Token, ExitMode } from '@/types/token';
 import { Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,12 +48,6 @@ function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatNum(value, 2)} %`;
 }
 
-function parseDecimal(value: string): number {
-  const normalized = value.trim().replace(',', '.');
-  const n = Number(normalized);
-  return Number.isFinite(n) ? n : 0;
-}
-
 /** `usdPerOneSol` = prix d’1 SOL en USD (spot Helius/GMGN). */
 function formatUsdInputAsSol(usdInput: string, usdPerOneSol: number | null): string | null {
   if (usdPerOneSol === null || !Number.isFinite(usdPerOneSol) || usdPerOneSol <= 0) return null;
@@ -44,230 +57,6 @@ function formatUsdInputAsSol(usdInput: string, usdPerOneSol: number | null): str
   if (!Number.isFinite(sol)) return null;
   return sol.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
-
-const MAX_TPS = 5;
-const WALLET_SLOTS = 5;
-/** Frais fixes (€) par couple wallet × token pour le mode revenu optimisé. */
-const FEE_EUR_PER_PAIR = 2;
-
-interface TakeProfitInput {
-  executionType: 'tp' | 'initial';
-  /** Valeur saisie : gain % ou MCap absolu selon `targetMode`. */
-  targetValue: string;
-  withdrawPercent: string;
-  targetMode: ExitMode;
-}
-
-/** Brut avant résolution par token (entrée différente → % effectif différent en mode MCap). */
-interface TakeProfitParsed {
-  executionType: 'tp' | 'initial';
-  rawTarget: number;
-  targetMode: ExitMode;
-  withdrawPercent: number;
-}
-
-function parseTakeProfits(inputs: TakeProfitInput[]): TakeProfitParsed[] {
-  return inputs
-    .map((tp) => ({
-      executionType: tp.executionType,
-      rawTarget: parseDecimal(tp.targetValue),
-      targetMode: tp.targetMode,
-      withdrawPercent:
-        tp.executionType === 'initial'
-          ? 0
-          : parseDecimal(tp.withdrawPercent),
-    }))
-    .filter((tp) =>
-      tp.executionType === 'initial'
-        ? tp.rawTarget > 0
-        : tp.rawTarget > 0 && tp.withdrawPercent > 0
-    );
-}
-
-function mcapToPercent(entryPrice: number, mcap: number): number {
-  return entryPrice > 0 ? ((mcap / entryPrice) - 1) * 100 : Infinity;
-}
-
-function autoInitialSellPercentFromTarget(targetPercent: number): number | null {
-  const multiple = 1 + targetPercent / 100;
-  if (!Number.isFinite(multiple) || multiple <= 0) return null;
-  return Math.max(0, Math.min(100, (1 / multiple) * 100));
-}
-
-/** Convertit chaque TP (% ou MCap) en % de gain vs entrée, puis trie pour l’ordre d’exécution. */
-function resolveTpsForToken(
-  takeProfits: TakeProfitParsed[],
-  token: TokenWithMetrics
-): { targetPercent: number; withdrawPercent: number; executionType: 'tp' | 'initial' }[] {
-  return takeProfits
-    .map((tp) => ({
-      executionType: tp.executionType,
-      targetPercent:
-        tp.targetMode === 'percent'
-          ? tp.rawTarget
-          : mcapToPercent(token.entryPrice, tp.rawTarget),
-      withdrawPercent: tp.withdrawPercent,
-    }))
-    .filter((tp) => Number.isFinite(tp.targetPercent) && tp.targetPercent > 0)
-    .sort((a, b) => a.targetPercent - b.targetPercent);
-}
-
-function simulateTokenMultiTp(
-  amount: number,
-  token: TokenWithMetrics,
-  takeProfits: { targetPercent: number; withdrawPercent: number; executionType: 'tp' | 'initial' }[]
-): number {
-  let remainingFraction = 1;
-  let totalReceived = 0;
-
-  for (const tp of takeProfits) {
-    if (remainingFraction <= 0) break;
-    if (token.maxGainPercent >= tp.targetPercent) {
-      let soldFraction = 0;
-      if (tp.executionType === 'initial') {
-        const multiple = 1 + tp.targetPercent / 100;
-        if (multiple > 0) {
-          // Vendre uniquement la fraction nécessaire pour récupérer la mise initiale.
-          const requiredFractionOfOriginal = 1 / multiple;
-          soldFraction = Math.min(remainingFraction, requiredFractionOfOriginal);
-        }
-      } else {
-        soldFraction = remainingFraction * Math.min(tp.withdrawPercent, 100) / 100;
-      }
-
-      if (soldFraction <= 0) continue;
-      totalReceived += amount * soldFraction * (1 + tp.targetPercent / 100);
-      remainingFraction -= soldFraction;
-    } else {
-      break;
-    }
-  }
-
-  if (remainingFraction > 0) {
-    totalReceived += amount * remainingFraction * (1 + token.maxLossPercent / 100);
-  }
-
-  return totalReceived;
-}
-
-function simulateTokenSimpleRealistic(amount: number, token: TokenWithMetrics): number {
-  const realizedPercent = token.targetReached ? token.targetExitPercent : token.maxLossPercent;
-  return amount * (1 + realizedPercent / 100);
-}
-
-interface MultiTpSimulationResult {
-  investedTotal: number;
-  totalReceived: number;
-  profit: number;
-  profitPercent: number;
-  tokensWithAtLeastOneTp: number;
-  tokensFullLoss: number;
-  totalFees: number;
-  profitBeforeFees: number;
-}
-
-interface DailyPnlPoint {
-  dayKey: string;
-  dayLabel: string;
-  pnl: number;
-}
-
-interface BestWorstDaySummary {
-  bestDay: DailyPnlPoint;
-  worstDay: DailyPnlPoint;
-  averageDayPnl: number;
-}
-
-function getLocalDayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getMultiTpSimulation(
-  amount: number,
-  tokensWithMetrics: TokenWithMetrics[],
-  takeProfits: TakeProfitParsed[]
-): MultiTpSimulationResult {
-  const investedTotal = amount * tokensWithMetrics.length;
-  let totalReceived = 0;
-  let tokensWithAtLeastOneTp = 0;
-
-  for (const token of tokensWithMetrics) {
-    const resolved = resolveTpsForToken(takeProfits, token);
-    totalReceived += simulateTokenMultiTp(amount, token, resolved);
-    const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
-    if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
-  }
-
-  const profitBeforeFees = totalReceived - investedTotal;
-  const profit = profitBeforeFees;
-  const profitPercent = investedTotal > 0 ? (profit / investedTotal) * 100 : 0;
-  const tokensFullLoss = tokensWithMetrics.length - tokensWithAtLeastOneTp;
-
-  return {
-    investedTotal,
-    totalReceived,
-    profit,
-    profitPercent,
-    tokensWithAtLeastOneTp,
-    tokensFullLoss,
-    totalFees: 0,
-    profitBeforeFees,
-  };
-}
-
-function getMultiTpSimulationWalletAmounts(
-  walletAmounts: number[],
-  tokensWithMetrics: TokenWithMetrics[],
-  takeProfits: TakeProfitParsed[]
-): MultiTpSimulationResult | null {
-  const N = tokensWithMetrics.length;
-  if (N === 0 || walletAmounts.length === 0) return null;
-
-  let investedTotal = 0;
-  let totalReceived = 0;
-  for (const amt of walletAmounts) {
-    investedTotal += amt * N;
-    for (const token of tokensWithMetrics) {
-      const resolved = resolveTpsForToken(takeProfits, token);
-      totalReceived += simulateTokenMultiTp(amt, token, resolved);
-    }
-  }
-
-  let tokensWithAtLeastOneTp = 0;
-  for (const token of tokensWithMetrics) {
-    const resolved = resolveTpsForToken(takeProfits, token);
-    const firstTarget = resolved.length > 0 ? resolved[0].targetPercent : Infinity;
-    if (token.maxGainPercent >= firstTarget) tokensWithAtLeastOneTp++;
-  }
-
-  const tokensFullLoss = tokensWithMetrics.length - tokensWithAtLeastOneTp;
-  const W = walletAmounts.length;
-  const totalFees = FEE_EUR_PER_PAIR * N * W;
-  const profitBeforeFees = totalReceived - investedTotal;
-  const profit = profitBeforeFees - totalFees;
-  const profitPercent = investedTotal > 0 ? (profit / investedTotal) * 100 : 0;
-
-  return {
-    investedTotal,
-    totalReceived,
-    profit,
-    profitPercent,
-    tokensWithAtLeastOneTp,
-    tokensFullLoss,
-    totalFees,
-    profitBeforeFees,
-  };
-}
-
-const DEFAULT_TP: TakeProfitInput = {
-  executionType: 'tp',
-  targetValue: '',
-  withdrawPercent: '',
-  targetMode: 'percent',
-};
 
 export interface StatsSummaryProps {
   tokens: Token[];
@@ -549,22 +338,6 @@ export function StatsSummary({
     return out;
   }, [optimizedRevenue, effectiveWalletAmounts, tokensWithMetrics, parsedTps, parsedTpsRight]);
   const primaryDaySummary = dailyPnlByStrategy.get('left') ?? null;
-
-  const handleTpChange = (index: number, field: keyof TakeProfitInput, value: string | ExitMode | 'tp' | 'initial') => {
-    setTakeProfits((prev) => prev.map((tp, i) => (i === index ? { ...tp, [field]: value } : tp)));
-  };
-
-  const addTp = () => {
-    if (takeProfits.length >= MAX_TPS) return;
-    setTakeProfits((prev) => [...prev, { ...DEFAULT_TP }]);
-  };
-
-  const removeTp = (index: number) => {
-    setTakeProfits((prev) => {
-      if (prev.length <= 1) return [{ ...DEFAULT_TP }];
-      return prev.filter((_, i) => i !== index);
-    });
-  };
 
   const handleTpChangeFor = (
     strategy: 'left' | 'right',

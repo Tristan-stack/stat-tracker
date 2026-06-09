@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { apiGet, apiPost } from '@/lib/api-client';
 import type { WatchlistWallet } from '@/types/watchlist';
 import type { Rugger } from '@/types/rugger';
 import type { CachedWalletComparison, CompareResponseSnapshot } from '@/lib/wallet-comparison/session-comparison-cache';
@@ -130,18 +131,12 @@ export default function WalletComparisonPage() {
   const fetchLists = useCallback(async () => {
     setIsLoadingLists(true);
     try {
-      const [wRes, rRes] = await Promise.all([
-        fetch('/api/watchlist'),
-        fetch('/api/ruggers?pageSize=100'),
+      const [w, r] = await Promise.allSettled([
+        apiGet<{ wallets: WatchlistWallet[] }>('/api/watchlist'),
+        apiGet<{ ruggers: Rugger[] }>('/api/ruggers?pageSize=100'),
       ]);
-      if (wRes.ok) {
-        const d = (await wRes.json()) as { wallets: WatchlistWallet[] };
-        setWatchlist(d.wallets);
-      }
-      if (rRes.ok) {
-        const d = (await rRes.json()) as { ruggers: Rugger[] };
-        setRuggers(d.ruggers);
-      }
+      if (w.status === 'fulfilled') setWatchlist(w.value.wallets);
+      if (r.status === 'fulfilled') setRuggers(r.value.ruggers);
     } finally {
       setIsLoadingLists(false);
     }
@@ -254,27 +249,27 @@ export default function WalletComparisonPage() {
         setProgress({ totalWallets: walletSnapshot.length, index: i + 1, currentWallet: walletAddress });
         appendLog(`GMGN ${i + 1}/${walletSnapshot.length} — ${walletAddress.slice(0, 8)}…`);
 
-        const res = await fetch('/api/wallet-comparison/wallet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({ walletAddress, fromMs: bounds.fromMs, toMs: bounds.toMs }),
-        });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          skipped.push({ walletAddress, error: data.error ?? `Erreur ${res.status}` });
-          appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${(data.error ?? res.status).toString().slice(0, 120)}`);
-          continue;
-        }
-        const data = (await res.json()) as
-          | { ok: true; walletAddress: string; map: BestBuyPerMint[] }
-          | { ok: false; walletAddress: string; error: string };
-        if (data.ok) {
-          okMaps.push({ walletAddress, map: data.map });
-          appendLog(`${data.map.length} mint(s) retenu(s) après dédup.`);
-        } else {
-          skipped.push({ walletAddress, error: data.error });
-          appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${data.error.slice(0, 120)}`);
+        try {
+          const data = await apiPost<
+            | { ok: true; walletAddress: string; map: BestBuyPerMint[] }
+            | { ok: false; walletAddress: string; error: string }
+          >(
+            '/api/wallet-comparison/wallet',
+            { walletAddress, fromMs: bounds.fromMs, toMs: bounds.toMs },
+            controller.signal
+          );
+          if (data.ok) {
+            okMaps.push({ walletAddress, map: data.map });
+            appendLog(`${data.map.length} mint(s) retenu(s) après dédup.`);
+          } else {
+            skipped.push({ walletAddress, error: data.error });
+            appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${data.error.slice(0, 120)}`);
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === 'AbortError') throw e;
+          const msg = e instanceof Error ? e.message : 'Erreur';
+          skipped.push({ walletAddress, error: msg });
+          appendLog(`Échec GMGN ${walletAddress.slice(0, 8)} : ${msg.slice(0, 120)}`);
         }
       }
 
@@ -285,19 +280,19 @@ export default function WalletComparisonPage() {
       }
 
       appendLog('Calcul de l’intersection et du classement…');
-      const finRes = await fetch('/api/wallet-comparison/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({ wallets: okMaps, skipped, fromMs: bounds.fromMs, toMs: bounds.toMs }),
-      });
-      if (!finRes.ok) {
-        const data = (await finRes.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? `Erreur ${finRes.status}`);
+      let payload: CompareResponse;
+      try {
+        payload = await apiPost<CompareResponse>(
+          '/api/wallet-comparison/finalize',
+          { wallets: okMaps, skipped, fromMs: bounds.fromMs, toMs: bounds.toMs },
+          controller.signal
+        );
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') throw e;
+        setError(e instanceof Error ? e.message : 'Erreur réseau.');
         setProgress(null);
         return;
       }
-      const payload = (await finRes.json()) as CompareResponse;
       setResult(payload);
       setWalletHistory(recordWalletsUsed(walletSnapshot));
       setSessionCache(

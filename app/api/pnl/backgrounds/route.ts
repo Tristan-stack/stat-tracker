@@ -1,32 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { insertPnlBackground, listPnlBackgroundsMeta } from '@/lib/repositories/pnl-backgrounds';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok, created } from '@/lib/api/responses';
+import { badRequest } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { listPnlBackgroundsMeta, insertPnlBackground } from '@/features/pnl/repository';
 
 /** Limite de taille du data URL base64 (~3 Mo). */
 const MAX_IMAGE_DATA_LENGTH = 3 * 1024 * 1024;
 
-export async function GET(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+export const GET = withAuth(async (_req, _ctx, { userId }) => {
+  const backgrounds = await listPnlBackgroundsMeta(userId);
+  return ok({ backgrounds });
+});
 
-  const backgrounds = await listPnlBackgroundsMeta(auth.userId);
-  return NextResponse.json({ backgrounds });
-}
+const createSchema = z.object({
+  name: z.string().optional(),
+  imageData: z.string(),
+});
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-
-  const body = (await req.json()) as { name?: string; imageData?: string };
-  const imageData = body.imageData;
-  if (typeof imageData !== 'string' || !imageData.startsWith('data:image/')) {
-    return NextResponse.json({ error: 'imageData invalide (data:image/ attendu)' }, { status: 400 });
+export const POST = withAuth(async (req, _ctx, { userId }) => {
+  const body = await parseBody(req, createSchema);
+  if (!body.imageData.startsWith('data:image/')) {
+    throw badRequest('imageData invalide (data:image/ attendu)');
   }
-  if (imageData.length > MAX_IMAGE_DATA_LENGTH) {
-    return NextResponse.json({ error: 'Image trop volumineuse (max ~3 Mo)' }, { status: 400 });
+  if (body.imageData.length > MAX_IMAGE_DATA_LENGTH) {
+    throw badRequest('Image trop volumineuse (max ~3 Mo)');
   }
-  const name = body.name?.trim() || null;
-
-  const background = await insertPnlBackground({ userId: auth.userId, name, imageData });
-  return NextResponse.json({ background }, { status: 201 });
-}
+  const background = await insertPnlBackground({
+    userId,
+    name: body.name?.trim() || null,
+    imageData: body.imageData,
+  });
+  return created({ background });
+});

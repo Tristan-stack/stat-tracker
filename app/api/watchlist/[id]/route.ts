@@ -1,75 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { updateWatchlist, deleteWatchlist } from '@/features/watchlist/repository';
 import { syncWatchlistToHeliusAsync } from '@/lib/helius/webhooks';
 
-export async function PATCH(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+type Ctx = { params: Promise<{ id: string }> };
 
-  const { id } = await context.params;
+const updateSchema = z.object({
+  label: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
 
-  const body = (await req.json()) as {
-    label?: string;
-    notes?: string;
-  };
+export const PATCH = withAuth<Ctx>(async (req, ctx, { userId }) => {
+  const { id } = await ctx.params;
+  const body = await parseBody(req, updateSchema);
 
-  const rows = await query<{
-    id: string;
-    wallet_address: string;
-    label: string | null;
-    notes: string | null;
-    source_rugger_id: string | null;
-    created_at: string;
-  }>(
-    `UPDATE watchlist_wallets
-     SET label = COALESCE($3, label),
-         notes = COALESCE($4, notes)
-     WHERE id = $1 AND user_id = $2
-     RETURNING id, wallet_address, label, notes, source_rugger_id, created_at`,
-    [id, userId, body.label?.trim() ?? null, body.notes?.trim() ?? null]
-  );
-
-  const r = rows[0];
-  if (!r) {
-    return NextResponse.json({ error: 'Watchlist entry not found' }, { status: 404 });
-  }
-
-  return NextResponse.json({
-    id: r.id,
-    walletAddress: r.wallet_address,
-    label: r.label,
-    notes: r.notes,
-    sourceRuggerId: r.source_rugger_id,
-    sourceRuggerName: null,
-    createdAt: r.created_at,
+  const wallet = await updateWatchlist({
+    id,
+    userId,
+    label: body.label != null ? body.label.trim() : null,
+    notes: body.notes != null ? body.notes.trim() : null,
   });
-}
+  if (!wallet) throw notFoundError('Watchlist entry not found');
 
-export async function DELETE(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+  return ok(wallet);
+});
 
-  const { id } = await context.params;
+export const DELETE = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id } = await ctx.params;
 
-  const rows = await query<{ id: string }>(
-    'DELETE FROM watchlist_wallets WHERE id = $1 AND user_id = $2 RETURNING id',
-    [id, userId]
-  );
-
-  if (rows.length === 0) {
-    return NextResponse.json({ error: 'Watchlist entry not found' }, { status: 404 });
-  }
+  const deleted = await deleteWatchlist(id, userId);
+  if (!deleted) throw notFoundError('Watchlist entry not found');
 
   syncWatchlistToHeliusAsync();
-
-  return NextResponse.json({ deleted: true });
-}
+  return ok({ deleted: true });
+});

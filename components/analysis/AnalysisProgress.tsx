@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AnalysisMode, WalletAnalysis } from '@/types/analysis';
 import { ChevronDown, ChevronUp, Loader2, Terminal } from 'lucide-react';
+import { readSseStream } from '@/lib/http/stream';
 
 interface SSEProgressEvent {
   percent: number;
@@ -245,37 +246,15 @@ export default function AnalysisProgress({
 
       setConnectionState('streaming');
       appendLog('Stream connecté');
-      const reader = res.body?.getReader();
-      if (!reader) {
+      if (!res.body) {
         setErrorMessage('Pas de stream disponible');
         setConnectionState('error');
         return;
       }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEvent) {
-            try {
-              const parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-              handleEvent(currentEvent, parsed);
-            } catch { /* skip malformed */ }
-            currentEvent = '';
-          }
-        }
-      }
+      await readSseStream(res.body, (event, data) =>
+        handleEvent(event, data as Record<string, unknown>)
+      );
     } catch (err) {
       if (controller.signal.aborted) {
         if (controller.signal.reason !== 'connect-timeout') return;

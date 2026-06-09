@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import SidebarLayout from '@/components/SidebarLayout';
 import { isPublicPagePath } from '@/lib/public-auth-paths';
+import { QueryProvider } from '@/lib/query/query-provider';
 
 export default function ConditionalLayout({
   children,
@@ -12,9 +13,9 @@ export default function ConditionalLayout({
   const pathname = usePathname();
   const hideSidebar = isPublicPagePath(pathname);
 
-  if (hideSidebar) {
-    return <>{children}</>;
-  }
-
-  return <SidebarLayout>{children}</SidebarLayout>;
+  return (
+    <QueryProvider>
+      {hideSidebar ? children : <SidebarLayout>{children}</SidebarLayout>}
+    </QueryProvider>
+  );
 }

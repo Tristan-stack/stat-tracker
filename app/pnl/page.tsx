@@ -17,14 +17,12 @@ import {
 } from '@/lib/pnl/card-settings-storage';
 import { combineResults } from '@/lib/pnl/combine-results';
 import { extractDominantColor, type DominantColor } from '@/lib/pnl/extract-dominant-color';
+import { usePnlWallets, useComputePnl, fetchPnlBackgroundImage } from '@/features/pnl/hooks/use-pnl';
 import type {
-  PnlBackground,
-  PnlBackgroundMeta,
   PnlCardSettings,
   PnlComputeResponse,
   PnlMethod,
   PnlRangePreset,
-  PnlWallet,
 } from '@/types/pnl';
 
 const PRESET_MS: Record<'1d' | '7d' | '30d', number> = {
@@ -34,8 +32,8 @@ const PRESET_MS: Record<'1d' | '7d' | '30d', number> = {
 };
 
 export default function PnlPage() {
-  const [wallets, setWallets] = useState<PnlWallet[]>([]);
-  const [backgrounds, setBackgrounds] = useState<PnlBackgroundMeta[]>([]);
+  const { data: wallets = [] } = usePnlWallets();
+  const computePnl = useComputePnl();
   const [settings, setSettings] = useState<PnlCardSettings>(DEFAULT_PNL_CARD_SETTINGS);
   const [preset, setPreset] = useState<PnlRangePreset>('7d');
   const [method, setMethod] = useState<PnlMethod>('gmgn');
@@ -53,27 +51,9 @@ export default function PnlPage() {
   // Couleur dominante de l'image de fond sélectionnée (pour la carte verticale).
   const [dominantColor, setDominantColor] = useState<DominantColor | null>(null);
 
-  // Chargement initial.
+  // Réglages de card persistés en localStorage (les wallets/fonds viennent des hooks RQ).
   useEffect(() => {
     setSettings(getPnlCardSettings());
-    void (async () => {
-      try {
-        const [wRes, bRes] = await Promise.all([
-          fetch('/api/pnl/wallets'),
-          fetch('/api/pnl/backgrounds'),
-        ]);
-        if (wRes.ok) {
-          const data = (await wRes.json()) as { wallets: PnlWallet[] };
-          setWallets(data.wallets);
-        }
-        if (bRes.ok) {
-          const data = (await bRes.json()) as { backgrounds: PnlBackgroundMeta[] };
-          setBackgrounds(data.backgrounds);
-        }
-      } catch {
-        // silencieux : l'UI reste utilisable
-      }
-    })();
   }, []);
 
   const updateSettings = useCallback((next: PnlCardSettings) => {
@@ -87,11 +67,10 @@ export default function PnlPage() {
     bgLoadingRef.current.add(id);
     void (async () => {
       try {
-        const res = await fetch(`/api/pnl/backgrounds/${id}`);
-        if (res.ok) {
-          const data = (await res.json()) as { background: PnlBackground };
-          setBgImages((prev) => ({ ...prev, [id]: data.background.imageData }));
-        }
+        const imageData = await fetchPnlBackgroundImage(id);
+        setBgImages((prev) => ({ ...prev, [id]: imageData }));
+      } catch {
+        // silencieux : la vignette retombe sur le nom
       } finally {
         bgLoadingRef.current.delete(id);
       }
@@ -146,21 +125,15 @@ export default function PnlPage() {
     setResults({});
     try {
       const settled = await Promise.allSettled(
-        wallets.map(async (w) => {
-          const res = await fetch('/api/pnl/compute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              walletAddress: w.walletAddress,
-              fromMs: bounds.fromMs,
-              toMs: bounds.toMs,
-              preset,
-              method,
-            }),
-          });
-          if (!res.ok) throw new Error(`compute ${w.walletAddress}`);
-          return (await res.json()) as PnlComputeResponse;
-        })
+        wallets.map((w) =>
+          computePnl.mutateAsync({
+            walletAddress: w.walletAddress,
+            fromMs: bounds.fromMs,
+            toMs: bounds.toMs,
+            preset,
+            method,
+          })
+        )
       );
       const next: Record<string, PnlComputeResponse> = {};
       settled.forEach((s) => {
@@ -173,7 +146,7 @@ export default function PnlPage() {
     } finally {
       setComputing(false);
     }
-  }, [resolveBounds, wallets, preset, method]);
+  }, [resolveBounds, wallets, preset, method, computePnl]);
 
   const selectedBgImage = selectedBgId ? bgImages[selectedBgId] ?? null : null;
 
@@ -211,7 +184,7 @@ export default function PnlPage() {
             <CardTitle className="text-base">Wallets</CardTitle>
           </CardHeader>
           <CardContent>
-            <PnlWalletManager wallets={wallets} onWalletsChange={setWallets} />
+            <PnlWalletManager />
           </CardContent>
         </Card>
 
@@ -274,8 +247,6 @@ export default function PnlPage() {
           <PnlCardCustomizer
             settings={settings}
             onSettingsChange={updateSettings}
-            backgrounds={backgrounds}
-            onBackgroundsChange={setBackgrounds}
             bgImages={bgImages}
             onRequestBackgroundImage={loadBackgroundImage}
             onCacheBackgroundImage={cacheBackgroundImage}

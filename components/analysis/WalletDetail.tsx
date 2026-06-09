@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { apiPost } from '@/lib/api-client';
+import { useWalletDetail } from '@/features/analysis/hooks/use-analysis-results';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WalletSource } from '@/types/analysis';
@@ -107,8 +109,7 @@ function StatItem({ label, value }: { label: string; value: string }) {
 }
 
 export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBack }: WalletDetailProps) {
-  const [wallet, setWallet] = useState<WalletData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: wallet, isLoading } = useWalletDetail<WalletData>(ruggerId, analysisId, walletAddress);
   const [copied, setCopied] = useState(false);
 
   const [tokenAnalysis, setTokenAnalysis] = useState<TokenAnalysisResult[] | null>(null);
@@ -127,18 +128,6 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
     setCopiedTokenMint(mint);
     setTimeout(() => setCopiedTokenMint((prev) => (prev === mint ? null : prev)), 1500);
   }, []);
-
-  const fetchWallet = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/wallet/${walletAddress}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as WalletData;
-      setWallet(data);
-    } finally { setIsLoading(false); }
-  }, [ruggerId, analysisId, walletAddress]);
-
-  useEffect(() => { void fetchWallet(); }, [fetchWallet]);
 
   const statsTokensForSummary = useMemo((): Token[] => {
     if (!tokenAnalysis || tokenAnalysis.length === 0) return [];
@@ -165,20 +154,14 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
     const toMs = Math.min(lastBuy + 7 * 86400000, Date.now());
 
     try {
-      const res = await fetch('/api/gmgn/wallet-purchases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: wallet.walletAddress, fromMs, toMs }),
+      const data = await apiPost<{ purchases: TokenAnalysisResult[] }>('/api/gmgn/wallet-purchases', {
+        walletAddress: wallet.walletAddress,
+        fromMs,
+        toMs,
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({ error: 'Erreur' }))) as { error?: string };
-        setAnalysisError(data.error ?? `HTTP ${res.status}`);
-        return;
-      }
-      const data = (await res.json()) as { purchases: TokenAnalysisResult[] };
       setTokenAnalysis(data.purchases);
-    } catch {
-      setAnalysisError('Erreur réseau');
+    } catch (e) {
+      setAnalysisError(e instanceof Error ? e.message : 'Erreur réseau');
     } finally {
       setIsAnalyzing(false);
     }

@@ -1,24 +1,36 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
+import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { WatchlistWallet } from '@/types/watchlist';
-import type { Rugger } from '@/types/rugger';
 import { Check, Copy, ExternalLink, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
 import { canOpenSolscanAccount, openSolscanAccountInNewTab } from '@/lib/open-trusted-solana-external';
+import { truncateAddress } from '@/lib/format';
+import { apiPost } from '@/lib/api-client';
+import {
+  useWatchlist,
+  useAddWatchlist,
+  useUpdateWatchlist,
+  useDeleteWatchlist,
+} from '@/features/watchlist/hooks/use-watchlist';
+import { useRuggersList } from '@/features/ruggers/hooks/use-ruggers';
 
-function truncateAddress(addr: string) {
-  if (addr.length <= 14) return addr;
-  return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : 'Erreur';
 }
 
 export default function WatchlistPage() {
-  const [wallets, setWallets] = useState<WatchlistWallet[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: wallets = [], isLoading } = useWatchlist();
+  const { data: ruggers = [] } = useRuggersList();
+  const addWatchlist = useAddWatchlist();
+  const updateWatchlist = useUpdateWatchlist();
+  const deleteWatchlist = useDeleteWatchlist();
+
   const [isAdding, setIsAdding] = useState(false);
   const [addAddress, setAddAddress] = useState('');
   const [addLabel, setAddLabel] = useState('');
@@ -27,68 +39,69 @@ export default function WatchlistPage() {
   const [editLabel, setEditLabel] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [ruggers, setRuggers] = useState<Rugger[]>([]);
   const [linkingWallet, setLinkingWallet] = useState<WatchlistWallet | null>(null);
   const [selectedRuggerId, setSelectedRuggerId] = useState('');
   const [copiedWalletId, setCopiedWalletId] = useState<string | null>(null);
 
-  const fetchWallets = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/watchlist');
-      if (!res.ok) return;
-      const data = (await res.json()) as { wallets: WatchlistWallet[] };
-      setWallets(data.wallets);
-    } finally { setIsLoading(false); }
-  }, []);
-
-  const fetchRuggers = useCallback(async () => {
-    const res = await fetch('/api/ruggers?pageSize=100');
-    if (!res.ok) return;
-    const data = (await res.json()) as { ruggers: Rugger[] };
-    setRuggers(data.ruggers);
-  }, []);
-
-  useEffect(() => {
-    void fetchWallets();
-    void fetchRuggers();
-  }, [fetchWallets, fetchRuggers]);
+  const attachToRugger = useMutation({
+    mutationFn: (input: { ruggerId: string; wallet: WatchlistWallet }) =>
+      apiPost(`/api/ruggers/${input.ruggerId}/buyers`, {
+        walletAddress: input.wallet.walletAddress,
+        label: input.wallet.label ?? null,
+        notes: input.wallet.notes ?? null,
+        origin: 'watchlist',
+      }),
+  });
 
   const handleAdd = useCallback(async () => {
     setError(null);
     const addr = addAddress.trim();
-    if (!addr) { setError('Adresse wallet requise.'); return; }
-    const res = await fetch('/api/watchlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress: addr, label: addLabel.trim() || undefined, notes: addNotes.trim() || undefined }),
-    });
-    if (!res.ok) {
-      const data = (await res.json()) as { error?: string };
-      setError(data.error ?? 'Erreur');
+    if (!addr) {
+      setError('Adresse wallet requise.');
       return;
     }
-    setAddAddress(''); setAddLabel(''); setAddNotes(''); setIsAdding(false);
-    await fetchWallets();
-  }, [addAddress, addLabel, addNotes, fetchWallets]);
+    try {
+      await addWatchlist.mutateAsync({
+        walletAddress: addr,
+        label: addLabel.trim() || undefined,
+        notes: addNotes.trim() || undefined,
+      });
+      setAddAddress('');
+      setAddLabel('');
+      setAddNotes('');
+      setIsAdding(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }, [addAddress, addLabel, addNotes, addWatchlist]);
 
-  const handleUpdate = useCallback(async (id: string) => {
-    const res = await fetch(`/api/watchlist/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: editLabel.trim() || null, notes: editNotes.trim() || null }),
-    });
-    if (!res.ok) return;
-    setEditingId(null);
-    await fetchWallets();
-  }, [editLabel, editNotes, fetchWallets]);
+  const handleUpdate = useCallback(
+    async (id: string) => {
+      try {
+        await updateWatchlist.mutateAsync({
+          id,
+          label: editLabel.trim() || null,
+          notes: editNotes.trim() || null,
+        });
+        setEditingId(null);
+      } catch (e) {
+        setError(errorMessage(e));
+      }
+    },
+    [editLabel, editNotes, updateWatchlist]
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    if (!window.confirm('Retirer ce wallet de la watchlist ?')) return;
-    const res = await fetch(`/api/watchlist/${id}`, { method: 'DELETE' });
-    if (!res.ok) return;
-    await fetchWallets();
-  }, [fetchWallets]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!window.confirm('Retirer ce wallet de la watchlist ?')) return;
+      try {
+        await deleteWatchlist.mutateAsync(id);
+      } catch (e) {
+        setError(errorMessage(e));
+      }
+    },
+    [deleteWatchlist]
+  );
 
   const startEdit = useCallback((w: WatchlistWallet) => {
     setEditingId(w.id);
@@ -98,24 +111,14 @@ export default function WatchlistPage() {
 
   const handleAttachToRugger = useCallback(async () => {
     if (!linkingWallet || selectedRuggerId.trim() === '') return;
-    const res = await fetch(`/api/ruggers/${selectedRuggerId}/buyers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        walletAddress: linkingWallet.walletAddress,
-        label: linkingWallet.label ?? null,
-        notes: linkingWallet.notes ?? null,
-        origin: 'watchlist',
-      }),
-    });
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? 'Erreur');
-      return;
+    try {
+      await attachToRugger.mutateAsync({ ruggerId: selectedRuggerId, wallet: linkingWallet });
+      setLinkingWallet(null);
+      setSelectedRuggerId('');
+    } catch (e) {
+      setError(errorMessage(e));
     }
-    setLinkingWallet(null);
-    setSelectedRuggerId('');
-  }, [linkingWallet, selectedRuggerId]);
+  }, [linkingWallet, selectedRuggerId, attachToRugger]);
 
   const handleCopyWallet = useCallback(async (wallet: WatchlistWallet) => {
     try {
@@ -156,7 +159,7 @@ export default function WatchlistPage() {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={handleAdd}>Ajouter</Button>
+              <Button type="button" size="sm" onClick={handleAdd} disabled={addWatchlist.isPending}>Ajouter</Button>
               <Button type="button" variant="outline" size="sm" onClick={() => { setIsAdding(false); setError(null); }}>Annuler</Button>
             </div>
           </CardContent>
@@ -300,8 +303,9 @@ export default function WatchlistPage() {
                   ))}
                 </select>
               </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
               <div className="flex gap-2">
-                <Button type="button" size="sm" disabled={selectedRuggerId.trim() === ''} onClick={() => void handleAttachToRugger()}>
+                <Button type="button" size="sm" disabled={selectedRuggerId.trim() === '' || attachToRugger.isPending} onClick={() => void handleAttachToRugger()}>
                   Ajouter
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={() => { setLinkingWallet(null); setSelectedRuggerId(''); }}>

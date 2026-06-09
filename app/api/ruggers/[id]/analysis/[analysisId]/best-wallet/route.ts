@@ -1,6 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import {
+  getBestWalletGuard,
+  getBestWalletBenchmark,
+  getTopTokens,
+  getBestWalletCandidates,
+  type BestWalletCandidateRow,
+} from '@/features/analysis/repository';
 import { buildPurchasePreviews } from '@/lib/gmgn/wallet-purchases';
 import { rankBestWallets, type BestWalletResult, type WalletTokenPreview } from '@/lib/analysis/best-wallet';
 import { computeTieCapMeta, resolveBestWalletTieMax } from '@/lib/analysis/best-wallet-tie';
@@ -17,6 +24,8 @@ import { runWithConcurrency } from '@/lib/analysis/async-pool';
 
 export const maxDuration = 60;
 
+type Ctx = { params: Promise<{ id: string; analysisId: string }> };
+
 const DEFAULT_TP_MIN_PERCENT = 80;
 const DEFAULT_TOKEN_LIMIT = 20;
 const MAX_TOKEN_LIMIT = 40;
@@ -25,30 +34,6 @@ const DEFAULT_WALLET_TIMEOUT_MS = 180_000;
 const WALLET_PREVIEW_CACHE_TTL_MS = 30 * 60_000;
 const RESPONSE_CACHE_TTL_MS = 8 * 60_000;
 const DEFAULT_RETRIES = 2;
-
-interface AnalysisGuardRow {
-  id: string;
-  starts_at: string | null;
-  ends_at: string | null;
-}
-
-interface TopTokenRow {
-  token_address: string;
-  wallet_count: number;
-}
-
-interface WalletRow {
-  wallet_address: string;
-  coverage_percent: number;
-  active_days: number;
-  candidate_token_matches: number;
-  tied_at_max_count: number;
-}
-
-interface BenchmarkRow {
-  wallet_count: number;
-  token_count: number;
-}
 
 interface BestWalletPayload {
   topWallets: Array<BestWalletResult & { activeDays: number }>;
@@ -69,17 +54,8 @@ interface BestWalletPayload {
     cacheHit: boolean;
     cacheHitResponse: boolean;
     cacheHitWalletPreviews: number;
-    timingsMs: {
-      total: number;
-      topTokensQuery: number;
-      candidateQuery: number;
-      gmgnPhase: number;
-      ranking: number;
-    };
-    benchmark: {
-      walletCount: number;
-      tokenCount: number;
-    };
+    timingsMs: { total: number; topTokensQuery: number; candidateQuery: number; gmgnPhase: number; ranking: number };
+    benchmark: { walletCount: number; tokenCount: number };
     topCoverageTokens: Array<{ tokenAddress: string; walletCount: number }>;
     partialFailures: Array<{ walletAddress: string; error: string }>;
     insufficientDataWallets: string[];
@@ -113,15 +89,14 @@ async function withRetry<T>(fn: () => Promise<T>, retries: number): Promise<T> {
       const message = error instanceof Error ? error.message : '';
       const retryable = /HTTP 429|HTTP 5\d{2}|ECONNRESET|ETIMEDOUT|timeout/i.test(message);
       if (!retryable || attempt === retries) break;
-      const waitMs = 300 * Math.pow(2, attempt);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt)));
     }
   }
   throw lastError;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return await Promise.race([
+  return Promise.race([
     promise,
     new Promise<T>((_, reject) => {
       setTimeout(() => reject(new Error(`Wallet processing timeout (${timeoutMs}ms)`)), timeoutMs);
@@ -129,22 +104,12 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   ]);
 }
 
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ id: string; analysisId: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-  const { id: ruggerId, analysisId } = await context.params;
+export const GET = withAuth<Ctx>(async (req, ctx, { userId }) => {
+  const { id: ruggerId, analysisId } = await ctx.params;
 
   const url = new URL(req.url);
   const tpMinPercent = parsePercent(url.searchParams.get('tpMinPercent'), DEFAULT_TP_MIN_PERCENT);
-  const tokenLimit = parsePositiveInt(
-    url.searchParams.get('tokenLimit'),
-    DEFAULT_TOKEN_LIMIT,
-    MAX_TOKEN_LIMIT
-  );
+  const tokenLimit = parsePositiveInt(url.searchParams.get('tokenLimit'), DEFAULT_TOKEN_LIMIT, MAX_TOKEN_LIMIT);
   const maxTieWallets = resolveBestWalletTieMax(url.searchParams.get('maxTieWallets'));
   const concurrency = parsePositiveInt(
     url.searchParams.get('concurrency'),
@@ -163,46 +128,17 @@ export async function GET(
   );
   const startTotal = performance.now();
 
-  const analysisGuard = await query<AnalysisGuardRow>(
-    `SELECT wa.id,
-            MIN(bp.purchased_at) AS starts_at,
-            MAX(bp.purchased_at) AS ends_at
-     FROM wallet_analyses wa
-     JOIN ruggers r ON r.id = wa.rugger_id
-     LEFT JOIN analysis_buyer_wallets bw ON bw.analysis_id = wa.id
-     LEFT JOIN analysis_buyer_purchases bp ON bp.buyer_wallet_id = bw.id
-     WHERE wa.id = $1 AND wa.rugger_id = $2 AND r.user_id = $3
-     GROUP BY wa.id`,
-    [analysisId, ruggerId, userId]
-  );
-  if (analysisGuard.length === 0) {
-    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
-  }
+  const guard = await getBestWalletGuard(analysisId, ruggerId, userId);
+  if (!guard) throw notFoundError('Analysis not found');
 
-  const benchmark = await query<BenchmarkRow>(
-    `SELECT COUNT(DISTINCT bw.wallet_address)::int AS wallet_count,
-            COUNT(DISTINCT bp.token_address)::int AS token_count
-     FROM analysis_buyer_wallets bw
-     LEFT JOIN analysis_buyer_purchases bp ON bp.buyer_wallet_id = bw.id
-     WHERE bw.analysis_id = $1`,
-    [analysisId]
-  );
+  const benchmark = await getBestWalletBenchmark(analysisId);
 
   const tTopStart = performance.now();
-  const topTokens = await query<TopTokenRow>(
-    `SELECT bp.token_address, COUNT(DISTINCT bp.buyer_wallet_id) AS wallet_count
-     FROM analysis_buyer_purchases bp
-     JOIN analysis_buyer_wallets bw ON bw.id = bp.buyer_wallet_id
-     WHERE bw.analysis_id = $1
-     GROUP BY bp.token_address
-     ORDER BY wallet_count DESC, bp.token_address ASC
-     LIMIT $2`,
-    [analysisId, tokenLimit]
-  );
+  const topTokens = await getTopTokens(analysisId, tokenLimit);
   const topTokensQueryMs = performance.now() - tTopStart;
 
   if (topTokens.length === 0) {
-    return NextResponse.json({
+    return ok({
       topWallets: [],
       meta: {
         tpMinPercent,
@@ -228,10 +164,7 @@ export async function GET(
           gmgnPhase: 0,
           ranking: 0,
         },
-        benchmark: {
-          walletCount: Number(benchmark[0]?.wallet_count ?? 0),
-          tokenCount: Number(benchmark[0]?.token_count ?? 0),
-        },
+        benchmark: { walletCount: benchmark.wallet_count, tokenCount: benchmark.token_count },
         topCoverageTokens: [],
         partialFailures: [],
         insufficientDataWallets: [],
@@ -243,23 +176,18 @@ export async function GET(
   }
 
   const nowMs = Date.now();
-  const startsAt = analysisGuard[0]?.starts_at ? new Date(analysisGuard[0].starts_at).getTime() : nowMs - 90 * 86400000;
-  const endsAt = analysisGuard[0]?.ends_at ? new Date(analysisGuard[0].ends_at).getTime() : nowMs;
+  const startsAt = guard.starts_at ? new Date(guard.starts_at).getTime() : nowMs - 90 * 86400000;
+  const endsAt = guard.ends_at ? new Date(guard.ends_at).getTime() : nowMs;
   const fromMs = Math.max(0, startsAt - 86400000);
   const toMs = Math.max(fromMs, Math.min(nowMs, endsAt + 7 * 86400000));
   const topTokenAddresses = topTokens.map((row) => row.token_address);
   const topTokenSet = new Set(topTokenAddresses);
-  const responseCacheKey = makeBestWalletResponseCacheKey({
-    analysisId,
-    tpMinPercent,
-    tokenLimit,
-    maxTieWallets,
-  });
+  const responseCacheKey = makeBestWalletResponseCacheKey({ analysisId, tpMinPercent, tokenLimit, maxTieWallets });
   const cachedResponse = getBestWalletResponseCache<BestWalletPayload>(responseCacheKey);
   const streamRequested = url.searchParams.get('stream') === '1';
   const cacheStats = getBestWalletCacheStats();
   if (cachedResponse && !streamRequested) {
-    return NextResponse.json({
+    return ok({
       ...cachedResponse,
       meta: {
         ...cachedResponse.meta,
@@ -272,58 +200,7 @@ export async function GET(
   }
 
   const tCandidateStart = performance.now();
-  const walletRows = await query<WalletRow>(
-    `WITH top_tokens AS (
-       SELECT token_address
-       FROM (
-         SELECT bp.token_address, COUNT(DISTINCT bp.buyer_wallet_id) AS wallet_count
-         FROM analysis_buyer_purchases bp
-         JOIN analysis_buyer_wallets bw ON bw.id = bp.buyer_wallet_id
-         WHERE bw.analysis_id = $1
-         GROUP BY bp.token_address
-         ORDER BY wallet_count DESC, bp.token_address ASC
-         LIMIT $2
-       ) t
-     ),
-     wallet_stats AS (
-       SELECT bw.wallet_address,
-              bw.coverage_percent,
-              bw.active_days::int AS active_days,
-              COUNT(DISTINCT CASE WHEN bp.token_address IN (SELECT token_address FROM top_tokens)
-                   THEN bp.token_address END)::int AS candidate_token_matches
-       FROM analysis_buyer_wallets bw
-       LEFT JOIN analysis_buyer_purchases bp ON bp.buyer_wallet_id = bw.id
-       WHERE bw.analysis_id = $1
-       GROUP BY bw.wallet_address, bw.coverage_percent, bw.active_days
-     ),
-     max_cov AS (
-       SELECT MAX(ws.coverage_percent) AS m FROM wallet_stats ws
-     ),
-     tied AS (
-       SELECT ws.wallet_address,
-              ws.coverage_percent,
-              ws.active_days,
-              ws.candidate_token_matches,
-              COUNT(*) OVER ()::int AS tied_at_max_count
-       FROM wallet_stats ws
-       CROSS JOIN max_cov mc
-       WHERE ws.coverage_percent = mc.m
-     ),
-     ranked AS (
-       SELECT t.*, ROW_NUMBER() OVER (
-         ORDER BY t.candidate_token_matches DESC, t.wallet_address ASC
-       )::int AS rn
-       FROM tied t
-     )
-     SELECT wallet_address,
-            coverage_percent,
-            active_days,
-            candidate_token_matches,
-            tied_at_max_count
-     FROM ranked
-     WHERE rn <= $3`,
-    [analysisId, tokenLimit, maxTieWallets]
-  );
+  const walletRows: BestWalletCandidateRow[] = await getBestWalletCandidates(analysisId, tokenLimit, maxTieWallets);
   const candidateQueryMs = performance.now() - tCandidateStart;
 
   const partialFailures: Array<{ walletAddress: string; error: string }> = [];
@@ -341,11 +218,7 @@ export async function GET(
     }) => void
   ): Promise<BestWalletPayload> => {
     const gmgnPhaseStart = performance.now();
-    const candidates: Array<{
-      walletAddress: string;
-      analysisCoveragePercent: number;
-      previews: WalletTokenPreview[];
-    }> = [];
+    const candidates: Array<{ walletAddress: string; analysisCoveragePercent: number; previews: WalletTokenPreview[] }> = [];
     let walletsAnalyzed = 0;
     let walletsSucceeded = 0;
     let walletsFailed = 0;
@@ -372,11 +245,7 @@ export async function GET(
           walletsFailed,
           currentWallet: wallet.wallet_address,
         });
-        return {
-          walletAddress: wallet.wallet_address,
-          analysisCoveragePercent: wallet.coverage_percent,
-          previews: cachedPreviews,
-        };
+        return { walletAddress: wallet.wallet_address, analysisCoveragePercent: wallet.coverage_percent, previews: cachedPreviews };
       }
 
       try {
@@ -386,28 +255,16 @@ export async function GET(
         );
         const filteredPreviews: WalletTokenPreview[] = previews
           .filter((preview) => topTokenSet.has(preview.tokenAddress))
-          .map((preview) => ({
-            tokenAddress: preview.tokenAddress,
-            entryPrice: preview.entryPrice,
-            high: preview.high,
-          }));
+          .map((preview) => ({ tokenAddress: preview.tokenAddress, entryPrice: preview.entryPrice, high: preview.high }));
         setWalletPreviewCache(previewCacheKey, filteredPreviews, WALLET_PREVIEW_CACHE_TTL_MS);
         if (filteredPreviews.length === 0) insufficientDataWallets.push(wallet.wallet_address);
         walletsSucceeded += 1;
-        return {
-          walletAddress: wallet.wallet_address,
-          analysisCoveragePercent: wallet.coverage_percent,
-          previews: filteredPreviews,
-        };
+        return { walletAddress: wallet.wallet_address, analysisCoveragePercent: wallet.coverage_percent, previews: filteredPreviews };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Preview collection failed';
         partialFailures.push({ walletAddress: wallet.wallet_address, error: message });
         walletsFailed += 1;
-        return {
-          walletAddress: wallet.wallet_address,
-          analysisCoveragePercent: wallet.coverage_percent,
-          previews: [] as WalletTokenPreview[],
-        };
+        return { walletAddress: wallet.wallet_address, analysisCoveragePercent: wallet.coverage_percent, previews: [] as WalletTokenPreview[] };
       } finally {
         walletsAnalyzed += 1;
         onProgress?.({
@@ -463,10 +320,7 @@ export async function GET(
           gmgnPhase: Math.round(gmgnPhaseMs),
           ranking: Math.round(rankingMs),
         },
-        benchmark: {
-          walletCount: Number(benchmark[0]?.wallet_count ?? 0),
-          tokenCount: Number(benchmark[0]?.token_count ?? 0),
-        },
+        benchmark: { walletCount: benchmark.wallet_count, tokenCount: benchmark.token_count },
         topCoverageTokens: topTokens.map((token) => ({
           tokenAddress: token.token_address,
           walletCount: Number(token.wallet_count),
@@ -483,7 +337,7 @@ export async function GET(
   if (!streamRequested) {
     const payload = await buildPayload();
     setBestWalletResponseCache(responseCacheKey, payload, RESPONSE_CACHE_TTL_MS);
-    return NextResponse.json(payload);
+    return ok(payload);
   }
 
   const encoder = new TextEncoder();
@@ -500,14 +354,11 @@ export async function GET(
           tpMinPercent,
           message: 'Démarrage de l’analyse Best Wallet',
         });
-        const payload = await buildPayload((progress) => {
-          send({ type: 'progress', ...progress });
-        });
+        const payload = await buildPayload((progress) => send({ type: 'progress', ...progress }));
         setBestWalletResponseCache(responseCacheKey, payload, RESPONSE_CACHE_TTL_MS);
         send({ type: 'done', payload });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Best wallet stream failed';
-        send({ type: 'error', error: message });
+        send({ type: 'error', error: error instanceof Error ? error.message : 'Best wallet stream failed' });
       } finally {
         controller.close();
       }
@@ -521,4 +372,4 @@ export async function GET(
       Connection: 'keep-alive',
     },
   });
-}
+});

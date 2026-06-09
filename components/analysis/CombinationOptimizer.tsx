@@ -1,41 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { WalletCombinationStep } from '@/types/analysis';
+import { truncateAddress } from '@/lib/format';
+import { useCombinations } from '@/features/analysis/hooks/use-analysis-results';
 
 interface CombinationOptimizerProps {
   ruggerId: string;
   analysisId: string;
 }
 
-function truncateWallet(address: string) {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
+const truncateWallet = (address: string) => truncateAddress(address, 6, 4);
 
 const COVERAGE_OPTIONS = [50, 60, 70, 80, 90, 100] as const;
 
 export default function CombinationOptimizer({ ruggerId, analysisId }: CombinationOptimizerProps) {
   const [targetCoverage, setTargetCoverage] = useState(80);
-  const [steps, setSteps] = useState<WalletCombinationStep[]>([]);
-  const [totalTokens, setTotalTokens] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const fetchCombinations = useCallback(async (coverage: number) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/combinations?targetCoverage=${coverage}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { steps: WalletCombinationStep[]; totalTokens: number };
-      setSteps(data.steps);
-      setTotalTokens(data.totalTokens);
-    } finally { setIsLoading(false); }
-  }, [ruggerId, analysisId]);
-
-  useEffect(() => { void fetchCombinations(targetCoverage); }, [fetchCombinations, targetCoverage]);
+  const { data, isFetching: isLoading } = useCombinations(ruggerId, analysisId, targetCoverage);
+  const steps = data?.steps ?? [];
+  const totalTokens = data?.totalTokens ?? 0;
 
   const handleCoverageChange = (value: number) => {
     setTargetCoverage(value);

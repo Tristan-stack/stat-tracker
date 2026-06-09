@@ -1,35 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { analysisOwnedByUser, getBuyerWalletAddresses } from '@/features/analysis/repository';
 import { findCrossRuggerWallets } from '@/lib/analysis/cross-rugger';
 
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ id: string; analysisId: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+type Ctx = { params: Promise<{ id: string; analysisId: string }> };
 
-  const { id: ruggerId, analysisId } = await context.params;
+export const GET = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id: ruggerId, analysisId } = await ctx.params;
+  if (!(await analysisOwnedByUser(analysisId, ruggerId, userId))) throw notFoundError('Analysis not found');
 
-  const ownership = await query<{ id: string }>(
-    `SELECT wa.id FROM wallet_analyses wa
-     JOIN ruggers r ON r.id = wa.rugger_id
-     WHERE wa.id = $1 AND wa.rugger_id = $2 AND r.user_id = $3`,
-    [analysisId, ruggerId, userId]
-  );
-  if (ownership.length === 0) {
-    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
-  }
-
-  const walletRows = await query<{ wallet_address: string }>(
-    'SELECT wallet_address FROM analysis_buyer_wallets WHERE analysis_id = $1',
-    [analysisId]
-  );
-  const addresses = walletRows.map((r) => r.wallet_address);
-
+  const addresses = await getBuyerWalletAddresses(analysisId);
   const matches = await findCrossRuggerWallets(userId, addresses);
-
-  return NextResponse.json({ matches });
-}
+  return ok({ matches });
+});

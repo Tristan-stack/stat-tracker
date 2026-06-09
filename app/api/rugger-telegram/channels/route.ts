@@ -1,72 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth-session';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok, created } from '@/lib/api/responses';
+import { badRequest } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { listChannels, insertChannel, getChannelById } from '@/features/telegram/repository';
 import { normalizeTelegramUsername } from '@/lib/telegram/username';
-import { getPostgresErrorCode } from '@/lib/pg-errors';
 
-export async function GET(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+export const GET = withAuth(async (_req, _ctx, { userId }) => {
+  const channels = await listChannels(userId);
+  return ok({ channels });
+});
 
-  const rows = await query<{
-    id: string;
-    username: string;
-    label: string | null;
-    created_at: string;
-  }>(
-    `select id, username, label, created_at from telegram_channels
-     where user_id = $1
-     order by created_at desc`,
-    [userId]
-  );
+const createSchema = z.object({
+  username: z.string().optional(),
+  label: z.string().nullable().optional(),
+});
 
-  return NextResponse.json({ channels: rows });
-}
+export const POST = withAuth(
+  async (req, _ctx, { userId }) => {
+    const body = await parseBody(req, createSchema);
+    const username = normalizeTelegramUsername(body.username ?? '');
+    if (username.length < 3 || username.length > 64) throw badRequest('username_invalide');
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-  if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
-  }
-  const usernameRaw = typeof (body as { username?: unknown }).username === 'string' ? (body as { username: string }).username : '';
-  const labelRaw = typeof (body as { label?: unknown }).label === 'string' ? (body as { label: string }).label : null;
-
-  const username = normalizeTelegramUsername(usernameRaw);
-  if (username.length < 3 || username.length > 64) {
-    return NextResponse.json({ error: 'username_invalide' }, { status: 400 });
-  }
-
-  const id = randomUUID();
-  try {
-    await query(
-      `insert into telegram_channels (id, user_id, username, label, created_at)
-       values ($1, $2, $3, $4, now())`,
-      [id, userId, username, labelRaw?.trim() || null]
-    );
-  } catch (err) {
-    if (getPostgresErrorCode(err) === '23505') {
-      return NextResponse.json({ error: 'channel_deja_enregistre' }, { status: 409 });
-    }
-    throw err;
-  }
-
-  const rows = await query<{
-    id: string;
-    username: string;
-    label: string | null;
-    created_at: string;
-  }>(`select id, username, label, created_at from telegram_channels where id = $1 and user_id = $2`, [id, userId]);
-
-  return NextResponse.json({ channel: rows[0] ?? null }, { status: 201 });
-}
+    const id = randomUUID();
+    await insertChannel({ id, userId, username, label: body.label?.trim() || null });
+    const channel = await getChannelById(id, userId);
+    return created({ channel: channel ?? null });
+  },
+  { name: 'POST /api/rugger-telegram/channels', dbErrors: { conflict: 'channel_deja_enregistre' } }
+);

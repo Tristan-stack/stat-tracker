@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { badRequest } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
 import { buildTokenTrackingPreviews } from '@/lib/gmgn/token-tracking';
 
 const MAX_TOKENS = 30;
+const MAX_SPAN_MS = 366 * 86400000;
 
 function normalizeTokenList(addresses: string[]): string[] {
   const seen = new Set<string>();
@@ -16,73 +21,46 @@ function normalizeTokenList(addresses: string[]): string[] {
   return out;
 }
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+const schema = z.object({
+  tokenAddress: z.string().optional(),
+  tokenAddresses: z.array(z.string()).optional(),
+  fromMs: z.number().optional(),
+  toMs: z.number().optional(),
+  athHigh: z.boolean().optional(),
+});
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
+export const POST = withAuth(async (req) => {
+  const body = await parseBody(req, schema);
 
-  const b = body as {
-    tokenAddress?: unknown;
-    tokenAddresses?: unknown;
-    fromMs?: unknown;
-    toMs?: unknown;
-    athHigh?: unknown;
-  };
-
-  const fromMs = typeof b.fromMs === 'number' && Number.isFinite(b.fromMs) ? b.fromMs : NaN;
-  const toMs = typeof b.toMs === 'number' && Number.isFinite(b.toMs) ? b.toMs : NaN;
+  const fromMs = body.fromMs ?? NaN;
+  const toMs = body.toMs ?? NaN;
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
-    return NextResponse.json(
-      { error: 'fromMs and toMs must be finite numbers with fromMs <= toMs' },
-      { status: 400 }
-    );
+    throw badRequest('fromMs and toMs must be finite numbers with fromMs <= toMs');
   }
+  if (toMs - fromMs > MAX_SPAN_MS) throw badRequest('Date range too large');
 
-  const maxSpan = 366 * 86400000;
-  if (toMs - fromMs > maxSpan) {
-    return NextResponse.json({ error: 'Date range too large' }, { status: 400 });
-  }
+  const tokenList =
+    body.tokenAddresses && body.tokenAddresses.length > 0
+      ? normalizeTokenList(body.tokenAddresses)
+      : body.tokenAddress && body.tokenAddress.trim() !== ''
+        ? [body.tokenAddress.trim()]
+        : [];
 
-  let tokenList: string[] = [];
-  if (Array.isArray(b.tokenAddresses) && b.tokenAddresses.length > 0) {
-    tokenList = normalizeTokenList(
-      b.tokenAddresses.filter((x): x is string => typeof x === 'string')
-    );
-  } else if (typeof b.tokenAddress === 'string' && b.tokenAddress.trim() !== '') {
-    tokenList = [b.tokenAddress.trim()];
-  }
-
-  if (tokenList.length === 0) {
-    return NextResponse.json(
-      { error: 'tokenAddress or tokenAddresses is required' },
-      { status: 400 }
-    );
-  }
-  if (tokenList.length > MAX_TOKENS) {
-    return NextResponse.json({ error: `Too many tokens (max ${MAX_TOKENS})` }, { status: 400 });
-  }
+  if (tokenList.length === 0) throw badRequest('tokenAddress or tokenAddresses is required');
+  if (tokenList.length > MAX_TOKENS) throw badRequest(`Too many tokens (max ${MAX_TOKENS})`);
 
   try {
-    const purchases = await buildTokenTrackingPreviews(tokenList, fromMs, toMs, {
-      athHigh: b.athHigh === true,
-    });
-    return NextResponse.json({ purchases });
+    const purchases = await buildTokenTrackingPreviews(tokenList, fromMs, toMs, { athHigh: body.athHigh === true });
+    return ok({ purchases });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'GMGN request failed';
-    const status =
-      /HTTP 401\b/.test(message)
-        ? 401
-        : /HTTP 403\b/.test(message)
-          ? 403
-          : /HTTP 429\b/.test(message)
-            ? 429
-            : 502;
+    const status = /HTTP 401\b/.test(message)
+      ? 401
+      : /HTTP 403\b/.test(message)
+        ? 403
+        : /HTTP 429\b/.test(message)
+          ? 429
+          : 502;
     return NextResponse.json({ error: message }, { status });
   }
-}
+});

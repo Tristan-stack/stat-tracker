@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { ApiError, badRequest, notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { getRuggerWalletInfo } from '@/features/ruggers/repository';
 import { localGmgnAllTimeRange } from '@/lib/token-date-filter';
 import { collectSolanaBuysInRange, rowTimestampSec, tokenMint } from '@/lib/gmgn/wallet-purchases';
 import type { WalletActivityRow } from '@/lib/gmgn/client';
@@ -11,7 +14,9 @@ import {
 } from '@/lib/gmgn/first-buy-notional';
 import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
 
-/** Une seule passe GMGN `wallet_activity` : on peut demander beaucoup de mints d’un coup. */
+type Ctx = { params: Promise<{ id: string }> };
+
+/** Une seule passe GMGN `wallet_activity` : on peut demander beaucoup de mints d'un coup. */
 const MAX_MINTS = 8000;
 
 function normalizeMintList(raw: unknown): string[] {
@@ -29,41 +34,22 @@ function normalizeMintList(raw: unknown): string[] {
   return out;
 }
 
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-  const { id: ruggerId } = await context.params;
+export const POST = withAuth<Ctx>(async (req, ctx, { userId }) => {
+  const { id: ruggerId } = await ctx.params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-  const b = body as { tokenAddresses?: unknown };
-  const tokenAddresses = normalizeMintList(b.tokenAddresses);
+  const body = await parseBody(req, z.object({ tokenAddresses: z.array(z.unknown()).optional() }));
+  const tokenAddresses = normalizeMintList(body.tokenAddresses);
   if (tokenAddresses.length === 0) {
-    return NextResponse.json({ error: 'tokenAddresses must be a non-empty array of strings' }, { status: 400 });
+    throw badRequest('tokenAddresses must be a non-empty array of strings');
   }
 
-  const rows = await query<{ wallet_address: string | null; wallet_type: string }>(
-    'select wallet_address, wallet_type from ruggers where id = $1 and user_id = $2',
-    [ruggerId, userId]
-  );
-  if (rows.length === 0) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
+  const info = await getRuggerWalletInfo(ruggerId, userId);
+  if (!info) throw notFoundError('Rugger not found');
+  if (info.walletType !== 'buyer') throw badRequest('Rugger wallet type must be buyer');
 
-  const { wallet_address: walletAddress, wallet_type: walletType } = rows[0]!;
-
-  if (walletType !== 'buyer') {
-    return NextResponse.json({ error: 'Rugger wallet type must be buyer' }, { status: 400 });
-  }
-
-  const wallet = typeof walletAddress === 'string' ? walletAddress.trim() : '';
+  const wallet = info.walletAddress?.trim() ?? '';
   if (wallet === '') {
-    return NextResponse.json({
+    return ok({
       byMint: {} as Record<string, FirstBuyPreviewEntry>,
       solUsd: null as number | null,
       message: 'Adresse wallet acheteur manquante',
@@ -72,8 +58,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
 
   const { fromMs, toMs } = localGmgnAllTimeRange();
   let solUsd: number | null = null;
-  const byMint: Record<string, FirstBuyPreviewEntry> = {};
-
   try {
     solUsd = await fetchSolUsdFromGmgn();
   } catch {
@@ -85,37 +69,30 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     activityRows = await collectSolanaBuysInRange(wallet, fromMs, toMs);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'GMGN failed';
-    return NextResponse.json({ error: msg.slice(0, 240) }, { status: 502 });
+    throw new ApiError(502, msg.slice(0, 240));
   }
 
   const buyByMint = new Map<string, WalletActivityRow>();
   for (const row of activityRows) {
     const m = tokenMint(row);
-    if (!m) continue;
-    buyByMint.set(m.trim(), row);
+    if (m) buyByMint.set(m.trim(), row);
   }
 
+  const byMint: Record<string, FirstBuyPreviewEntry> = {};
   for (const mint of tokenAddresses) {
     const row = buyByMint.get(mint);
     if (!row) {
-      byMint[mint] = {
-        usd: null,
-        sol: null,
-        purchasedAt: null,
-        error: 'Aucun achat sur la fenêtre GMGN (~366 j)',
-      };
+      byMint[mint] = { usd: null, sol: null, purchasedAt: null, error: 'Aucun achat sur la fenêtre GMGN (~366 j)' };
       continue;
     }
-    const parsed = parseFirstBuyNotional(row);
-    const merged = mergeNotionalWithSolUsd(parsed, solUsd);
+    const merged = mergeNotionalWithSolUsd(parseFirstBuyNotional(row), solUsd);
     const ts = rowTimestampSec(row);
-    const purchasedAt = ts > 0 ? new Date(ts * 1000).toISOString() : null;
     byMint[mint] = {
       usd: merged.usd,
       sol: merged.sol,
-      purchasedAt,
+      purchasedAt: ts > 0 ? new Date(ts * 1000).toISOString() : null,
     };
   }
 
-  return NextResponse.json({ byMint, solUsd });
-}
+  return ok({ byMint, solUsd });
+});

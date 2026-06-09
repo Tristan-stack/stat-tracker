@@ -11,13 +11,16 @@ import {
   PNL_ELEMENT_LABELS,
   PNL_FONT_OPTIONS,
 } from '@/lib/pnl/card-settings-storage';
-import type { PnlBackgroundMeta, PnlCardSettings } from '@/types/pnl';
+import type { PnlCardSettings } from '@/types/pnl';
+import {
+  usePnlBackgrounds,
+  useAddPnlBackground,
+  useDeletePnlBackground,
+} from '@/features/pnl/hooks/use-pnl';
 
 interface PnlCardCustomizerProps {
   settings: PnlCardSettings;
   onSettingsChange: (settings: PnlCardSettings) => void;
-  backgrounds: PnlBackgroundMeta[];
-  onBackgroundsChange: (backgrounds: PnlBackgroundMeta[]) => void;
   /** Cache des data URLs des fonds (id → image), partagé avec la page. */
   bgImages: Record<string, string>;
   /** Demande le chargement de l'image d'un fond (pour la preview). */
@@ -38,15 +41,16 @@ function readFileAsDataUrl(file: File): Promise<string> {
 export default function PnlCardCustomizer({
   settings,
   onSettingsChange,
-  backgrounds,
-  onBackgroundsChange,
   bgImages,
   onRequestBackgroundImage,
   onCacheBackgroundImage,
 }: PnlCardCustomizerProps) {
+  const { data: backgrounds = [] } = usePnlBackgrounds();
+  const addBackground = useAddPnlBackground();
+  const deleteBackground = useDeletePnlBackground();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uploading = addBackground.isPending;
 
   const update = (patch: Partial<PnlCardSettings>) => onSettingsChange({ ...settings, ...patch });
 
@@ -67,36 +71,25 @@ export default function PnlCardCustomizer({
   };
 
   const handleUpload = async (file: File) => {
-    setUploading(true);
     setError(null);
     try {
       const imageData = await readFileAsDataUrl(file);
-      const res = await fetch('/api/pnl/backgrounds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name, imageData }),
-      });
-      const data = (await res.json()) as { background?: PnlBackgroundMeta; error?: string };
-      if (!res.ok || !data.background) {
-        setError(data.error ?? 'Échec de l’upload');
-        return;
-      }
-      onBackgroundsChange([data.background, ...backgrounds]);
-      onCacheBackgroundImage(data.background.id, imageData);
-      update({ selectedBackgroundId: data.background.id });
-    } catch {
-      setError('Erreur lors de la lecture du fichier');
+      const background = await addBackground.mutateAsync({ name: file.name, imageData });
+      onCacheBackgroundImage(background.id, imageData);
+      update({ selectedBackgroundId: background.id });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Échec de l’upload');
     } finally {
-      setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
 
   const handleDeleteBackground = async (id: string) => {
-    const res = await fetch(`/api/pnl/backgrounds/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      onBackgroundsChange(backgrounds.filter((b) => b.id !== id));
+    try {
+      await deleteBackground.mutateAsync(id);
       if (settings.selectedBackgroundId === id) update({ selectedBackgroundId: null });
+    } catch {
+      setError('Échec de la suppression du fond');
     }
   };
 

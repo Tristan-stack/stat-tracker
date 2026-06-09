@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { badRequest, notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { getChannelUsername } from '@/features/telegram/repository';
 import {
   isTelegramScrapeAuthError,
   isTelegramScrapeConfigError,
@@ -12,54 +15,35 @@ export const runtime = 'nodejs';
 /** Vercel Hobby plafonne à 60s. Pour de gros canaux, scraper par morceaux (plages plus courtes). */
 export const maxDuration = 60;
 
-type ScrapeBody = {
-  channelId?: string;
-  from?: string;
-  to?: string;
-  /** Si true, réponse `application/x-ndjson` avec événements `start` / `tick` / `done` / `error`. */
-  stream?: boolean;
-};
-
 const NDJSON_HEADERS = {
   'Content-Type': 'application/x-ndjson; charset=utf-8',
   'Cache-Control': 'no-store',
 } as const;
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+const scrapeSchema = z.object({
+  channelId: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  stream: z.boolean().optional(),
+});
 
-  let body: ScrapeBody;
-  try {
-    body = (await req.json()) as ScrapeBody;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
+export const POST = withAuth(async (req, _ctx, { userId }) => {
+  const body = await parseBody(req, scrapeSchema);
   const channelId = body.channelId?.trim() ?? '';
   const fromIso = body.from?.trim() ?? '';
   const toIso = body.to?.trim() ?? '';
-  if (!channelId || !fromIso || !toIso) {
-    return NextResponse.json({ error: 'channelId_from_et_to_obligatoires' }, { status: 400 });
-  }
+  if (!channelId || !fromIso || !toIso) throw badRequest('channelId_from_et_to_obligatoires');
 
   const fromMs = new Date(fromIso).getTime();
   const toMs = new Date(toIso).getTime();
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
-    return NextResponse.json({ error: 'plage_dates_invalide' }, { status: 400 });
+    throw badRequest('plage_dates_invalide');
   }
 
-  const channelRows = await query<{ username: string }>(
-    `select username from telegram_channels where id = $1 and user_id = $2`,
-    [channelId, userId]
-  );
-  const channel = channelRows[0];
-  if (!channel) return NextResponse.json({ error: 'channel_introuvable' }, { status: 404 });
+  const username = await getChannelUsername(channelId, userId);
+  if (!username) throw notFoundError('channel_introuvable');
 
-  const useStream = body.stream === true;
-
-  if (useStream) {
+  if (body.stream === true) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -70,23 +54,17 @@ export async function POST(req: NextRequest) {
         void (async () => {
           let lastTickAt = 0;
           try {
-            push({
-              type: 'start',
-              maxMessages: telegramScrapeMaxMessages(),
-            });
+            push({ type: 'start', maxMessages: telegramScrapeMaxMessages() });
 
             const result = await runTelegramPnlScrape({
               userId,
               channelId,
-              telegramUsername: channel.username,
+              telegramUsername: username,
               fromMs,
               toMs,
               onAfterMessage: async (stats) => {
                 const now = Date.now();
-                const emit =
-                  stats.fetched <= 4 ||
-                  stats.fetched % 10 === 0 ||
-                  now - lastTickAt >= 120;
+                const emit = stats.fetched <= 4 || stats.fetched % 10 === 0 || now - lastTickAt >= 120;
                 if (!emit) return;
                 lastTickAt = now;
                 push({
@@ -144,14 +122,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await runTelegramPnlScrape({
-      userId,
-      channelId,
-      telegramUsername: channel.username,
-      fromMs,
-      toMs,
-    });
-
+    const result = await runTelegramPnlScrape({ userId, channelId, telegramUsername: username, fromMs, toMs });
     return NextResponse.json({
       ok: true,
       fetched: result.fetched,
@@ -174,4 +145,4 @@ export async function POST(req: NextRequest) {
     console.error('[rugger-telegram/scrape]', message);
     return NextResponse.json({ error: 'telegram_scrape_failed', detail: message }, { status: 502 });
   }
-}
+});

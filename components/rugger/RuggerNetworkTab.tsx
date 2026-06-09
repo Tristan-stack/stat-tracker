@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,11 @@ import MotherAddressCard from '@/components/analysis/MotherAddressCard';
 import CombinationOptimizer from '@/components/analysis/CombinationOptimizer';
 import WalletDetail from '@/components/analysis/WalletDetail';
 import { ChevronRight, History, Plus, Trash2 } from 'lucide-react';
+import { useAnalyses, useDeleteAnalysis, useDeleteAllAnalyses } from '@/features/analysis/hooks/use-analyses';
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : '';
+}
 
 type TabView = 'idle' | 'running' | 'results';
 type ResultSection = 'leaderboard' | 'mothers' | 'combinations';
@@ -38,8 +43,12 @@ const STATUS_STYLES: Record<string, string> = {
 
 export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetworkTabProps) {
   const [view, setView] = useState<TabView>('idle');
-  const [analyses, setAnalyses] = useState<WalletAnalysis[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const { data: analyses = [], isLoading: isLoadingHistory, refetch } = useAnalyses(ruggerId);
+  const deleteAnalysis = useDeleteAnalysis(ruggerId);
+  const deleteAllAnalyses = useDeleteAllAnalyses(ruggerId);
+  const refreshHistory = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
   const [runningMode, setRunningMode] = useState<AnalysisMode>('combined');
@@ -58,18 +67,6 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
 
   const activeAnalysisIdRef = useRef<string | null>(null);
   const userCancelledRef = useRef(false);
-
-  const fetchHistory = useCallback(async () => {
-    setIsLoadingHistory(true);
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { analyses: WalletAnalysis[] };
-      setAnalyses(data.analyses);
-    } finally { setIsLoadingHistory(false); }
-  }, [ruggerId]);
-
-  useEffect(() => { void fetchHistory(); }, [fetchHistory]);
 
   // NOTE:
   // We intentionally avoid auto-resuming "running/pending" analyses from history.
@@ -114,12 +111,12 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     setView('results');
     setResultSection('leaderboard');
     setWalletDetailAddress(null);
-    void fetchHistory();
-  }, [fetchHistory]);
+    refreshHistory();
+  }, [refreshHistory]);
 
-  const handleAnalysisError = useCallback((_message: string) => {
-    void fetchHistory();
-  }, [fetchHistory]);
+  const handleAnalysisError = useCallback(() => {
+    refreshHistory();
+  }, [refreshHistory]);
 
   const handleAnalysisStarted = useCallback((analysisId: string) => {
     setActiveAnalysisId(analysisId);
@@ -155,42 +152,35 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     setActiveAnalysisId(null);
     activeAnalysisIdRef.current = null;
     setWalletDetailAddress(null);
-    void fetchHistory();
-  }, [fetchHistory]);
+    refreshHistory();
+  }, [refreshHistory]);
 
   const handleCancelRunningAnalysis = useCallback(async () => {
     userCancelledRef.current = true;
 
-    const shouldCancel = window.confirm(
-      'Annuler cette analyse en cours ? Les résultats partiels seront supprimés.'
-    );
-    if (!shouldCancel) {
+    if (!window.confirm('Annuler cette analyse en cours ? Les résultats partiels seront supprimés.')) {
       userCancelledRef.current = false;
       return;
     }
 
     const runningId = activeAnalysisIdRef.current;
-
     setCancellingAnalysisId(runningId);
     try {
       if (runningId) {
-        const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${runningId}`, {
-          method: 'DELETE',
-        });
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (!res.ok) {
-          window.alert(body.error ?? "Impossible d'annuler l'analyse.");
+        try {
+          await deleteAnalysis.mutateAsync(runningId);
+        } catch (e) {
+          window.alert(errorMessage(e) || "Impossible d'annuler l'analyse.");
         }
       }
       setView('idle');
       setActiveAnalysisId(null);
       activeAnalysisIdRef.current = null;
       setWalletDetailAddress(null);
-      await fetchHistory();
     } finally {
       setCancellingAnalysisId(null);
     }
-  }, [ruggerId, fetchHistory]);
+  }, [deleteAnalysis]);
 
   const handleDeleteAnalysis = useCallback(
     async (analysisId: string) => {
@@ -203,25 +193,19 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
       }
       setDeletingAnalysisId(analysisId);
       try {
-        const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}`, {
-          method: 'DELETE',
-        });
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (!res.ok) {
-          window.alert(body.error ?? 'Impossible de supprimer l’analyse.');
-          return;
-        }
+        await deleteAnalysis.mutateAsync(analysisId);
         if (activeAnalysisId === analysisId) {
           setView('idle');
           setActiveAnalysisId(null);
           setWalletDetailAddress(null);
         }
-        await fetchHistory();
+      } catch (e) {
+        window.alert(errorMessage(e) || 'Impossible de supprimer l’analyse.');
       } finally {
         setDeletingAnalysisId(null);
       }
     },
-    [ruggerId, activeAnalysisId, fetchHistory]
+    [deleteAnalysis, activeAnalysisId]
   );
 
   const [isDeletingAll, setIsDeletingAll] = useState(false);
@@ -237,22 +221,18 @@ export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetwork
     }
     setIsDeletingAll(true);
     try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis`, { method: 'DELETE' });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        window.alert(body.error ?? 'Impossible de supprimer les analyses.');
-        return;
-      }
+      await deleteAllAnalyses.mutateAsync();
       userCancelledRef.current = true;
       setView('idle');
       setActiveAnalysisId(null);
       activeAnalysisIdRef.current = null;
       setWalletDetailAddress(null);
-      await fetchHistory();
+    } catch (e) {
+      window.alert(errorMessage(e) || 'Impossible de supprimer les analyses.');
     } finally {
       setIsDeletingAll(false);
     }
-  }, [analyses.length, ruggerId, fetchHistory]);
+  }, [analyses.length, deleteAllAnalyses]);
 
   const handleWalletClick = useCallback((walletAddress: string) => {
     setWalletDetailAddress(walletAddress);

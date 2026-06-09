@@ -1,96 +1,46 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { query } from '@/lib/db';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok, created } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
 import { ruggerExistsForUser } from '@/lib/rugger-access';
-import { getPostgresErrorCode } from '@/lib/pg-errors';
-import type { RuggerBuyerOrigin, RuggerBuyerWallet } from '@/types/rugger-buyer';
+import { listBuyers, insertBuyer } from '@/features/ruggers/buyers-repository';
+import { trimToNull } from '@/features/ruggers/normalize';
 
-const VALID_ORIGINS: RuggerBuyerOrigin[] = ['manual', 'watchlist', 'analysis', 'scraping'];
+type Ctx = { params: Promise<{ id: string }> };
 
-interface RuggerBuyerRow {
-  id: string;
-  rugger_id: string;
-  wallet_address: string;
-  label: string | null;
-  notes: string | null;
-  origin: RuggerBuyerOrigin;
-  created_at: string;
-  updated_at: string;
-}
+export const GET = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id: ruggerId } = await ctx.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) throw notFoundError('Rugger not found');
 
-function toBuyer(row: RuggerBuyerRow): RuggerBuyerWallet {
-  return {
-    id: row.id,
-    ruggerId: row.rugger_id,
-    walletAddress: row.wallet_address,
-    label: row.label,
-    notes: row.notes,
-    origin: row.origin,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
+  const buyers = await listBuyers(ruggerId);
+  return ok({ buyers });
+});
 
-export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+const createSchema = z.object({
+  walletAddress: z.string().trim().min(1, 'walletAddress is required'),
+  label: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  origin: z.enum(['manual', 'watchlist', 'analysis', 'scraping']).optional(),
+});
 
-  const { id: ruggerId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
+export const POST = withAuth<Ctx>(
+  async (req, ctx, { userId }) => {
+    const { id: ruggerId } = await ctx.params;
+    if (!(await ruggerExistsForUser(ruggerId, userId))) throw notFoundError('Rugger not found');
+
+    const body = await parseBody(req, createSchema);
+    const buyer = await insertBuyer({
+      ruggerId,
+      walletAddress: body.walletAddress,
+      label: trimToNull(body.label),
+      notes: trimToNull(body.notes),
+      origin: body.origin ?? 'manual',
+    });
+    return created(buyer);
+  },
+  {
+    name: 'POST /api/ruggers/[id]/buyers',
+    dbErrors: { conflict: 'Wallet already linked to this rugger' },
   }
-
-  const rows = await query<RuggerBuyerRow>(
-    `SELECT id, rugger_id, wallet_address, label, notes, origin, created_at, updated_at
-     FROM rugger_buyer_wallets
-     WHERE rugger_id = $1
-     ORDER BY created_at DESC`,
-    [ruggerId]
-  );
-
-  return NextResponse.json({ buyers: rows.map(toBuyer) });
-}
-
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-
-  const { id: ruggerId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
-
-  const body = (await req.json()) as {
-    walletAddress?: string;
-    label?: string | null;
-    notes?: string | null;
-    origin?: RuggerBuyerOrigin;
-  };
-
-  const walletAddress = body.walletAddress?.trim() ?? '';
-  if (walletAddress === '') {
-    return NextResponse.json({ error: 'walletAddress is required' }, { status: 400 });
-  }
-  const origin = body.origin ?? 'manual';
-  if (!VALID_ORIGINS.includes(origin)) {
-    return NextResponse.json({ error: 'Invalid origin' }, { status: 400 });
-  }
-
-  try {
-    const rows = await query<RuggerBuyerRow>(
-      `INSERT INTO rugger_buyer_wallets (id, rugger_id, wallet_address, label, notes, origin)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-       RETURNING id, rugger_id, wallet_address, label, notes, origin, created_at, updated_at`,
-      [ruggerId, walletAddress, body.label?.trim() || null, body.notes?.trim() || null, origin]
-    );
-    return NextResponse.json(toBuyer(rows[0]), { status: 201 });
-  } catch (error) {
-    const code = getPostgresErrorCode(error);
-    if (code === '23505') {
-      return NextResponse.json({ error: 'Wallet already linked to this rugger' }, { status: 409 });
-    }
-    throw error;
-  }
-}
+);

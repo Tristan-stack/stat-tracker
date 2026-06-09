@@ -1,48 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { AnalysisMotherAddress } from '@/types/analysis';
 import { Check, ExternalLink, X } from 'lucide-react';
 import { canOpenSolscanAccount, openSolscanAccountInNewTab } from '@/lib/open-trusted-solana-external';
+import { truncateAddress } from '@/lib/format';
+import { useMothers, useValidateMother } from '@/features/analysis/hooks/use-analysis-results';
 
 interface MotherAddressCardProps {
   ruggerId: string;
   analysisId: string;
 }
 
-function truncateAddress(address: string) {
-  if (address.length <= 14) return address;
-  return `${address.slice(0, 6)}…${address.slice(-6)}`;
-}
-
 export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddressCardProps) {
-  const [mothers, setMothers] = useState<AnalysisMotherAddress[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: mothers = [], isLoading } = useMothers(ruggerId, analysisId);
+  const validateMother = useValidateMother(ruggerId, analysisId);
 
-  const fetchMothers = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/mothers`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { mothers: AnalysisMotherAddress[] };
-      setMothers(data.mothers);
-    } finally { setIsLoading(false); }
-  }, [ruggerId, analysisId]);
-
-  useEffect(() => { void fetchMothers(); }, [fetchMothers]);
-
-  const handleValidate = useCallback(async (motherId: string, validated: boolean) => {
-    const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/mothers/${motherId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ validated }),
-    });
-    if (!res.ok) return;
-    const updated = (await res.json()) as AnalysisMotherAddress;
-    setMothers((prev) => prev.map((m) => m.id === motherId ? { ...m, validated: updated.validated, validatedAt: updated.validatedAt } : m));
-  }, [ruggerId, analysisId]);
+  const handleValidate = (motherId: string, validated: boolean) => {
+    void validateMother.mutateAsync({ motherId, validated }).catch(() => {});
+  };
 
   if (isLoading) return <p className="text-xs text-muted-foreground">Chargement des adresses mères…</p>;
   if (mothers.length === 0) return <p className="text-xs text-muted-foreground">Aucune adresse mère détectée.</p>;

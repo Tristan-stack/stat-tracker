@@ -2,10 +2,10 @@
 
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Rugger } from '@/types/rugger';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,102 +13,83 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Eye, Link2, MoreVertical, Wallet } from 'lucide-react';
+import { apiPost } from '@/lib/api-client';
+import { useCreateRugger, useRuggersList } from '@/features/ruggers/hooks/use-ruggers';
+import { useAddWatchlist } from '@/features/watchlist/hooks/use-watchlist';
 
 interface WalletActionsProps {
   walletAddress: string;
   sourceRuggerId?: string;
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : 'Erreur réseau';
+}
+
 export default function WalletActions({ walletAddress, sourceRuggerId }: WalletActionsProps) {
   const router = useRouter();
+  const { data: ruggers = [] } = useRuggersList();
+  const createRugger = useCreateRugger();
+  const addWatchlist = useAddWatchlist();
+  const attachBuyer = useMutation({
+    mutationFn: (ruggerId: string) =>
+      apiPost(`/api/ruggers/${ruggerId}/buyers`, { walletAddress, origin: 'analysis' }),
+  });
+
   const [showWatchlistForm, setShowWatchlistForm] = useState(false);
   const [watchlistLabel, setWatchlistLabel] = useState('');
   const [watchlistNotes, setWatchlistNotes] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showRuggerPicker, setShowRuggerPicker] = useState(false);
-  const [ruggers, setRuggers] = useState<Rugger[]>([]);
   const [selectedRuggerId, setSelectedRuggerId] = useState(sourceRuggerId ?? '');
+
+  const isSubmitting = addWatchlist.isPending || attachBuyer.isPending;
 
   const handleAddAsRugger = useCallback(async () => {
     setFeedback(null);
     try {
-      const res = await fetch('/api/ruggers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, walletType: 'simple' }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setFeedback(data.error ?? 'Erreur');
-        return;
-      }
-      const data = (await res.json()) as { id: string };
-      router.push(`/rugger/${data.id}`);
-    } catch { setFeedback('Erreur réseau'); }
-  }, [walletAddress, router]);
+      const rugger = await createRugger.mutateAsync({ walletAddress, walletType: 'simple' });
+      router.push(`/rugger/${rugger.id}`);
+    } catch (e) {
+      setFeedback(errorMessage(e));
+    }
+  }, [walletAddress, router, createRugger]);
 
   const handleAddToWatchlist = useCallback(async () => {
-    setIsSubmitting(true);
     setFeedback(null);
     try {
-      const res = await fetch('/api/watchlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          walletAddress,
-          label: watchlistLabel.trim() || undefined,
-          notes: watchlistNotes.trim() || undefined,
-          sourceRuggerId: sourceRuggerId || undefined,
-        }),
+      await addWatchlist.mutateAsync({
+        walletAddress,
+        label: watchlistLabel.trim() || undefined,
+        notes: watchlistNotes.trim() || undefined,
+        sourceRuggerId: sourceRuggerId || undefined,
       });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setFeedback(data.error ?? 'Erreur');
-        return;
-      }
       setFeedback('Ajouté à la watchlist');
       setShowWatchlistForm(false);
       setWatchlistLabel('');
       setWatchlistNotes('');
-    } catch { setFeedback('Erreur réseau'); }
-    finally { setIsSubmitting(false); }
-  }, [walletAddress, watchlistLabel, watchlistNotes, sourceRuggerId]);
-
-  const openRuggerPicker = useCallback(async () => {
-    setFeedback(null);
-    const res = await fetch('/api/ruggers?pageSize=100');
-    if (!res.ok) {
-      setFeedback('Impossible de charger les ruggers.');
-      return;
+    } catch (e) {
+      setFeedback(errorMessage(e));
     }
-    const data = (await res.json()) as { ruggers: Rugger[] };
-    setRuggers(data.ruggers);
-    setSelectedRuggerId(sourceRuggerId ?? data.ruggers[0]?.id ?? '');
+  }, [walletAddress, watchlistLabel, watchlistNotes, sourceRuggerId, addWatchlist]);
+
+  const openRuggerPicker = useCallback(() => {
+    setFeedback(null);
+    setSelectedRuggerId(sourceRuggerId ?? ruggers[0]?.id ?? '');
     setShowRuggerPicker(true);
-  }, [sourceRuggerId]);
+  }, [sourceRuggerId, ruggers]);
 
   const handleAddToExistingRugger = useCallback(async () => {
     if (selectedRuggerId.trim() === '') return;
-    setIsSubmitting(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/ruggers/${selectedRuggerId}/buyers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, origin: 'analysis' }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setFeedback(data.error ?? 'Erreur');
-        return;
-      }
+      await attachBuyer.mutateAsync(selectedRuggerId);
       setFeedback('Ajouté au rugger');
       setShowRuggerPicker(false);
-    } finally {
-      setIsSubmitting(false);
+    } catch (e) {
+      setFeedback(errorMessage(e));
     }
-  }, [selectedRuggerId, walletAddress]);
+  }, [selectedRuggerId, attachBuyer]);
 
   return (
     <div className="inline-flex items-center gap-1">

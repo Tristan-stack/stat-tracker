@@ -1,15 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/api/with-auth';
 import { mtprotoSessionConnected } from '@/lib/rugger-telegram/mtproto-login-service';
 
-export async function GET(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-
+export const GET = withAuth(async (_req, _ctx, { userId }) => {
   const status = await mtprotoSessionConnected(userId);
   return NextResponse.json({
     connected: status.connected,
     ...(status.phoneHint !== undefined ? { phoneHint: status.phoneHint } : {}),
   });
-}
+});

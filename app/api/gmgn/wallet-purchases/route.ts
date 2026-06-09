@@ -1,5 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { badRequest } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
 import {
   buildPurchasePreviews,
   buildWalletPurchasePreviews,
@@ -10,17 +14,14 @@ import {
 
 export const maxDuration = 60;
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.trim().length > 0;
-}
-
 const MAX_WALLETS = 20;
+const MAX_SPAN_MS = 366 * 86400000;
 
 function normalizeWalletList(addresses: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of addresses) {
-    const a = typeof raw === 'string' ? raw.trim() : '';
+    const a = raw.trim();
     if (a === '' || seen.has(a)) continue;
     seen.add(a);
     out.push(a);
@@ -37,101 +38,72 @@ function mergeMultiWalletPurchases(rows: WalletPurchasePreview[]): WalletPurchas
       byMint.set(mint, p);
       continue;
     }
-    const tNew = new Date(p.purchasedAt).getTime();
-    const tOld = new Date(prev.purchasedAt).getTime();
-    if (tNew < tOld) byMint.set(mint, p);
+    if (new Date(p.purchasedAt).getTime() < new Date(prev.purchasedAt).getTime()) byMint.set(mint, p);
   }
   return [...byMint.values()].sort(
     (a, b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime()
   );
 }
 
-function parseOptionalPositiveInt(v: unknown): number | undefined {
-  if (typeof v !== 'number' || !Number.isFinite(v) || v < 1) return undefined;
+function parseOptionalPositiveInt(v: number | undefined): number | undefined {
+  if (v === undefined || !Number.isFinite(v) || v < 1) return undefined;
   return Math.floor(v);
 }
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+const schema = z.object({
+  walletAddress: z.string().optional(),
+  walletAddresses: z.array(z.string()).optional(),
+  fromMs: z.number().optional(),
+  toMs: z.number().optional(),
+  debug: z.boolean().optional(),
+  klineEnrichTotalCap: z.number().optional(),
+  klineEnrichOffset: z.number().optional(),
+  klineEnrichBatchSize: z.number().optional(),
+  klineSliceOnly: z.boolean().optional(),
+});
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
+export const POST = withAuth(async (req) => {
+  const body = await parseBody(req, schema);
 
-  const b = body as {
-    walletAddress?: unknown;
-    walletAddresses?: unknown;
-    fromMs?: unknown;
-    toMs?: unknown;
-    debug?: unknown;
-    klineEnrichTotalCap?: unknown;
-    klineEnrichOffset?: unknown;
-    klineEnrichBatchSize?: unknown;
-    klineSliceOnly?: unknown;
-  };
-
-  const fromMs = typeof b.fromMs === 'number' && Number.isFinite(b.fromMs) ? b.fromMs : NaN;
-  const toMs = typeof b.toMs === 'number' && Number.isFinite(b.toMs) ? b.toMs : NaN;
+  const fromMs = body.fromMs ?? NaN;
+  const toMs = body.toMs ?? NaN;
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
-    return NextResponse.json({ error: 'fromMs and toMs must be finite numbers with fromMs <= toMs' }, { status: 400 });
+    throw badRequest('fromMs and toMs must be finite numbers with fromMs <= toMs');
   }
+  if (toMs - fromMs > MAX_SPAN_MS) throw badRequest('Date range too large');
 
-  const maxSpan = 366 * 86400000;
-  if (toMs - fromMs > maxSpan) {
-    return NextResponse.json({ error: 'Date range too large' }, { status: 400 });
-  }
-
-  const debug = b.debug === true;
+  const debug = body.debug === true;
   const debugLog: string[] | undefined = debug ? [] : undefined;
 
   let walletList: string[];
-  if (Array.isArray(b.walletAddresses) && b.walletAddresses.length > 0) {
-    const raw = b.walletAddresses.filter((x): x is string => typeof x === 'string');
-    walletList = normalizeWalletList(raw);
-    if (walletList.length === 0) {
-      return NextResponse.json({ error: 'walletAddresses must contain at least one non-empty address' }, { status: 400 });
-    }
-    if (walletList.length > MAX_WALLETS) {
-      return NextResponse.json(
-        { error: `Too many wallets (max ${MAX_WALLETS})` },
-        { status: 400 }
-      );
-    }
-  } else if (isNonEmptyString(b.walletAddress)) {
-    walletList = [b.walletAddress.trim()];
+  if (body.walletAddresses && body.walletAddresses.length > 0) {
+    walletList = normalizeWalletList(body.walletAddresses);
+    if (walletList.length === 0) throw badRequest('walletAddresses must contain at least one non-empty address');
+    if (walletList.length > MAX_WALLETS) throw badRequest(`Too many wallets (max ${MAX_WALLETS})`);
+  } else if (body.walletAddress && body.walletAddress.trim() !== '') {
+    walletList = [body.walletAddress.trim()];
   } else {
-    return NextResponse.json(
-      { error: 'walletAddress or walletAddresses is required' },
-      { status: 400 }
-    );
+    throw badRequest('walletAddress or walletAddresses is required');
   }
 
-  const klineSliceOnly = b.klineSliceOnly === true;
-  const userCap = parseOptionalPositiveInt(b.klineEnrichTotalCap);
+  const klineSliceOnly = body.klineSliceOnly === true;
+  const userCap = parseOptionalPositiveInt(body.klineEnrichTotalCap);
   const klineOffset =
-    typeof b.klineEnrichOffset === 'number' && Number.isFinite(b.klineEnrichOffset) && b.klineEnrichOffset >= 0
-      ? Math.floor(b.klineEnrichOffset)
+    body.klineEnrichOffset !== undefined && Number.isFinite(body.klineEnrichOffset) && body.klineEnrichOffset >= 0
+      ? Math.floor(body.klineEnrichOffset)
       : 0;
   const klineBatchSize =
-    typeof b.klineEnrichBatchSize === 'number' &&
-    Number.isFinite(b.klineEnrichBatchSize) &&
-    b.klineEnrichBatchSize >= 1
-      ? Math.min(Math.floor(b.klineEnrichBatchSize), 500)
+    body.klineEnrichBatchSize !== undefined &&
+    Number.isFinite(body.klineEnrichBatchSize) &&
+    body.klineEnrichBatchSize >= 1
+      ? Math.min(Math.floor(body.klineEnrichBatchSize), 500)
       : DEFAULT_KLINE_ENRICH_BATCH;
 
   if (klineSliceOnly && walletList.length !== 1) {
-    return NextResponse.json(
-      { error: 'klineSliceOnly is only supported for a single walletAddress' },
-      { status: 400 }
-    );
+    throw badRequest('klineSliceOnly is only supported for a single walletAddress');
   }
-
   if (klineSliceOnly && userCap === undefined) {
-    return NextResponse.json({ error: 'klineEnrichTotalCap is required when klineSliceOnly is true' }, { status: 400 });
+    throw badRequest('klineEnrichTotalCap is required when klineSliceOnly is true');
   }
 
   try {
@@ -145,26 +117,19 @@ export async function POST(req: NextRequest) {
         const merged: WalletPurchasePreview[] = [];
         for (const addr of walletList) {
           const batch = await buildPurchasePreviews(addr, fromMs, toMs, { debugLog });
-          for (const p of batch) {
-            merged.push({ ...p, sourceWallet: addr });
-          }
+          for (const p of batch) merged.push({ ...p, sourceWallet: addr });
         }
-        merged.sort(
-          (a, b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime()
-        );
+        merged.sort((a, b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime());
         purchases = mergeMultiWalletPurchases(merged);
       }
-      const payload: {
-        purchases: typeof purchases;
-        debugLog?: string[];
-        meta?: BuildWalletPurchasePreviewsMeta;
-      } = { purchases };
+      const payload: { purchases: typeof purchases; debugLog?: string[]; meta?: BuildWalletPurchasePreviewsMeta } = {
+        purchases,
+      };
       if (debug && debugLog !== undefined) payload.debugLog = debugLog;
-      return NextResponse.json(payload);
+      return ok(payload);
     }
 
-    const wallet = walletList[0];
-    const result = await buildWalletPurchasePreviews(wallet, fromMs, toMs, {
+    const result = await buildWalletPurchasePreviews(walletList[0], fromMs, toMs, {
       debugLog,
       klineEnrichTotalCap: userCap,
       klineEnrichOffset: klineOffset,
@@ -183,11 +148,16 @@ export async function POST(req: NextRequest) {
       meta: result.meta,
     };
     if (debug && debugLog !== undefined) payload.debugLog = debugLog;
-    return NextResponse.json(payload);
+    return ok(payload);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'GMGN request failed';
-    const status =
-      /HTTP 401\b/.test(message) ? 401 : /HTTP 403\b/.test(message) ? 403 : /HTTP 429\b/.test(message) ? 429 : 502;
+    const status = /HTTP 401\b/.test(message)
+      ? 401
+      : /HTTP 403\b/.test(message)
+        ? 403
+        : /HTTP 429\b/.test(message)
+          ? 429
+          : 502;
     return NextResponse.json({ error: message }, { status });
   }
-}
+});

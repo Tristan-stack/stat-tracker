@@ -1,128 +1,89 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { badRequest, notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
 import { ruggerExistsForUser } from '@/lib/rugger-access';
-import { query } from '@/lib/db';
+import { getRuggerWalletInfo } from '@/features/ruggers/repository';
+import {
+  listAnalyses,
+  deleteAllAnalyses,
+  createAnalysis,
+  getRuggerTokenAddresses,
+} from '@/features/analysis/repository';
 import { runAnalysisPipeline, type PipelineOpts } from '@/lib/analysis/run-analysis';
 import type { AnalysisMode } from '@/types/analysis';
 
-// Vercel Hobby plafonne maxDuration à 60s ; l'analyse longue est découpée en steps (voir route /step).
+// Vercel Hobby plafonne maxDuration à 60s ; l'analyse longue est découpée en steps.
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
+type Ctx = { params: Promise<{ id: string }> };
+
 const VALID_MODES: AnalysisMode[] = ['token', 'funding', 'combined', 'token_hunting'];
 
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+const postSchema = z.object({
+  mode: z.string().optional(),
+  tokenAddresses: z.array(z.string()).optional(),
+  fundingDepth: z.number().optional(),
+  walletCentricRecoveryLimit: z.number().nullable().optional(),
+  excludeInactiveOver24h: z.boolean().optional(),
+  mcapMin: z.number().nullable().optional(),
+  mcapMax: z.number().nullable().optional(),
+});
 
-  const { id: ruggerId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
+export const POST = withAuth<Ctx>(async (req, ctx, { userId }) => {
+  const { id: ruggerId } = await ctx.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) throw notFoundError('Rugger not found');
 
-  const body = (await req.json()) as {
-    mode?: AnalysisMode;
-    tokenAddresses?: string[];
-    fundingDepth?: number;
-    /** 0–120 : nombre de wallets candidats (top coverage) pour la recovery GMGN ; 0 = désactivé. */
-    walletCentricRecoveryLimit?: number;
-    /** Si true : éliminer les buyers dont la dernière activité on-chain est > 24h avant l'analyse profonde. */
-    excludeInactiveOver24h?: boolean;
-    mcapMin?: number;
-    mcapMax?: number;
-  };
+  const body = await parseBody(req, postSchema);
 
-  const mode = body.mode ?? 'combined';
+  const mode = (body.mode ?? 'combined') as AnalysisMode;
   if (!VALID_MODES.includes(mode)) {
-    return NextResponse.json({ error: 'Invalid mode. Use: token, funding, combined, or token_hunting' }, { status: 400 });
+    throw badRequest('Invalid mode. Use: token, funding, combined, or token_hunting');
   }
 
   const fundingDepth = body.fundingDepth ?? 5;
-  if (fundingDepth < 1 || fundingDepth > 5) {
-    return NextResponse.json({ error: 'fundingDepth must be between 1 and 5' }, { status: 400 });
-  }
+  if (fundingDepth < 1 || fundingDepth > 5) throw badRequest('fundingDepth must be between 1 and 5');
 
-  const rugger = await query<{ wallet_address: string | null }>(
-    'SELECT wallet_address FROM ruggers WHERE id = $1',
-    [ruggerId]
-  );
-  const ruggerWallet = rugger[0]?.wallet_address;
+  const info = await getRuggerWalletInfo(ruggerId, userId);
+  const ruggerWallet = info?.walletAddress ?? null;
   if (!ruggerWallet && mode !== 'token_hunting') {
-    return NextResponse.json({ error: 'Rugger has no primary wallet configured' }, { status: 400 });
+    throw badRequest('Rugger has no primary wallet configured');
   }
 
-  let tokens: { address: string; name: string | null }[];
-  if (body.tokenAddresses && body.tokenAddresses.length > 0) {
-    tokens = body.tokenAddresses.map((addr) => ({ address: addr, name: null }));
-  } else {
-    const dbTokens = await query<{ token_address: string; token_name: string | null }>(
-      'SELECT token_address, token_name FROM rugger_tokens WHERE rugger_id = $1 AND token_address IS NOT NULL',
-      [ruggerId]
-    );
-    tokens = dbTokens.map((t) => ({ address: t.token_address, name: t.token_name }));
-  }
+  const tokens =
+    body.tokenAddresses && body.tokenAddresses.length > 0
+      ? body.tokenAddresses.map((address) => ({ address, name: null as string | null }))
+      : await getRuggerTokenAddresses(ruggerId);
 
   if ((mode === 'token' || mode === 'combined' || mode === 'token_hunting') && tokens.length === 0) {
-    return NextResponse.json(
-      { error: 'No tokens available. Add tokens to the rugger or provide tokenAddresses.' },
-      { status: 400 }
-    );
+    throw badRequest('No tokens available. Add tokens to the rugger or provide tokenAddresses.');
   }
 
   let walletCentricRecoveryLimit: number | undefined;
-  if (body.walletCentricRecoveryLimit !== undefined && body.walletCentricRecoveryLimit !== null) {
-    const n = Number(body.walletCentricRecoveryLimit);
-    if (!Number.isFinite(n)) {
-      return NextResponse.json(
-        { error: 'walletCentricRecoveryLimit must be a finite number' },
-        { status: 400 }
-      );
+  if (body.walletCentricRecoveryLimit != null) {
+    if (!Number.isFinite(body.walletCentricRecoveryLimit)) {
+      throw badRequest('walletCentricRecoveryLimit must be a finite number');
     }
-    walletCentricRecoveryLimit = n;
+    walletCentricRecoveryLimit = body.walletCentricRecoveryLimit;
   }
 
   let mcapMin: number | undefined;
-  if (body.mcapMin !== undefined && body.mcapMin !== null) {
-    const n = Number(body.mcapMin);
-    if (!Number.isFinite(n) || n < 0) {
-      return NextResponse.json(
-        { error: 'mcapMin must be a finite number >= 0' },
-        { status: 400 }
-      );
-    }
-    mcapMin = n;
+  if (body.mcapMin != null) {
+    if (!Number.isFinite(body.mcapMin) || body.mcapMin < 0) throw badRequest('mcapMin must be a finite number >= 0');
+    mcapMin = body.mcapMin;
   }
-
   let mcapMax: number | undefined;
-  if (body.mcapMax !== undefined && body.mcapMax !== null) {
-    const n = Number(body.mcapMax);
-    if (!Number.isFinite(n) || n < 0) {
-      return NextResponse.json(
-        { error: 'mcapMax must be a finite number >= 0' },
-        { status: 400 }
-      );
-    }
-    mcapMax = n;
+  if (body.mcapMax != null) {
+    if (!Number.isFinite(body.mcapMax) || body.mcapMax < 0) throw badRequest('mcapMax must be a finite number >= 0');
+    mcapMax = body.mcapMax;
   }
-
   if (mcapMin !== undefined && mcapMax !== undefined && mcapMin > mcapMax) {
-    return NextResponse.json(
-      { error: 'mcapMin must be <= mcapMax' },
-      { status: 400 }
-    );
+    throw badRequest('mcapMin must be <= mcapMax');
   }
 
-  const analysisRows = await query<{ id: string }>(
-    `INSERT INTO wallet_analyses (id, rugger_id, mode, status, funding_depth, buyer_limit, token_count)
-     VALUES (gen_random_uuid(), $1, $2, 'pending', $3, 200, $4)
-     RETURNING id`,
-    [ruggerId, mode, fundingDepth, tokens.length]
-  );
-  const analysisId = analysisRows[0].id;
+  const analysisId = await createAnalysis({ ruggerId, mode, fundingDepth, tokenCount: tokens.length });
 
   const pipelineOpts: PipelineOpts = {
     mode,
@@ -139,10 +100,8 @@ export async function POST(
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
 
   const markDisconnected = () => {
-    if (clientDisconnected) return;
     clientDisconnected = true;
   };
-
   req.signal.addEventListener('abort', markDisconnected);
 
   const emit = (event: string, data: Record<string, unknown>) => {
@@ -157,20 +116,22 @@ export async function POST(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       streamController = controller;
-
       emit('ping', { analysisId });
 
       runAnalysisPipeline(analysisId, tokens, ruggerWallet ?? null, userId, pipelineOpts, emit)
         .catch((error) => {
           if (clientDisconnected) return;
-          const message =
-            error instanceof Error ? error.message : 'Erreur inconnue pendant le pipeline';
+          const message = error instanceof Error ? error.message : 'Erreur inconnue pendant le pipeline';
           emit('error', { analysisId, message });
           console.error('Analysis pipeline failed', { analysisId, message });
         })
         .finally(() => {
           if (!clientDisconnected) {
-            try { controller.close(); } catch { /* stream already closed */ }
+            try {
+              controller.close();
+            } catch {
+              /* stream already closed */
+            }
           }
         });
     },
@@ -186,80 +147,18 @@ export async function POST(
       Connection: 'keep-alive',
     },
   });
-}
+});
 
-export async function DELETE(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+export const DELETE = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id: ruggerId } = await ctx.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) throw notFoundError('Rugger not found');
+  const deletedCount = await deleteAllAnalyses(ruggerId);
+  return ok({ ok: true, deletedCount });
+});
 
-  const { id: ruggerId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
-
-  const deleted = await query<{ id: string }>(
-    `DELETE FROM wallet_analyses WHERE rugger_id = $1 RETURNING id`,
-    [ruggerId]
-  );
-
-  return NextResponse.json({ ok: true, deletedCount: deleted.length });
-}
-
-interface AnalysisRow {
-  id: string;
-  mode: string;
-  status: string;
-  funding_depth: number;
-  buyer_limit: number;
-  token_count: number;
-  buyer_count: number;
-  progress: number;
-  progress_label: string | null;
-  error_message: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
-export async function GET(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
-
-  const { id: ruggerId } = await context.params;
-  if (!(await ruggerExistsForUser(ruggerId, userId))) {
-    return NextResponse.json({ error: 'Rugger not found' }, { status: 404 });
-  }
-
-  const rows = await query<AnalysisRow>(
-    `SELECT id, mode, status, funding_depth, buyer_limit, token_count, buyer_count,
-            progress, progress_label, error_message, created_at, completed_at
-     FROM wallet_analyses
-     WHERE rugger_id = $1
-     ORDER BY created_at DESC`,
-    [ruggerId]
-  );
-
-  const analyses = rows.map((r) => ({
-    id: r.id,
-    mode: r.mode,
-    status: r.status,
-    fundingDepth: r.funding_depth,
-    buyerLimit: r.buyer_limit,
-    tokenCount: r.token_count,
-    buyerCount: r.buyer_count,
-    progress: r.progress,
-    progressLabel: r.progress_label,
-    errorMessage: r.error_message,
-    createdAt: r.created_at,
-    completedAt: r.completed_at,
-  }));
-
-  return NextResponse.json({ analyses });
-}
+export const GET = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id: ruggerId } = await ctx.params;
+  if (!(await ruggerExistsForUser(ruggerId, userId))) throw notFoundError('Rugger not found');
+  const analyses = await listAnalyses(ruggerId);
+  return ok({ analyses });
+});

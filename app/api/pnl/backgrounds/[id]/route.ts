@@ -1,27 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { deletePnlBackground, getPnlBackground } from '@/lib/repositories/pnl-backgrounds';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { getPnlBackground, deletePnlBackground } from '@/features/pnl/repository';
 
-export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+type Ctx = { params: Promise<{ id: string }> };
 
-  const { id } = await context.params;
-  const background = await getPnlBackground({ id, userId: auth.userId });
-  if (!background) {
-    return NextResponse.json({ error: 'Fond introuvable' }, { status: 404 });
-  }
-  return NextResponse.json({ background });
-}
+export const GET = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id } = await ctx.params;
+  const background = await getPnlBackground({ id, userId });
+  if (!background) throw notFoundError('Fond introuvable');
+  return ok({ background });
+});
 
-export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-
-  const { id } = await context.params;
-  const deleted = await deletePnlBackground({ id, userId: auth.userId });
-  if (!deleted) {
-    return NextResponse.json({ error: 'Fond introuvable' }, { status: 404 });
-  }
-  return NextResponse.json({ deleted: true });
-}
+export const DELETE = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id } = await ctx.params;
+  const deleted = await deletePnlBackground({ id, userId });
+  if (!deleted) throw notFoundError('Fond introuvable');
+  return ok({ deleted: true });
+});

@@ -15,6 +15,12 @@ import { formatMintShort } from '@/lib/token-display';
 import { iso2ToFlagEmoji, MTPROTO_COUNTRY_DIALS } from '@/lib/rugger-telegram/mtproto-country-dials';
 import { composeE164FromIsoAndNational } from '@/lib/rugger-telegram/mtproto-phone';
 import { cn } from '@/lib/utils';
+import { readNdjsonStream } from '@/lib/http/stream';
+import { apiGet, apiPost, apiDelete, ApiError } from '@/lib/api-client';
+
+function errMsg(e: unknown, fallback: string): string {
+  return e instanceof ApiError ? e.message : fallback;
+}
 
 type ChannelDto = Omit<TelegramChannelRow, 'created_at'> & { createdAt: string };
 
@@ -143,21 +149,11 @@ export default function RuggerTelegramPage() {
     }
     setIsFavoritesLoading(true);
     try {
-      const res = await fetch(
+      const data = await apiGet<{ favorites?: Array<{ mint: string; tokenName: string | null }> }>(
         `/api/rugger-telegram/favorites?channelId=${encodeURIComponent(selectedChannelId)}`
       );
-      if (!res.ok) {
-        setTelegramFavorites([]);
-        return;
-      }
-      const data = (await res.json()) as {
-        favorites?: Array<{ mint: string; tokenName: string | null }>;
-      };
       setTelegramFavorites(
-        (data.favorites ?? []).map((f) => ({
-          mint: f.mint.trim(),
-          token_name: f.tokenName,
-        }))
+        (data.favorites ?? []).map((f) => ({ mint: f.mint.trim(), token_name: f.tokenName }))
       );
     } catch {
       setTelegramFavorites([]);
@@ -169,15 +165,14 @@ export default function RuggerTelegramPage() {
   const loadChannels = useCallback(async () => {
     setIsLoadingChannels(true);
     try {
-      const response = await fetch('/api/rugger-telegram/channels');
-      if (!response.ok) return;
-      const data = (await response.json()) as { channels: TelegramChannelRow[] };
+      const data = await apiGet<{ channels: TelegramChannelRow[] }>('/api/rugger-telegram/channels');
       const mapped = data.channels.map(mapChannel);
       setChannels(mapped);
-      setSelectedChannelId((current) => {
-        if (current && mapped.some((c) => c.id === current)) return current;
-        return mapped[0]?.id ?? null;
-      });
+      setSelectedChannelId((current) =>
+        current && mapped.some((c) => c.id === current) ? current : mapped[0]?.id ?? null
+      );
+    } catch {
+      /* ignore */
     } finally {
       setIsLoadingChannels(false);
     }
@@ -195,16 +190,7 @@ export default function RuggerTelegramPage() {
 
   const refreshMtprotoStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/rugger-telegram/mtproto/status');
-      if (response.status === 401) {
-        setMtprotoConnected(false);
-        return;
-      }
-      if (!response.ok) {
-        setMtprotoConnected(false);
-        return;
-      }
-      const data = (await response.json()) as { connected?: boolean; phoneHint?: string };
+      const data = await apiGet<{ connected?: boolean; phoneHint?: string }>('/api/rugger-telegram/mtproto/status');
       setMtprotoConnected(Boolean(data.connected));
       setMtprotoPhoneHint(typeof data.phoneHint === 'string' ? data.phoneHint : undefined);
     } catch {
@@ -228,11 +214,7 @@ export default function RuggerTelegramPage() {
   const handleMtprotoDisconnect = useCallback(async () => {
     setMtprotoLoginError(null);
     try {
-      const response = await fetch('/api/rugger-telegram/mtproto/session', { method: 'DELETE' });
-      if (!response.ok) {
-        setMtprotoLoginError('Impossible de supprimer la session Telegram pour le moment.');
-        return;
-      }
+      await apiDelete('/api/rugger-telegram/mtproto/session');
       setMtprotoLoginPhase('phone');
       setMtprotoCountryIso('FR');
       setMtprotoLoginNational('');
@@ -242,7 +224,7 @@ export default function RuggerTelegramPage() {
       setSelectedChannelId(null);
       await refreshMtprotoStatus();
     } catch {
-      setMtprotoLoginError('Erreur réseau pendant la déconnexion.');
+      setMtprotoLoginError('Impossible de supprimer la session Telegram pour le moment.');
     }
   }, [refreshMtprotoStatus]);
 
@@ -255,19 +237,12 @@ export default function RuggerTelegramPage() {
         setMtprotoLoginError('Choisis un pays et un numéro valide (tu peux aussi coller un +33… complet dans le second champ).');
         return;
       }
-      const response = await fetch('/api/rugger-telegram/mtproto/send-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneE164 }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMtprotoLoginError(data.error ?? 'Impossible d’envoyer le code Telegram.');
-        return;
-      }
+      await apiPost('/api/rugger-telegram/mtproto/send-code', { phone: phoneE164 });
       setMtprotoLoginPhase('code');
       setMtprotoLoginCode('');
       setMtprotoLoginPassword('');
+    } catch (e) {
+      setMtprotoLoginError(errMsg(e, 'Impossible d’envoyer le code Telegram.'));
     } finally {
       setMtprotoLoginBusy(false);
     }
@@ -277,25 +252,18 @@ export default function RuggerTelegramPage() {
     setMtprotoLoginError(null);
     setMtprotoLoginBusy(true);
     try {
-      const response = await fetch('/api/rugger-telegram/mtproto/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: mtprotoLoginCode.trim(),
-          password: mtprotoLoginPassword.trim() || undefined,
-        }),
+      await apiPost('/api/rugger-telegram/mtproto/complete', {
+        code: mtprotoLoginCode.trim(),
+        password: mtprotoLoginPassword.trim() || undefined,
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        setMtprotoLoginError(data.error ?? 'Connexion Telegram refusée.');
-        return;
-      }
       await refreshMtprotoStatus();
       setMtprotoLoginPhase('phone');
       setMtprotoCountryIso('FR');
       setMtprotoLoginNational('');
       setMtprotoLoginCode('');
       setMtprotoLoginPassword('');
+    } catch (e) {
+      setMtprotoLoginError(errMsg(e, 'Connexion Telegram refusée.'));
     } finally {
       setMtprotoLoginBusy(false);
     }
@@ -346,18 +314,16 @@ export default function RuggerTelegramPage() {
         sortBy,
         dir,
       });
-      const response = await fetch(`/api/rugger-telegram/leaderboard?${params.toString()}`);
-      if (!response.ok) {
-        const err = (await response.json().catch(() => null)) as { error?: string } | null;
-        setBoardError(err?.error ?? `Erreur ${response.status}`);
-        setRows([]);
-        return;
-      }
-      const data = (await response.json()) as { rows: TelegramLeaderboardRow[] };
+      const data = await apiGet<{ rows: TelegramLeaderboardRow[] }>(
+        `/api/rugger-telegram/leaderboard?${params.toString()}`
+      );
       setRows(data.rows);
       setMayhemByMint({});
       setMayhemSkippedNoApiKey(false);
       setBoardMayhemHint(null);
+    } catch (e) {
+      setBoardError(errMsg(e, 'Erreur réseau'));
+      setRows([]);
     } finally {
       setIsLoadingBoard(false);
     }
@@ -381,63 +347,48 @@ export default function RuggerTelegramPage() {
     void (async () => {
       try {
         const mints = rows.map((r) => r.token_mint);
-        const res = await fetch('/api/rugger-telegram/mayhem-resolve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mints }),
-        });
-        const payload = (await res.json().catch(() => null)) as
-          | {
-              skippedNoApiKey?: boolean;
-              checked?: number;
-              excluded?: number;
-              capped?: boolean;
-              cap?: number;
-              mayhemCacheHits?: number;
-              mayhemGmgnCalls?: number;
-              mayhemByMint?: Record<string, boolean>;
-              error?: string;
-            }
-          | null;
+        const payload = await apiPost<{
+          skippedNoApiKey?: boolean;
+          checked?: number;
+          excluded?: number;
+          capped?: boolean;
+          cap?: number;
+          mayhemCacheHits?: number;
+          mayhemGmgnCalls?: number;
+          mayhemByMint?: Record<string, boolean>;
+        }>('/api/rugger-telegram/mayhem-resolve', { mints });
 
         if (cancelled) return;
-        if (!res.ok || !payload) {
-          if (!cancelled) setBoardMayhemHint(`Filtre Mayhem : erreur (${res.status}).`);
-          return;
-        }
-        if (typeof payload.error === 'string') {
-          if (!cancelled) setBoardMayhemHint(payload.error);
-          return;
-        }
+        setMayhemByMint(payload.mayhemByMint ?? {});
+        setMayhemResolveCap(typeof payload.cap === 'number' ? payload.cap : 100);
+        const skipped = payload.skippedNoApiKey === true;
+        setMayhemSkippedNoApiKey(skipped);
 
-        if (!cancelled) {
-          setMayhemByMint(payload.mayhemByMint ?? {});
-          setMayhemResolveCap(typeof payload.cap === 'number' ? payload.cap : 100);
-          const skipped = payload.skippedNoApiKey === true;
-          setMayhemSkippedNoApiKey(skipped);
-
-          if (skipped) {
-            setBoardMayhemHint('Filtre Mayhem ignoré : GMGN_API_KEY n’est pas configurée sur le serveur.');
-          } else {
-            const parts: string[] = [];
-            const checked = payload.checked ?? 0;
-            const excluded = payload.excluded ?? 0;
-            const ch = payload.mayhemCacheHits ?? 0;
-            const gm = payload.mayhemGmgnCalls ?? 0;
+        if (skipped) {
+          setBoardMayhemHint('Filtre Mayhem ignoré : GMGN_API_KEY n’est pas configurée sur le serveur.');
+        } else {
+          const parts: string[] = [];
+          const checked = payload.checked ?? 0;
+          const excluded = payload.excluded ?? 0;
+          const ch = payload.mayhemCacheHits ?? 0;
+          const gm = payload.mayhemGmgnCalls ?? 0;
+          parts.push(
+            `${excluded} token(s) Pump Mayhem exclus sur ${checked} mint(s) résolu(s) — cache ${ch.toLocaleString('fr-FR')}, appels GMGN ${gm.toLocaleString('fr-FR')}.`
+          );
+          if (payload.capped === true && typeof payload.cap === 'number') {
             parts.push(
-              `${excluded} token(s) Pump Mayhem exclus sur ${checked} mint(s) résolu(s) — cache ${ch.toLocaleString('fr-FR')}, appels GMGN ${gm.toLocaleString('fr-FR')}.`
+              `Les entrées au-delà du rang ${payload.cap} n’ont pas été vérifiées (variable TELEGRAM_LEADERBOARD_MAYHEM_MAX_MINTS).`
             );
-            if (payload.capped === true && typeof payload.cap === 'number') {
-              parts.push(
-                `Les entrées au-delà du rang ${payload.cap} n’ont pas été vérifiées (variable TELEGRAM_LEADERBOARD_MAYHEM_MAX_MINTS).`
-              );
-            }
-            setBoardMayhemHint(parts.join(' '));
           }
+          setBoardMayhemHint(parts.join(' '));
         }
-      } catch {
-        if (!cancelled)
-          setBoardMayhemHint('Filtre Mayhem : erreur réseau ou réponse invalide.');
+      } catch (e) {
+        if (!cancelled) {
+          const status = e instanceof ApiError ? e.status : 0;
+          setBoardMayhemHint(
+            status ? `Filtre Mayhem : erreur (${status}).` : 'Filtre Mayhem : erreur réseau ou réponse invalide.'
+          );
+        }
       } finally {
         if (!cancelled) setIsMayhemResolving(false);
       }
@@ -456,25 +407,14 @@ export default function RuggerTelegramPage() {
       const already = favoriteMintSet.has(mint);
       try {
         if (already) {
-          const params = new URLSearchParams({
-            channelId: selectedChannelId,
-            mint,
-          });
-          const res = await fetch(`/api/rugger-telegram/favorites?${params.toString()}`, {
-            method: 'DELETE',
-          });
-          if (!res.ok) return;
+          const params = new URLSearchParams({ channelId: selectedChannelId, mint });
+          await apiDelete(`/api/rugger-telegram/favorites?${params.toString()}`);
         } else {
-          const res = await fetch('/api/rugger-telegram/favorites', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              channelId: selectedChannelId,
-              tokenMint: mint,
-              tokenName: tn && tn !== '' ? tn : null,
-            }),
+          await apiPost('/api/rugger-telegram/favorites', {
+            channelId: selectedChannelId,
+            tokenMint: mint,
+            tokenName: tn && tn !== '' ? tn : null,
           });
-          if (!res.ok) return;
         }
         await reloadTelegramFavorites();
       } catch {
@@ -489,14 +429,8 @@ export default function RuggerTelegramPage() {
       const mint = mintRaw.trim();
       if (!selectedChannelId || mint === '') return;
       try {
-        const params = new URLSearchParams({
-          channelId: selectedChannelId,
-          mint,
-        });
-        const res = await fetch(`/api/rugger-telegram/favorites?${params.toString()}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok) return;
+        const params = new URLSearchParams({ channelId: selectedChannelId, mint });
+        await apiDelete(`/api/rugger-telegram/favorites?${params.toString()}`);
         await reloadTelegramFavorites();
       } catch {
         //
@@ -528,18 +462,17 @@ export default function RuggerTelegramPage() {
   const handleAddChannel = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      const response = await fetch('/api/rugger-telegram/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      try {
+        await apiPost('/api/rugger-telegram/channels', {
           username: newChannelUsername,
           label: newChannelLabel.trim() || null,
-        }),
-      });
-      if (!response.ok) return;
-      setNewChannelUsername('');
-      setNewChannelLabel('');
-      await loadChannels();
+        });
+        setNewChannelUsername('');
+        setNewChannelLabel('');
+        await loadChannels();
+      } catch {
+        /* username invalide / canal déjà enregistré */
+      }
     },
     [loadChannels, newChannelLabel, newChannelUsername]
   );
@@ -547,10 +480,13 @@ export default function RuggerTelegramPage() {
   const handleDeleteChannel = useCallback(
     async (id: string) => {
       if (!window.confirm('Supprimer ce canal et ses messages stockés ?')) return;
-      const response = await fetch(`/api/rugger-telegram/channels/${id}`, { method: 'DELETE' });
-      if (!response.ok) return;
-      if (selectedChannelId === id) setSelectedChannelId(null);
-      await loadChannels();
+      try {
+        await apiDelete(`/api/rugger-telegram/channels/${id}`);
+        if (selectedChannelId === id) setSelectedChannelId(null);
+        await loadChannels();
+      } catch {
+        /* ignore */
+      }
     },
     [loadChannels, selectedChannelId]
   );
@@ -593,10 +529,6 @@ export default function RuggerTelegramPage() {
         return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
       const numLine = (v: unknown): number => {
         const x = Number(v);
         return Number.isFinite(x) ? x : 0;
@@ -627,15 +559,7 @@ export default function RuggerTelegramPage() {
         });
       };
 
-      const handleLine = (line: string) => {
-        if (!line.trim()) return;
-        let ev: Record<string, unknown>;
-        try {
-          ev = JSON.parse(line) as Record<string, unknown>;
-        } catch {
-          streamFatal = 'Réponse scrape mal formée.';
-          return;
-        }
+      const handleEvent = (ev: Record<string, unknown>) => {
         const t = typeof ev.type === 'string' ? ev.type : '';
         if (t === 'start' && typeof ev.maxMessages === 'number') {
           lastMaxMessages = ev.maxMessages;
@@ -675,20 +599,7 @@ export default function RuggerTelegramPage() {
         }
       };
 
-      while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          handleLine(line);
-          if (streamFatal !== null) break;
-        }
-        if (done) break;
-        if (streamFatal !== null) break;
-      }
-
-      if (buffer.trim()) handleLine(buffer);
+      await readNdjsonStream(response.body, (raw) => handleEvent(raw as Record<string, unknown>));
 
       if (streamFatal !== null) {
         setScrapeError(streamFatal);

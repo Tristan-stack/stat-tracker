@@ -1,5 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { ApiError, badRequest } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
 import { computeWalletPnl } from '@/lib/pnl/compute-wallet-pnl';
 import { computeBalanceDeltaPnl } from '@/lib/pnl/compute-balance-delta-pnl';
 import { fetchWalletBalance } from '@/lib/pnl/wallet-balance';
@@ -10,27 +13,22 @@ export const maxDuration = 60;
 const VALID_PRESETS: PnlRangePreset[] = ['today', '1d', '7d', '30d', 'day', 'custom'];
 const VALID_METHODS: PnlMethod[] = ['gmgn', 'balance_delta'];
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+const computeSchema = z.object({
+  walletAddress: z.string().trim().min(1, 'walletAddress is required'),
+  fromMs: z.number(),
+  toMs: z.number(),
+  preset: z.string().optional(),
+  method: z.string().optional(),
+  includeBalance: z.boolean().optional(),
+});
 
-  const body = (await req.json()) as {
-    walletAddress?: string;
-    fromMs?: number;
-    toMs?: number;
-    preset?: PnlRangePreset;
-    method?: PnlMethod;
-    includeBalance?: boolean;
-  };
+export const POST = withAuth(async (req) => {
+  const body = await parseBody(req, computeSchema);
 
-  const walletAddress = body.walletAddress?.trim();
-  if (!walletAddress) {
-    return NextResponse.json({ error: 'walletAddress is required' }, { status: 400 });
-  }
-  const fromMs = Number(body.fromMs);
-  const toMs = Number(body.toMs);
+  const walletAddress = body.walletAddress;
+  const { fromMs, toMs } = body;
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
-    return NextResponse.json({ error: 'Plage de dates invalide' }, { status: 400 });
+    throw badRequest('Plage de dates invalide');
   }
   const preset: PnlRangePreset = VALID_PRESETS.includes(body.preset as PnlRangePreset)
     ? (body.preset as PnlRangePreset)
@@ -55,10 +53,10 @@ export async function POST(req: NextRequest) {
         startBalanceSol: delta.startBalanceSol,
         endBalanceSol: delta.endBalanceSol,
       };
-      return NextResponse.json(response);
+      return ok(response);
     } catch (e) {
       console.error('[POST /api/pnl/compute] balance_delta', e);
-      return NextResponse.json({ error: 'Échec du calcul PNL (delta de balance)' }, { status: 502 });
+      throw new ApiError(502, 'Échec du calcul PNL (delta de balance)');
     }
   }
 
@@ -71,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   if (pnlSettled.status === 'rejected') {
     console.error('[POST /api/pnl/compute] pnl', pnlSettled.reason);
-    return NextResponse.json({ error: 'Échec du calcul PNL' }, { status: 502 });
+    throw new ApiError(502, 'Échec du calcul PNL');
   }
 
   const { result, warnings: pnlWarnings, solUsd } = pnlSettled.value;
@@ -93,5 +91,5 @@ export async function POST(req: NextRequest) {
     solUsd: solUsd ?? balance?.solUsd ?? null,
     warnings,
   };
-  return NextResponse.json(response);
-}
+  return ok(response);
+});

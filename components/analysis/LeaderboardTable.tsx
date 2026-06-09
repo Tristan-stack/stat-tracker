@@ -1,6 +1,7 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
+import { useLeaderboard, useCrossRugger } from '@/features/analysis/hooks/use-analysis-results';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -157,57 +158,35 @@ function buildSortQuery(criteria: SortCriterion[]): string {
 }
 
 export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }: LeaderboardTableProps) {
-  const [wallets, setWallets] = useState<LeaderboardWallet[]>([]);
-  const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(DEFAULT_SORTS);
-  const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [crossMatches, setCrossMatches] = useState<Map<string, CrossRuggerMatch>>(new Map());
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+
+  const leaderboardQuery = useLeaderboard<LeaderboardWallet>(ruggerId, analysisId, {
+    sortBy: sortCriteria[0]?.field ?? 'coverage',
+    sortQuery: buildSortQuery(sortCriteria),
+    offset,
+    search,
+    limit: PAGE_SIZE,
+  });
+  const wallets = leaderboardQuery.data?.wallets ?? [];
+  const total = leaderboardQuery.data?.total ?? 0;
+  const isLoading = leaderboardQuery.isFetching;
+
+  const crossQuery = useCrossRugger(ruggerId, analysisId);
+  const crossMatches = useMemo(() => {
+    const map = new Map<string, CrossRuggerMatch>();
+    for (const m of crossQuery.data ?? []) map.set(m.walletAddress, m);
+    return map;
+  }, [crossQuery.data]);
 
   const handleCopyAddress = useCallback(async (address: string) => {
     await navigator.clipboard.writeText(address);
     setCopiedAddress(address);
     setTimeout(() => setCopiedAddress((prev) => (prev === address ? null : prev)), 1500);
   }, []);
-
-  const fetchLeaderboard = useCallback(async (sorts: SortCriterion[], pageOffset: number, searchTerm: string) => {
-    setIsLoading(true);
-    try {
-      const primarySort = sorts[0]?.field ?? 'coverage';
-      const params = new URLSearchParams({
-        sortBy: primarySort,
-        limit: String(PAGE_SIZE),
-        offset: String(pageOffset),
-      });
-      const sortQuery = buildSortQuery(sorts);
-      if (sortQuery !== '') params.set('sort', sortQuery);
-      if (searchTerm.trim() !== '') params.set('search', searchTerm.trim());
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/leaderboard?${params}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { wallets: LeaderboardWallet[]; total: number };
-      setWallets(data.wallets);
-      setTotal(data.total);
-    } finally { setIsLoading(false); }
-  }, [ruggerId, analysisId]);
-
-  const fetchCrossRugger = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/ruggers/${ruggerId}/analysis/${analysisId}/cross-rugger`);
-      if (!res.ok) return;
-      const data = (await res.json()) as { matches: CrossRuggerMatch[] };
-      const map = new Map<string, CrossRuggerMatch>();
-      for (const m of data.matches) map.set(m.walletAddress, m);
-      setCrossMatches(map);
-    } catch { /* ignore */ }
-  }, [ruggerId, analysisId]);
-
-  useEffect(() => {
-    void fetchLeaderboard(sortCriteria, offset, search);
-  }, [fetchLeaderboard, sortCriteria, offset, search]);
-  useEffect(() => { void fetchCrossRugger(); }, [fetchCrossRugger]);
 
   const toggleSortFromColumn = (field: SortField) => {
     setSortCriteria((prev): SortCriterion[] => {

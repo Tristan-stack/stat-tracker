@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Check, Copy } from 'lucide-react';
+import { readNdjsonStream } from '@/lib/http/stream';
 
 interface BestWalletLeaderboardProps {
   ruggerId: string;
@@ -127,66 +128,50 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId, onWalletCl
         setError('Impossible de lire le flux de progression.');
         return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed === '') continue;
-          const event = JSON.parse(trimmed) as
-            | {
-                type: 'started';
-                totalWallets: number;
-                selectedTokenCount: number;
-                message: string;
-              }
-            | {
-                type: 'progress';
-                message: string;
-                totalWallets: number;
-                walletsAnalyzed: number;
-                walletsRemaining: number;
-                walletsSucceeded: number;
-                walletsFailed: number;
-                currentWallet: string;
-              }
-            | { type: 'done'; payload: BestWalletResponse }
-            | { type: 'error'; error: string };
-
-          if (event.type === 'started') {
-            setProgress({
-              totalWallets: event.totalWallets,
-              walletsAnalyzed: 0,
-              walletsRemaining: event.totalWallets,
-              walletsSucceeded: 0,
-              walletsFailed: 0,
-              currentWallet: null,
-            });
-            setDynamicLogs((prev) => [...prev.slice(-5), event.message]);
-          } else if (event.type === 'progress') {
-            setProgress({
-              totalWallets: event.totalWallets,
-              walletsAnalyzed: event.walletsAnalyzed,
-              walletsRemaining: event.walletsRemaining,
-              walletsSucceeded: event.walletsSucceeded,
-              walletsFailed: event.walletsFailed,
-              currentWallet: event.currentWallet,
-            });
-            setDynamicLogs((prev) => [...prev.slice(-5), event.message]);
-          } else if (event.type === 'done') {
-            setData(event.payload);
-            setDynamicLogs((prev) => [...prev.slice(-5), 'Analyse terminée.']);
-          } else if (event.type === 'error') {
-            setError(event.error);
+      type StreamEvent =
+        | { type: 'started'; totalWallets: number; selectedTokenCount: number; message: string }
+        | {
+            type: 'progress';
+            message: string;
+            totalWallets: number;
+            walletsAnalyzed: number;
+            walletsRemaining: number;
+            walletsSucceeded: number;
+            walletsFailed: number;
+            currentWallet: string;
           }
+        | { type: 'done'; payload: BestWalletResponse }
+        | { type: 'error'; error: string };
+
+      await readNdjsonStream(res.body, (raw) => {
+        const event = raw as StreamEvent;
+        if (event.type === 'started') {
+          setProgress({
+            totalWallets: event.totalWallets,
+            walletsAnalyzed: 0,
+            walletsRemaining: event.totalWallets,
+            walletsSucceeded: 0,
+            walletsFailed: 0,
+            currentWallet: null,
+          });
+          setDynamicLogs((prev) => [...prev.slice(-5), event.message]);
+        } else if (event.type === 'progress') {
+          setProgress({
+            totalWallets: event.totalWallets,
+            walletsAnalyzed: event.walletsAnalyzed,
+            walletsRemaining: event.walletsRemaining,
+            walletsSucceeded: event.walletsSucceeded,
+            walletsFailed: event.walletsFailed,
+            currentWallet: event.currentWallet,
+          });
+          setDynamicLogs((prev) => [...prev.slice(-5), event.message]);
+        } else if (event.type === 'done') {
+          setData(event.payload);
+          setDynamicLogs((prev) => [...prev.slice(-5), 'Analyse terminée.']);
+        } else if (event.type === 'error') {
+          setError(event.error);
         }
-      }
+      });
     } catch (err) {
       const isAbort =
         (err instanceof DOMException || err instanceof Error) && (err as Error).name === 'AbortError';

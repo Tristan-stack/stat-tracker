@@ -5,22 +5,26 @@ import { Check, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import type { PnlWallet } from '@/types/pnl';
+import { truncateAddress } from '@/lib/format';
+import {
+  usePnlWallets,
+  useAddPnlWallet,
+  useUpdatePnlWallet,
+  useDeletePnlWallet,
+} from '@/features/pnl/hooks/use-pnl';
 
-interface PnlWalletManagerProps {
-  wallets: PnlWallet[];
-  onWalletsChange: (wallets: PnlWallet[]) => void;
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : 'Erreur';
 }
 
-function shortAddress(addr: string): string {
-  if (addr.length <= 14) return addr;
-  return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
-}
+export default function PnlWalletManager() {
+  const { data: wallets = [] } = usePnlWallets();
+  const addWallet = useAddPnlWallet();
+  const updateWallet = useUpdatePnlWallet();
+  const deleteWallet = useDeletePnlWallet();
 
-export default function PnlWalletManager({ wallets, onWalletsChange }: PnlWalletManagerProps) {
   const [addressInput, setAddressInput] = useState('');
   const [labelInput, setLabelInput] = useState('');
-  const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
@@ -29,36 +33,22 @@ export default function PnlWalletManager({ wallets, onWalletsChange }: PnlWallet
   const handleAdd = async () => {
     const walletAddress = addressInput.trim();
     if (!walletAddress) return;
-    setAdding(true);
     setError(null);
     try {
-      const res = await fetch('/api/pnl/wallets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, label: labelInput.trim() || undefined }),
-      });
-      const data = (await res.json()) as { wallet?: PnlWallet; error?: string };
-      if (!res.ok || !data.wallet) {
-        setError(data.error ?? 'Échec de l’ajout');
-        return;
-      }
-      onWalletsChange([data.wallet, ...wallets]);
+      await addWallet.mutateAsync({ walletAddress, label: labelInput.trim() || undefined });
       setAddressInput('');
       setLabelInput('');
-    } catch {
-      setError('Erreur réseau');
-    } finally {
-      setAdding(false);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   };
 
   const handleDelete = async (id: string) => {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/pnl/wallets/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        onWalletsChange(wallets.filter((w) => w.id !== id));
-      }
+      await deleteWallet.mutateAsync(id);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -67,16 +57,10 @@ export default function PnlWalletManager({ wallets, onWalletsChange }: PnlWallet
   const handleSaveLabel = async (id: string) => {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/pnl/wallets/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: editLabel.trim() || undefined }),
-      });
-      const data = (await res.json()) as { wallet?: PnlWallet };
-      if (res.ok && data.wallet) {
-        onWalletsChange(wallets.map((w) => (w.id === id ? data.wallet! : w)));
-        setEditingId(null);
-      }
+      await updateWallet.mutateAsync({ id, label: editLabel.trim() || undefined });
+      setEditingId(null);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -103,8 +87,8 @@ export default function PnlWalletManager({ wallets, onWalletsChange }: PnlWallet
           }}
           className="sm:max-w-[200px]"
         />
-        <Button type="button" onClick={() => void handleAdd()} disabled={adding || !addressInput.trim()}>
-          {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+        <Button type="button" onClick={() => void handleAdd()} disabled={addWallet.isPending || !addressInput.trim()}>
+          {addWallet.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
           Ajouter
         </Button>
       </div>
@@ -134,7 +118,7 @@ export default function PnlWalletManager({ wallets, onWalletsChange }: PnlWallet
                     />
                   ) : (
                     <>
-                      <p className="truncate text-sm font-medium">{w.label ?? shortAddress(w.walletAddress)}</p>
+                      <p className="truncate text-sm font-medium">{w.label ?? truncateAddress(w.walletAddress)}</p>
                       <p className="truncate font-mono text-xs text-muted-foreground">{w.walletAddress}</p>
                     </>
                   )}

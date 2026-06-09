@@ -5,7 +5,6 @@ import { TokenForm } from '@/components/TokenForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DatePicker } from '@/components/ui/date-picker';
 import type { Token } from '@/types/token';
 import {
   localCustomDayRange,
@@ -13,35 +12,14 @@ import {
   localTodayPurchaseRange,
   localYesterdayPurchaseRange,
 } from '@/lib/token-date-filter';
-import { Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
+import { apiPost, ApiError } from '@/lib/api-client';
+import { GmgnPeriodSelector, type GmgnFetchPeriod } from '@/features/ruggers/components/GmgnPeriodSelector';
+import { GmgnPreviewList } from '@/features/ruggers/components/GmgnPreviewList';
+import type { GmgnPreviewRow, GmgnPurchasePreview } from '@/features/ruggers/types';
 
-export interface GmgnPreviewRow {
-  rowKey: string;
-  tokenAddress: string;
-  name: string;
-  purchasedAt: string;
-  truncatedKlines: boolean;
-  entryStr: string;
-  highStr: string;
-  lowStr: string;
-  /** Minutes entrée → creux (API token-tracking). */
-  entryToLowMinutes?: number | null;
-  sourceWallet?: string;
-}
-
-interface GmgnPurchasePreview {
-  tokenAddress: string;
-  name: string;
-  purchasedAt: string;
-  entryPrice: number;
-  high: number;
-  low: number;
-  truncatedKlines: boolean;
-  entryToLowMinutes?: number | null;
-  sourceWallet?: string;
-}
+export type { GmgnPreviewRow } from '@/features/ruggers/types';
 
 export interface GmgnTokenAddSectionProps {
   /** Mint set for dedupe when `loadKnownTokens` is not provided. */
@@ -57,27 +35,18 @@ export interface GmgnTokenAddSectionProps {
   walletAddressPrefill?: string | null;
 }
 
-function parseYyyyMmDdToDate(value: string): Date | undefined {
-  if (value.trim() === '') return undefined;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (!parts) return undefined;
-  const year = Number(parts[1]);
-  const month = Number(parts[2]) - 1;
-  const day = Number(parts[3]);
-  const date = new Date(year, month, day);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date;
-}
-
-function formatDateToYyyyMmDd(date?: Date): string {
-  if (!date) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 const GMGN_KLINE_BATCH_SIZE = 100;
+
+function gmgnErrorMessage(e: unknown): string {
+  return e instanceof ApiError ? e.message : 'Erreur réseau';
+}
+
+function resolveGmgnRange(period: GmgnFetchPeriod, from: string, to: string) {
+  if (period === 'today') return localTodayPurchaseRange();
+  if (period === 'yesterday') return localYesterdayPurchaseRange();
+  if (period === 'all') return localGmgnAllTimeRange();
+  return from && to ? localCustomDayRange(from, to) : null;
+}
 
 function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow[] {
   return purchases.map((p) => ({
@@ -94,10 +63,7 @@ function mapApiPurchasesToRows(purchases: GmgnPurchasePreview[]): GmgnPreviewRow
   }));
 }
 
-function mergeKlinePatchesIntoRows(
-  rows: GmgnPreviewRow[],
-  patches: GmgnPurchasePreview[]
-): GmgnPreviewRow[] {
+function mergeKlinePatchesIntoRows(rows: GmgnPreviewRow[], patches: GmgnPurchasePreview[]): GmgnPreviewRow[] {
   const byMint = new Map(patches.map((p) => [p.tokenAddress.trim(), p] as const));
   return rows.map((row) => {
     const p = byMint.get(row.tokenAddress.trim());
@@ -142,6 +108,8 @@ function buildMintSet(tokens: Token[]): Set<string> {
   return s;
 }
 
+type AddMode = 'manual' | 'walletBuyer' | 'motherExchange' | 'tokenTracking';
+
 export default function GmgnTokenAddSection({
   knownTokens,
   loadKnownTokens,
@@ -151,13 +119,11 @@ export default function GmgnTokenAddSection({
   addAllButtonLabel = 'Tout ajouter',
   walletAddressPrefill,
 }: GmgnTokenAddSectionProps) {
-  const [tokenAddMode, setTokenAddMode] = useState<
-    'manual' | 'walletBuyer' | 'motherExchange' | 'tokenTracking'
-  >('walletBuyer');
+  const [tokenAddMode, setTokenAddMode] = useState<AddMode>('walletBuyer');
   const [gmgnWalletInput, setGmgnWalletInput] = useState('');
   const [motherWalletText, setMotherWalletText] = useState('');
   const [tokenTrackingText, setTokenTrackingText] = useState('');
-  const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
+  const [gmgnFetchPeriod, setGmgnFetchPeriod] = useState<GmgnFetchPeriod>('today');
   const [gmgnFetchFrom, setGmgnFetchFrom] = useState('');
   const [gmgnFetchTo, setGmgnFetchTo] = useState('');
   const [gmgnKlineBudgetStr, setGmgnKlineBudgetStr] = useState('300');
@@ -172,30 +138,45 @@ export default function GmgnTokenAddSection({
     if (walletAddressPrefill?.trim()) setGmgnWalletInput(walletAddressPrefill.trim());
   }, [walletAddressPrefill]);
 
-  const resolveKnownTokens = useCallback(async () => {
-    if (loadKnownTokens) return loadKnownTokens();
-    return knownTokens;
-  }, [loadKnownTokens, knownTokens]);
+  const resolveKnownTokens = useCallback(
+    async () => (loadKnownTokens ? loadKnownTokens() : knownTokens),
+    [loadKnownTokens, knownTokens]
+  );
 
-  const handleGmgnFetch = useCallback(async () => {
+  const resetGmgnState = useCallback(() => {
     setGmgnError(null);
     setGmgnPreview(null);
     setGmgnDedupeNotice(null);
+  }, []);
+
+  /** Applique rows fetchées : dédup contre les mints connus + messages d'état. */
+  const applyFetchedRows = useCallback(
+    (rows: GmgnPreviewRow[], knownMints: Set<string>, noun: 'achat' | 'token', emptyMessage: string) => {
+      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
+      const skipped = rows.length - filtered.length;
+      if (rows.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(emptyMessage);
+      } else if (filtered.length === 0) {
+        setGmgnPreview([]);
+        setGmgnDedupeNotice(`Les ${rows.length} ${noun}(s) trouvé(s) sont déjà enregistrés.`);
+      } else {
+        setGmgnPreview(filtered);
+        setGmgnDedupeNotice(skipped > 0 ? `${skipped} ${noun}(s) déjà présent(s) — exclus de la liste.` : null);
+      }
+    },
+    []
+  );
+
+  // --- Wallet buyer : fetch + enrichissement klines incrémental ---
+  const handleGmgnFetch = useCallback(async () => {
+    resetGmgnState();
     const w = gmgnWalletInput.trim();
     if (!w) {
       setGmgnError('Adresse wallet requise.');
       return;
     }
-    const range =
-      gmgnFetchPeriod === 'today'
-        ? localTodayPurchaseRange()
-        : gmgnFetchPeriod === 'yesterday'
-          ? localYesterdayPurchaseRange()
-          : gmgnFetchPeriod === 'all'
-            ? localGmgnAllTimeRange()
-            : gmgnFetchFrom && gmgnFetchTo
-              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
-              : null;
+    const range = resolveGmgnRange(gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo);
     if (!range) {
       setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
       return;
@@ -204,71 +185,39 @@ export default function GmgnTokenAddSection({
     setGmgnEnrichingMore(false);
     setGmgnEnrichProgress(null);
     try {
-      const existingTokens = await resolveKnownTokens();
-      const knownMints = buildMintSet(existingTokens);
+      const knownMints = buildMintSet(await resolveKnownTokens());
       const budgetParsed = Math.floor(Number(String(gmgnKlineBudgetStr).replace(',', '.')));
-      const budget =
-        Number.isFinite(budgetParsed) && budgetParsed >= 1 ? Math.min(budgetParsed, 5000) : 300;
+      const budget = Number.isFinite(budgetParsed) && budgetParsed >= 1 ? Math.min(budgetParsed, 5000) : 300;
 
-      const res1 = await fetch('/api/gmgn/wallet-purchases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data1 = await apiPost<{ purchases?: GmgnPurchasePreview[]; meta?: GmgnWalletPurchasesMeta }>(
+        '/api/gmgn/wallet-purchases',
+        {
           walletAddress: w,
           fromMs: range.fromMs,
           toMs: range.toMs,
           klineEnrichTotalCap: budget,
           klineEnrichOffset: 0,
           klineEnrichBatchSize: GMGN_KLINE_BATCH_SIZE,
-        }),
-      });
-      const data1 = (await res1.json()) as {
-        purchases?: GmgnPurchasePreview[];
-        error?: string;
-        meta?: GmgnWalletPurchasesMeta;
-      };
-      if (!res1.ok) {
-        setGmgnError(data1.error ?? 'Échec du fetch GMGN');
-        return;
-      }
-      const fullPurchases = data1.purchases ?? [];
-      const rowsAll = mapApiPurchasesToRows(fullPurchases);
-      const filtered = rowsAll.filter((r) => !knownMints.has(r.tokenAddress.trim()));
-      const skipped = rowsAll.length - filtered.length;
-
-      if (rowsAll.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice('Aucun achat « buy » renvoyé par GMGN sur ce créneau.');
-        return;
-      }
-      if (filtered.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice(`Les ${rowsAll.length} achat(s) trouvé(s) sont déjà enregistrés.`);
-        return;
-      }
-
-      setGmgnPreview(filtered);
-      setGmgnDedupeNotice(
-        skipped > 0 ? `${skipped} achat(s) déjà présent(s) — exclus de la liste.` : null
+        }
       );
+      const rowsAll = mapApiPurchasesToRows(data1.purchases ?? []);
+      applyFetchedRows(rowsAll, knownMints, 'achat', 'Aucun achat « buy » renvoyé par GMGN sur ce créneau.');
+      if (rowsAll.length === 0 || rowsAll.every((r) => knownMints.has(r.tokenAddress.trim()))) return;
       setGmgnLoading(false);
 
       const meta = data1.meta;
       if (!meta) return;
-
       const enrichLimit = Math.min(meta.klineEnrichCap, meta.totalPurchases);
       let off = meta.klineSliceBatchSize;
       if (off >= enrichLimit) return;
 
       setGmgnEnrichingMore(true);
       setGmgnEnrichProgress(`${Math.min(off, enrichLimit)} / ${enrichLimit}`);
-
       try {
         while (off < enrichLimit) {
-          const resN = await fetch('/api/gmgn/wallet-purchases', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          let patches: GmgnPurchasePreview[];
+          try {
+            const dataN = await apiPost<{ purchasePatches?: GmgnPurchasePreview[] }>('/api/gmgn/wallet-purchases', {
               walletAddress: w,
               fromMs: range.fromMs,
               toMs: range.toMs,
@@ -276,17 +225,12 @@ export default function GmgnTokenAddSection({
               klineEnrichOffset: off,
               klineEnrichBatchSize: GMGN_KLINE_BATCH_SIZE,
               klineSliceOnly: true,
-            }),
-          });
-          const dataN = (await resN.json()) as {
-            purchasePatches?: GmgnPurchasePreview[];
-            error?: string;
-          };
-          if (!resN.ok) {
-            setGmgnError(dataN.error ?? `Enrichissement kline interrompu après ${off} token(s).`);
+            });
+            patches = dataN.purchasePatches ?? [];
+          } catch (e) {
+            setGmgnError(e instanceof ApiError ? e.message : `Enrichissement kline interrompu après ${off} token(s).`);
             break;
           }
-          const patches = dataN.purchasePatches ?? [];
           setGmgnPreview((prev) => (prev ? mergeKlinePatchesIntoRows(prev, patches) : prev));
           off += GMGN_KLINE_BATCH_SIZE;
           setGmgnEnrichProgress(`${Math.min(off, enrichLimit)} / ${enrichLimit}`);
@@ -295,155 +239,87 @@ export default function GmgnTokenAddSection({
         setGmgnEnrichingMore(false);
         setGmgnEnrichProgress(null);
       }
-    } catch {
-      setGmgnError('Erreur réseau');
+    } catch (e) {
+      setGmgnError(gmgnErrorMessage(e));
     } finally {
       setGmgnLoading(false);
     }
-  }, [
-    gmgnWalletInput,
-    gmgnFetchPeriod,
-    gmgnFetchFrom,
-    gmgnFetchTo,
-    gmgnKlineBudgetStr,
-    resolveKnownTokens,
-  ]);
+  }, [gmgnWalletInput, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, gmgnKlineBudgetStr, resolveKnownTokens, resetGmgnState, applyFetchedRows]);
 
-  const handleMotherFetch = useCallback(async () => {
-    setGmgnError(null);
-    setGmgnPreview(null);
-    setGmgnDedupeNotice(null);
-    const wallets = parseWalletLines(motherWalletText);
-    if (wallets.length === 0) {
-      setGmgnError('Indique au moins une adresse wallet (une par ligne).');
-      return;
-    }
-    if (wallets.length > 20) {
-      setGmgnError('Maximum 20 adresses distinctes.');
-      return;
-    }
-    const range =
-      gmgnFetchPeriod === 'today'
-        ? localTodayPurchaseRange()
-        : gmgnFetchPeriod === 'yesterday'
-          ? localYesterdayPurchaseRange()
-          : gmgnFetchPeriod === 'all'
-            ? localGmgnAllTimeRange()
-            : gmgnFetchFrom && gmgnFetchTo
-              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
-              : null;
-    if (!range) {
-      setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
-      return;
-    }
-    setGmgnLoading(true);
-    try {
-      const existingTokens = await resolveKnownTokens();
-      const knownMints = buildMintSet(existingTokens);
-      const res = await fetch('/api/gmgn/wallet-purchases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddresses: wallets, fromMs: range.fromMs, toMs: range.toMs }),
-      });
-      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
-      if (!res.ok) {
-        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+  // --- Mother / Exchange + Token tracking : fetch batch simple ---
+  const runBatchFetch = useCallback(
+    async (config: {
+      values: string[];
+      emptyValuesError: string;
+      tooManyError: string;
+      maxCount: number;
+      endpoint: string;
+      body: (range: { fromMs: number; toMs: number }) => Record<string, unknown>;
+      noun: 'achat' | 'token';
+      emptyMessage: string;
+    }) => {
+      resetGmgnState();
+      if (config.values.length === 0) {
+        setGmgnError(config.emptyValuesError);
         return;
       }
-      const rows = mapApiPurchasesToRows(data.purchases ?? []);
-      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
-      const skipped = rows.length - filtered.length;
-      if (rows.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice('Aucun achat « buy » renvoyé par GMGN sur ce créneau.');
-      } else if (filtered.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice(`Les ${rows.length} achat(s) trouvé(s) sont déjà enregistrés.`);
-      } else {
-        setGmgnPreview(filtered);
-        setGmgnDedupeNotice(
-          skipped > 0 ? `${skipped} achat(s) déjà présent(s) — exclus de la liste.` : null
-        );
-      }
-    } catch {
-      setGmgnError('Erreur réseau');
-    } finally {
-      setGmgnLoading(false);
-    }
-  }, [motherWalletText, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, resolveKnownTokens]);
-
-  const handleTokenTrackingFetch = useCallback(async () => {
-    setGmgnError(null);
-    setGmgnPreview(null);
-    setGmgnDedupeNotice(null);
-    const tokenList = parseWalletLines(tokenTrackingText);
-    if (tokenList.length === 0) {
-      setGmgnError('Indique au moins une adresse token (une par ligne).');
-      return;
-    }
-    if (tokenList.length > 30) {
-      setGmgnError('Maximum 30 tokens distincts.');
-      return;
-    }
-    const range =
-      gmgnFetchPeriod === 'today'
-        ? localTodayPurchaseRange()
-        : gmgnFetchPeriod === 'yesterday'
-          ? localYesterdayPurchaseRange()
-          : gmgnFetchPeriod === 'all'
-            ? localGmgnAllTimeRange()
-            : gmgnFetchFrom && gmgnFetchTo
-              ? localCustomDayRange(gmgnFetchFrom, gmgnFetchTo)
-              : null;
-    if (!range) {
-      setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
-      return;
-    }
-    setGmgnLoading(true);
-    try {
-      const existingTokens = await resolveKnownTokens();
-      const knownMints = buildMintSet(existingTokens);
-      const res = await fetch('/api/gmgn/token-tracking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tokenAddresses: tokenList,
-          fromMs: range.fromMs,
-          toMs: range.toMs,
-        }),
-      });
-      const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
-      if (!res.ok) {
-        setGmgnError(data.error ?? 'Échec du fetch GMGN');
+      if (config.values.length > config.maxCount) {
+        setGmgnError(config.tooManyError);
         return;
       }
-      const rows = mapApiPurchasesToRows(data.purchases ?? []);
-      const filtered = rows.filter((r) => !knownMints.has(r.tokenAddress.trim()));
-      const skipped = rows.length - filtered.length;
-      if (rows.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice('Aucune donnée GMGN trouvée pour ces tokens sur ce créneau.');
-      } else if (filtered.length === 0) {
-        setGmgnPreview([]);
-        setGmgnDedupeNotice(`Les ${rows.length} token(s) trouvé(s) sont déjà enregistrés.`);
-      } else {
-        setGmgnPreview(filtered);
-        setGmgnDedupeNotice(
-          skipped > 0 ? `${skipped} token(s) déjà présent(s) — exclus de la liste.` : null
-        );
+      const range = resolveGmgnRange(gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo);
+      if (!range) {
+        setGmgnError('Indique deux dates (début et fin) pour la plage personnalisée.');
+        return;
       }
-    } catch {
-      setGmgnError('Erreur réseau');
-    } finally {
-      setGmgnLoading(false);
-    }
-  }, [tokenTrackingText, gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, resolveKnownTokens]);
+      setGmgnLoading(true);
+      try {
+        const knownMints = buildMintSet(await resolveKnownTokens());
+        const data = await apiPost<{ purchases?: GmgnPurchasePreview[] }>(config.endpoint, config.body(range));
+        applyFetchedRows(mapApiPurchasesToRows(data.purchases ?? []), knownMints, config.noun, config.emptyMessage);
+      } catch (e) {
+        setGmgnError(gmgnErrorMessage(e));
+      } finally {
+        setGmgnLoading(false);
+      }
+    },
+    [gmgnFetchPeriod, gmgnFetchFrom, gmgnFetchTo, resolveKnownTokens, resetGmgnState, applyFetchedRows]
+  );
+
+  const handleMotherFetch = useCallback(
+    () =>
+      runBatchFetch({
+        values: parseWalletLines(motherWalletText),
+        emptyValuesError: 'Indique au moins une adresse wallet (une par ligne).',
+        tooManyError: 'Maximum 20 adresses distinctes.',
+        maxCount: 20,
+        endpoint: '/api/gmgn/wallet-purchases',
+        body: (range) => ({ walletAddresses: parseWalletLines(motherWalletText), fromMs: range.fromMs, toMs: range.toMs }),
+        noun: 'achat',
+        emptyMessage: 'Aucun achat « buy » renvoyé par GMGN sur ce créneau.',
+      }),
+    [motherWalletText, runBatchFetch]
+  );
+
+  const handleTokenTrackingFetch = useCallback(
+    () =>
+      runBatchFetch({
+        values: parseWalletLines(tokenTrackingText),
+        emptyValuesError: 'Indique au moins une adresse token (une par ligne).',
+        tooManyError: 'Maximum 30 tokens distincts.',
+        maxCount: 30,
+        endpoint: '/api/gmgn/token-tracking',
+        body: (range) => ({ tokenAddresses: parseWalletLines(tokenTrackingText), fromMs: range.fromMs, toMs: range.toMs }),
+        noun: 'token',
+        emptyMessage: 'Aucune donnée GMGN trouvée pour ces tokens sur ce créneau.',
+      }),
+    [tokenTrackingText, runBatchFetch]
+  );
 
   const handleAddGmgnPurchases = useCallback(
     async (items: GmgnPreviewRow[]) => {
       if (items.length === 0) return;
-      const existingTokens = await resolveKnownTokens();
-      const knownMints = buildMintSet(existingTokens);
+      const knownMints = buildMintSet(await resolveKnownTokens());
       const newItems = items.filter((p) => !knownMints.has(p.tokenAddress.trim()));
       if (newItems.length === 0) return;
       const result = await onAddPurchases(newItems);
@@ -464,13 +340,12 @@ export default function GmgnTokenAddSection({
 
   const updateGmgnPreviewRow = useCallback(
     (rowKey: string, field: 'entryStr' | 'highStr' | 'lowStr', value: string) => {
-      setGmgnPreview((prev) => {
-        if (!prev) return prev;
-        return prev.map((r) => (r.rowKey === rowKey ? { ...r, [field]: value } : r));
-      });
+      setGmgnPreview((prev) => (prev ? prev.map((r) => (r.rowKey === rowKey ? { ...r, [field]: value } : r)) : prev));
     },
     []
   );
+
+  const isFetchInProgress = gmgnLoading || gmgnEnrichingMore;
 
   return (
     <section className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow sm:p-6">
@@ -485,15 +360,11 @@ export default function GmgnTokenAddSection({
             type="button"
             onClick={() => {
               setTokenAddMode(mode);
-              setGmgnPreview(null);
-              setGmgnDedupeNotice(null);
-              setGmgnError(null);
+              resetGmgnState();
             }}
             className={cn(
               'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
-              tokenAddMode === mode
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              tokenAddMode === mode ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
             )}
           >
             {mode === 'walletBuyer'
@@ -509,58 +380,17 @@ export default function GmgnTokenAddSection({
 
       {tokenAddMode === 'manual' && <TokenForm onAdd={(t) => void onManualAdd(t)} />}
 
-      {(tokenAddMode === 'walletBuyer' ||
-        tokenAddMode === 'motherExchange' ||
-        tokenAddMode === 'tokenTracking') && (
+      {tokenAddMode !== 'manual' && (
         <div className="space-y-4">
-          <div className="space-y-2">
-            <span className="text-sm font-medium text-foreground">Période du fetch</span>
-            <div className="flex flex-wrap items-center gap-2">
-              {(['today', 'yesterday', 'all', 'custom'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setGmgnFetchPeriod(p)}
-                  className={cn(
-                    'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                    gmgnFetchPeriod === p
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  )}
-                >
-                  {p === 'today'
-                    ? "Aujourd'hui"
-                    : p === 'yesterday'
-                      ? 'Hier'
-                      : p === 'all'
-                        ? 'Tous'
-                        : 'Personnalisé'}
-                </button>
-              ))}
-            </div>
-          </div>
-          {gmgnFetchPeriod === 'custom' && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-2">
-                <Label>Du</Label>
-                <DatePicker
-                  value={parseYyyyMmDdToDate(gmgnFetchFrom)}
-                  onChange={(date) => setGmgnFetchFrom(formatDateToYyyyMmDd(date))}
-                  placeholder="Date de début"
-                  className="w-[200px]"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Au</Label>
-                <DatePicker
-                  value={parseYyyyMmDdToDate(gmgnFetchTo)}
-                  onChange={(date) => setGmgnFetchTo(formatDateToYyyyMmDd(date))}
-                  placeholder="Date de fin"
-                  className="w-[200px]"
-                />
-              </div>
-            </div>
-          )}
+          <GmgnPeriodSelector
+            period={gmgnFetchPeriod}
+            onPeriodChange={setGmgnFetchPeriod}
+            from={gmgnFetchFrom}
+            onFromChange={setGmgnFetchFrom}
+            to={gmgnFetchTo}
+            onToChange={setGmgnFetchTo}
+          />
+
           {tokenAddMode === 'walletBuyer' && (
             <div className="mt-4 flex max-w-2xl flex-col gap-3">
               <Label htmlFor="gmgn-wallet" className="block text-sm font-medium leading-normal">
@@ -588,8 +418,7 @@ export default function GmgnTokenAddSection({
                   className="w-40"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Chargement par paquets de {GMGN_KLINE_BATCH_SIZE} : les premiers tokens s&apos;affichent tout de suite,
-                  puis le reste se met à jour. Le serveur applique aussi un plafond (variable{' '}
+                  Chargement par paquets de {GMGN_KLINE_BATCH_SIZE} : les premiers tokens s&apos;affichent tout de suite, puis le reste se met à jour. Le serveur applique aussi un plafond (variable{' '}
                   <span className="font-mono">GMGN_MAX_KLINE_ENRICH_CAP</span>, défaut 2000).
                 </p>
               </div>
@@ -633,6 +462,7 @@ export default function GmgnTokenAddSection({
               />
             </div>
           )}
+
           {gmgnError && <p className="text-sm text-destructive">{gmgnError}</p>}
           {gmgnEnrichProgress !== null && (
             <p className="text-xs text-muted-foreground">Enrichissement klines : {gmgnEnrichProgress}</p>
@@ -646,106 +476,24 @@ export default function GmgnTokenAddSection({
                   ? handleTokenTrackingFetch()
                   : handleGmgnFetch())
             }
-            disabled={gmgnLoading || gmgnEnrichingMore}
+            disabled={isFetchInProgress}
           >
-            {gmgnLoading
-              ? 'Chargement GMGN…'
-              : gmgnEnrichingMore
-                ? 'Enrichissement klines…'
-                : 'Fetch achats'}
+            {gmgnLoading ? 'Chargement GMGN…' : gmgnEnrichingMore ? 'Enrichissement klines…' : 'Fetch achats'}
           </Button>
+
           {gmgnPreview && gmgnPreview.length > 0 && (
-            <div className="space-y-3">
-              {gmgnDedupeNotice && <p className="text-xs text-muted-foreground">{gmgnDedupeNotice}</p>}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium">
-                  {gmgnPreview.length} nouveau{gmgnPreview.length !== 1 ? 'x' : ''} achat
-                  {gmgnPreview.length !== 1 ? 's' : ''} à ajouter
-                </p>
-                <Button type="button" size="sm" onClick={() => void handleAddGmgnPurchases(gmgnPreview)}>
-                  {addAllButtonLabel}
-                </Button>
-              </div>
-              <ul className="max-h-96 space-y-3 overflow-y-auto rounded-lg border bg-muted/20 p-3 text-sm">
-                {gmgnPreview.map((p) => (
-                  <li
-                    key={p.rowKey}
-                    className={cn(
-                      'flex flex-col gap-3 rounded-md border bg-background/80 px-3 py-2',
-                      p.truncatedKlines && 'border-2 border-red-500'
-                    )}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{p.name}</div>
-                        <div className="truncate font-mono text-[11px] text-muted-foreground">
-                          {p.tokenAddress}
-                        </div>
-                        {p.sourceWallet && (
-                          <div className="truncate font-mono text-[10px] text-muted-foreground/90">
-                            Wallet : {p.sourceWallet}
-                          </div>
-                        )}
-                        <div className="text-xs text-muted-foreground">
-                          {new Date(p.purchasedAt).toLocaleString('fr-FR')}
-                          {p.truncatedKlines && ' · kline non chargé (limite)'}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => removeGmgnPreviewRow(p.rowKey)}
-                          aria-label="Retirer de la liste"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => void handleAddGmgnPurchases([p])}>
-                          Ajouter
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Entrée</Label>
-                        <Input
-                          className="font-mono text-xs"
-                          inputMode="decimal"
-                          value={p.entryStr}
-                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'entryStr', e.target.value)}
-                          placeholder="ex. 6.41"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">High</Label>
-                        <Input
-                          className="font-mono text-xs"
-                          inputMode="decimal"
-                          value={p.highStr}
-                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'highStr', e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Low</Label>
-                        <Input
-                          className="font-mono text-xs"
-                          inputMode="decimal"
-                          value={p.lowStr}
-                          onChange={(e) => updateGmgnPreviewRow(p.rowKey, 'lowStr', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <GmgnPreviewList
+              rows={gmgnPreview}
+              dedupeNotice={gmgnDedupeNotice}
+              addAllLabel={addAllButtonLabel}
+              onAddAll={() => void handleAddGmgnPurchases(gmgnPreview)}
+              onAddOne={(p) => void handleAddGmgnPurchases([p])}
+              onRemove={removeGmgnPreviewRow}
+              onUpdateField={updateGmgnPreviewRow}
+            />
           )}
           {gmgnPreview !== null && gmgnPreview.length === 0 && !gmgnLoading && (
-            <p className="text-sm text-muted-foreground">
-              {gmgnDedupeNotice ?? 'Aucun nouveau token à ajouter.'}
-            </p>
+            <p className="text-sm text-muted-foreground">{gmgnDedupeNotice ?? 'Aucun nouveau token à ajouter.'}</p>
           )}
         </div>
       )}

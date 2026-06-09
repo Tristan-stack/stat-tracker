@@ -1,5 +1,6 @@
 import { countTokenCreationsFromEnhancedTxs } from '@/lib/helius/token-creator-detect';
 import { throttleHelius } from '@/lib/helius/throttle';
+import { sleep, parseRetryAfterHeader, isRetryableFailure } from '@/lib/http/retry';
 
 const HELIUS_BASE = 'https://api.helius.xyz';
 const HELIUS_MAX_RETRIES = Number(process.env.HELIUS_MAX_RETRIES ?? '3');
@@ -87,25 +88,6 @@ interface RpcResponse<T> {
   error?: { code: number; message: string };
 }
 
-function isRetryableHeliusFailure(status: number, message: string): boolean {
-  if (status === 429) return true;
-  if (status >= 500) return true;
-  return /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|timeout|aborted/i.test(message);
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function parseRetryAfterHeader(value: string | null): number | null {
-  if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
-  const dateMs = Date.parse(value);
-  if (Number.isNaN(dateMs)) return null;
-  return Math.max(0, dateMs - Date.now());
-}
-
 function getBackoffMs(attempt: number, status: number, retryAfterMs?: number | null): number {
   if (retryAfterMs != null && retryAfterMs > 0) return retryAfterMs;
   if (status === 429) {
@@ -116,56 +98,11 @@ function getBackoffMs(attempt: number, status: number, retryAfterMs?: number | n
   return HELIUS_RETRY_BASE_MS * Math.pow(2, attempt);
 }
 
-/** `params` JSON-RPC : tableau (RPC classique) ou objet (ex. DAS `getAsset`). */
-export async function heliusRpc<T>(method: string, params: unknown): Promise<T> {
-  const url = buildRpcUrl();
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt <= HELIUS_MAX_RETRIES; attempt += 1) {
-    try {
-      await throttleHelius();
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        const message = `Helius RPC ${method}: HTTP ${res.status} — ${text.slice(0, 300)}`;
-        if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(res.status, message)) {
-          const retryAfterMs = parseRetryAfterHeader(res.headers.get('retry-after'));
-          await sleep(getBackoffMs(attempt, res.status, retryAfterMs));
-          continue;
-        }
-        throw new Error(message);
-      }
-
-      const json = (await res.json()) as RpcResponse<T>;
-      if (json.error) {
-        throw new Error(`Helius RPC ${method}: ${json.error.message} (code ${json.error.code})`);
-      }
-      return json.result;
-    } catch (error) {
-      lastError = error;
-      const message = error instanceof Error ? error.message : String(error);
-      if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(0, message)) {
-        await sleep(HELIUS_RETRY_BASE_MS * Math.pow(2, attempt));
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw lastError;
-}
-
-// ---------------------------------------------------------------------------
-// REST helper (Enhanced Transactions API)
-// ---------------------------------------------------------------------------
-
-export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
-  const url = buildRestUrl(path);
+/**
+ * POST JSON vers Helius avec throttle + retry/backoff (429/5xx/réseau).
+ * Boucle unique mutualisée entre les helpers RPC et REST.
+ */
+async function heliusPost<T>(url: string, body: unknown, label: string): Promise<T> {
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= HELIUS_MAX_RETRIES; attempt += 1) {
@@ -179,8 +116,8 @@ export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        const message = `Helius REST ${path}: HTTP ${res.status} — ${text.slice(0, 300)}`;
-        if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(res.status, message)) {
+        const message = `${label}: HTTP ${res.status} — ${text.slice(0, 300)}`;
+        if (attempt < HELIUS_MAX_RETRIES && isRetryableFailure(res.status, message)) {
           const retryAfterMs = parseRetryAfterHeader(res.headers.get('retry-after'));
           await sleep(getBackoffMs(attempt, res.status, retryAfterMs));
           continue;
@@ -192,7 +129,7 @@ export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
-      if (attempt < HELIUS_MAX_RETRIES && isRetryableHeliusFailure(0, message)) {
+      if (attempt < HELIUS_MAX_RETRIES && isRetryableFailure(0, message)) {
         await sleep(HELIUS_RETRY_BASE_MS * Math.pow(2, attempt));
         continue;
       }
@@ -201,6 +138,27 @@ export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
   }
 
   throw lastError;
+}
+
+/** `params` JSON-RPC : tableau (RPC classique) ou objet (ex. DAS `getAsset`). */
+export async function heliusRpc<T>(method: string, params: unknown): Promise<T> {
+  const json = await heliusPost<RpcResponse<T>>(
+    buildRpcUrl(),
+    { jsonrpc: '2.0', id: 1, method, params },
+    `Helius RPC ${method}`
+  );
+  if (json.error) {
+    throw new Error(`Helius RPC ${method}: ${json.error.message} (code ${json.error.code})`);
+  }
+  return json.result;
+}
+
+// ---------------------------------------------------------------------------
+// REST helper (Enhanced Transactions API)
+// ---------------------------------------------------------------------------
+
+export async function heliusRest<T>(path: string, body: unknown): Promise<T> {
+  return heliusPost<T>(buildRestUrl(path), body, `Helius REST ${path}`);
 }
 
 // ---------------------------------------------------------------------------

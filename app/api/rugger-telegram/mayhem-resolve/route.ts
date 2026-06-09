@@ -1,16 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { parseBody } from '@/lib/api/validate';
 import { resolvePumpMayhemWithCache } from '@/lib/gmgn/pump-mayhem-cache';
 import { telegramMayhemMintResolveCap } from '@/lib/rugger-telegram/mayhem-cap';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-type Body = {
-  mints?: unknown;
-};
-
-/** Déduplication en gardant l’ordre du classement ; max `cap` mints traités. */
+/** Déduplication en gardant l'ordre du classement ; max `cap` mints traités. */
 function mintsDedupOrdered(input: unknown, cap: number): string[] {
   if (!Array.isArray(input)) return [];
   const seen = new Set<string>();
@@ -25,16 +23,8 @@ function mintsDedupOrdered(input: unknown, cap: number): string[] {
   return out;
 }
 
-export async function POST(req: NextRequest) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-
-  let body: Body;
-  try {
-    body = (await req.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
+export const POST = withAuth(async (req) => {
+  const body = await parseBody(req, z.object({ mints: z.array(z.unknown()).optional() }));
 
   const cap = telegramMayhemMintResolveCap();
   const listLen = Array.isArray(body.mints) ? body.mints.length : 0;
@@ -77,4 +67,4 @@ export async function POST(req: NextRequest) {
     mayhemGmgnCalls,
     mayhemByMint,
   });
-}
+});

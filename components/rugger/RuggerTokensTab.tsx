@@ -1,30 +1,36 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { TokenTable } from '@/components/TokenTable';
 import { StatsSummary } from '@/components/StatsSummary';
 import GmgnTokenAddSection, { type GmgnPreviewRow } from '@/components/GmgnTokenAddSection';
 import { TokenImportExport } from '@/components/TokenImportExport';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { DatePicker } from '@/components/ui/date-picker';
 import type { Rugger, StatusId } from '@/types/rugger';
-import { STATUS_LABELS, STATUS_ORDER, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
 import type { Token, ExitMode } from '@/types/token';
 import { getTokenWithMetrics } from '@/lib/token-calculations';
 import { isMigrationPeakMcap, type MigrationView } from '@/lib/migration';
-import {
-  appendTokenDateQueryParams,
-  getPurchaseFilterLabel,
-  localGmgnAllTimeRange,
-  type TokenPurchaseFilter,
-} from '@/lib/token-date-filter';
-import { Trash2 } from 'lucide-react';
+import { localGmgnAllTimeRange, type TokenPurchaseFilter } from '@/lib/token-date-filter';
 import { cn } from '@/lib/utils';
 import { parseGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import { getTokenMintAddress } from '@/lib/token-display';
-import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
+import { apiPost } from '@/lib/api-client';
+import { TokenFilterBar } from '@/features/ruggers/components/TokenFilterBar';
+import { GlobalTargetControl } from '@/features/ruggers/components/GlobalTargetControl';
+import { FirstBuyStatsStrip, type FirstBuyStats } from '@/features/ruggers/components/FirstBuyStatsStrip';
+import {
+  useRuggerTokensPage,
+  useRuggerTokensAll,
+  useRuggerTokensUnfiltered,
+  useFirstBuyPreview,
+  useInsertTokens,
+  useUpdateToken,
+  useDeleteToken,
+  useApplyGlobalTarget,
+  useResetTokens,
+  fetchRuggerTokensUnfiltered,
+  type TokenFilters,
+} from '@/features/ruggers/hooks/use-tokens';
 
 interface RuggerTokensTabProps {
   ruggerId: string;
@@ -32,61 +38,16 @@ interface RuggerTokensTabProps {
   onRuggerChange: () => void;
 }
 
-interface TokensResponse {
-  tokens: Token[];
-  page: number;
-  pageSize: number;
-  total: number;
-  allSameTargetPercent: number | null;
-}
-
 const TOKEN_TABLE_PAGE_SIZES = [10, 15, 30] as const;
-
-function parseYyyyMmDdToDate(value: string): Date | undefined {
-  if (value.trim() === '') return undefined;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (!parts) return undefined;
-  const year = Number(parts[1]);
-  const month = Number(parts[2]) - 1;
-  const day = Number(parts[3]);
-  const date = new Date(year, month, day);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date;
-}
-
-function formatDateToYyyyMmDd(date?: Date): string {
-  if (!date) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function formatFirstBuyStatValue(v: number, unit: 'usd' | 'sol'): string {
-  if (unit === 'usd') {
-    return `${v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
-  }
-  return `${v.toLocaleString('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} SOL`;
-}
-
-function parsePositiveNumericFilterValue(raw: string): number | null {
-  const normalized = raw.trim().replace(',', '.');
-  if (normalized === '') return null;
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-}
+const DEFAULT_GMGN_TARGET_PERCENT = 100;
+const FIRST_BUY_UNIT_LS = 'stattracker-first-buy-unit';
 
 interface GmgnPurchasePreview {
-  tokenAddress: string;
   name: string;
   purchasedAt: string;
-  entryPrice: number;
   high: number;
   low: number;
-  truncatedKlines: boolean;
   entryToLowMinutes?: number | null;
-  sourceWallet?: string;
 }
 
 function buildRuggerMintSet(tokens: Token[]): Set<string> {
@@ -98,22 +59,9 @@ function buildRuggerMintSet(tokens: Token[]): Set<string> {
   return s;
 }
 
-const DEFAULT_GMGN_TARGET_PERCENT = 100;
-const FIRST_BUY_UNIT_LS = 'stattracker-first-buy-unit';
-
-export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: RuggerTokensTabProps) {
-  const id = ruggerId;
-
-  const [tokensPage, setTokensPage] = useState<TokensResponse | null>(null);
-  const [allTokensForStats, setAllTokensForStats] = useState<Token[]>([]);
+export default function RuggerTokensTab({ ruggerId: id, rugger, onRuggerChange }: RuggerTokensTabProps) {
   const [page, setPage] = useState(1);
-  const [tokenTablePageSize, setTokenTablePageSize] =
-    useState<(typeof TOKEN_TABLE_PAGE_SIZES)[number]>(10);
-  const [isLoadingTokens, setIsLoadingTokens] = useState(false);
-  const [globalTargetPercent, setGlobalTargetPercent] = useState('');
-  const [globalTargetMcap, setGlobalTargetMcap] = useState('');
-  const [globalExitMode, setGlobalExitMode] = useState<ExitMode>('percent');
-  const [isApplyingGlobalTarget, setIsApplyingGlobalTarget] = useState(false);
+  const [tokenTablePageSize, setTokenTablePageSize] = useState<(typeof TOKEN_TABLE_PAGE_SIZES)[number]>(10);
   const [tokenStatusFilter, setTokenStatusFilter] = useState<StatusId | 'all'>('all');
   const [tokenPurchaseFilter, setTokenPurchaseFilter] = useState<TokenPurchaseFilter>('all');
   const [tokenEntryMcapMin, setTokenEntryMcapMin] = useState('');
@@ -122,16 +70,45 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   const [tokenTableCustomTo, setTokenTableCustomTo] = useState('');
   const [tokenTablePickDay, setTokenTablePickDay] = useState('');
   const [migrationView, setMigrationView] = useState<MigrationView>('all');
-  const prevRuggerIdForFetchRef = useRef<string | null>(null);
+
+  const [globalTargetPercent, setGlobalTargetPercent] = useState('');
+  const [globalTargetMcap, setGlobalTargetMcap] = useState('');
+  const [globalExitMode, setGlobalExitMode] = useState<ExitMode>('percent');
   const [gmgnRefreshError, setGmgnRefreshError] = useState<string | null>(null);
   const [gmgnRefreshInfo, setGmgnRefreshInfo] = useState<string | null>(null);
   const [hiddenTokenIds, setHiddenTokenIds] = useState<Set<string>>(() => new Set());
   const [refreshingTokenIds, setRefreshingTokenIds] = useState<Set<string>>(() => new Set());
-  const [unfilteredRuggerTokens, setUnfilteredRuggerTokens] = useState<Token[]>([]);
   const [firstBuyUnit, setFirstBuyUnit] = useState<'usd' | 'sol'>('usd');
-  const [firstBuyByMint, setFirstBuyByMint] = useState<Record<string, FirstBuyPreviewEntry>>({});
-  const [firstBuyLoading, setFirstBuyLoading] = useState(false);
 
+  const filters: TokenFilters = useMemo(
+    () => ({
+      status: tokenStatusFilter,
+      purchaseFilter: tokenPurchaseFilter,
+      entryMcapMin: tokenEntryMcapMin,
+      entryMcapMax: tokenEntryMcapMax,
+      customFrom: tokenTableCustomFrom,
+      customTo: tokenTableCustomTo,
+      pickDay: tokenTablePickDay,
+      migrationOnly: migrationView === 'migrations',
+    }),
+    [tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView]
+  );
+
+  const tokensPageQuery = useRuggerTokensPage(id, page, tokenTablePageSize, filters);
+  const allTokensQuery = useRuggerTokensAll(id, filters);
+  const unfilteredQuery = useRuggerTokensUnfiltered(id);
+
+  const tokensData = tokensPageQuery.data ?? null;
+  const allTokensForStats = useMemo(() => allTokensQuery.data ?? [], [allTokensQuery.data]);
+  const unfilteredRuggerTokens = useMemo(() => unfilteredQuery.data ?? [], [unfilteredQuery.data]);
+
+  const insertTokens = useInsertTokens(id);
+  const updateToken = useUpdateToken(id);
+  const deleteToken = useDeleteToken(id);
+  const applyGlobalTarget = useApplyGlobalTarget(id);
+  const resetTokens = useResetTokens(id);
+
+  // --- localStorage : unité 1er achat + tokens masqués (par rugger) ---
   useEffect(() => {
     try {
       const v = window.localStorage.getItem(FIRST_BUY_UNIT_LS);
@@ -153,17 +130,12 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(`stattracker-rugger-hidden:${id}`);
-      if (!raw) { setHiddenTokenIds(new Set()); return; }
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) { setHiddenTokenIds(new Set()); return; }
-      setHiddenTokenIds(new Set(parsed.filter((x): x is string => typeof x === 'string')));
-    } catch { setHiddenTokenIds(new Set()); }
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+      setHiddenTokenIds(new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []));
+    } catch {
+      setHiddenTokenIds(new Set());
+    }
   }, [id]);
-
-  const mergeHidden = useCallback(
-    (list: Token[]) => list.map((t) => ({ ...t, hidden: hiddenTokenIds.has(t.id) })),
-    [hiddenTokenIds]
-  );
 
   const handleToggleHidden = useCallback(
     (tokenId: string) => {
@@ -173,34 +145,26 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
         else next.add(tokenId);
         try {
           window.localStorage.setItem(`stattracker-rugger-hidden:${id}`, JSON.stringify([...next]));
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         return next;
       });
     },
     [id]
   );
 
-  const tokensForStats = useMemo(
-    () => mergeHidden(allTokensForStats).filter((t) => !t.hidden),
-    [mergeHidden, allTokensForStats]
+  const mergeHidden = useCallback(
+    (list: Token[]) => list.map((t) => ({ ...t, hidden: hiddenTokenIds.has(t.id) })),
+    [hiddenTokenIds]
   );
 
-  const tokensForActivityInference = useMemo(
-    () => mergeHidden(unfilteredRuggerTokens).filter((t) => !t.hidden),
-    [mergeHidden, unfilteredRuggerTokens]
-  );
+  const tokensForStats = useMemo(() => mergeHidden(allTokensForStats).filter((t) => !t.hidden), [mergeHidden, allTokensForStats]);
+  const tokensForActivityInference = useMemo(() => mergeHidden(unfilteredRuggerTokens).filter((t) => !t.hidden), [mergeHidden, unfilteredRuggerTokens]);
+  const migrationKnownTotal = useMemo(() => allTokensForStats.filter((t) => isMigrationPeakMcap(t.high)).length, [allTokensForStats]);
+  const pagedTokensMerged = useMemo(() => mergeHidden(tokensData?.tokens ?? []), [mergeHidden, tokensData?.tokens]);
 
-  const migrationKnownTotal = useMemo(
-    () => allTokensForStats.filter((t) => isMigrationPeakMcap(t.high)).length,
-    [allTokensForStats]
-  );
-
-  const pagedTokensMerged = useMemo(
-    () => mergeHidden(tokensPage?.tokens ?? []),
-    [mergeHidden, tokensPage?.tokens]
-  );
-
-  /** Mints des tokens inclus dans les stats (tous chargés, hors masqués) — aligné sur `tokensForStats`. */
+  // --- 1er achat (wallets « buyer ») ---
   const firstBuyNeededMints = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -210,264 +174,79 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
       seen.add(m);
       out.push(m);
     }
-    out.sort();
-    return out;
+    return out.sort();
   }, [tokensForStats]);
 
-  const firstBuyNeededMintsKey = firstBuyNeededMints.join('|');
+  const buyerWallet = rugger.walletType === 'buyer' ? (rugger.walletAddress?.trim() ?? '') : '';
+  const firstBuyEnabled = buyerWallet !== '' && firstBuyNeededMints.length > 0;
+  const firstBuyQuery = useFirstBuyPreview(id, firstBuyNeededMints, firstBuyEnabled);
+  const firstBuyByMint = useMemo(() => firstBuyQuery.data ?? {}, [firstBuyQuery.data]);
+  const firstBuyLoading = firstBuyEnabled && firstBuyQuery.isFetching;
 
-  const buyerSourceKey = `${id}|${(rugger.walletAddress ?? '').trim()}|${rugger.walletType}`;
-
-  const firstBuyByMintRef = useRef(firstBuyByMint);
-  firstBuyByMintRef.current = firstBuyByMint;
-
-  useLayoutEffect(() => {
-    if (rugger.walletType !== 'buyer') {
-      setFirstBuyByMint({});
-      return;
+  const firstBuyStats = useMemo<FirstBuyStats | null>(() => {
+    if (rugger.walletType !== 'buyer') return null;
+    const values: number[] = [];
+    for (const t of tokensForStats) {
+      const mint = getTokenMintAddress(t).trim();
+      const e = mint ? firstBuyByMint[mint] : undefined;
+      if (!e) continue;
+      const v = firstBuyUnit === 'usd' ? e.usd : e.sol;
+      if (v === null || !Number.isFinite(v)) continue;
+      values.push(v);
     }
-    setFirstBuyByMint({});
-  }, [rugger.walletType, buyerSourceKey]);
-
-  useEffect(() => {
-    if (rugger.walletType !== 'buyer') {
-      setFirstBuyLoading(false);
-      return;
-    }
-    const wallet = rugger.walletAddress?.trim() ?? '';
-    if (wallet === '' || firstBuyNeededMints.length === 0) {
-      setFirstBuyLoading(false);
-      return;
-    }
-
-    const missing = firstBuyNeededMints.filter((m) => firstBuyByMintRef.current[m] === undefined);
-    if (missing.length === 0) {
-      setFirstBuyLoading(false);
-      return;
-    }
-
-    const ac = new AbortController();
-    let active = true;
-    setFirstBuyLoading(true);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/ruggers/${id}/tokens/first-buy-preview`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tokenAddresses: missing }),
-          signal: ac.signal,
-        });
-        const data = (await res.json()) as {
-          byMint?: Record<string, FirstBuyPreviewEntry>;
-        };
-        if (!active) return;
-        if (!res.ok) {
-          setFirstBuyByMint({});
-          return;
-        }
-        setFirstBuyByMint((prev) => ({ ...prev, ...(data.byMint ?? {}) }));
-      } catch {
-        if (active) setFirstBuyByMint({});
-      } finally {
-        if (active) setFirstBuyLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-      ac.abort();
+    if (values.length === 0) return null;
+    return {
+      min: Math.min(...values),
+      max: Math.max(...values),
+      avg: values.reduce((s, x) => s + x, 0) / values.length,
+      count: values.length,
     };
-  }, [buyerSourceKey, firstBuyNeededMintsKey, id]);
+  }, [rugger.walletType, tokensForStats, firstBuyByMint, firstBuyUnit]);
+
+  // Synchronise le champ « objectif commun » quand tous les tokens partagent le même %.
+  useEffect(() => {
+    if (tokensData?.allSameTargetPercent != null) {
+      setGlobalTargetPercent(String(tokensData.allSameTargetPercent));
+    }
+  }, [tokensData?.allSameTargetPercent]);
 
   const handleMigrationViewChange = useCallback((view: MigrationView) => {
     setMigrationView(view);
     setPage(1);
   }, []);
 
-  const loadTokens = useCallback(
-    async (
-      ruggerId: string,
-      nextPage: number,
-      listPageSize: number,
-      status?: StatusId | 'all',
-      purchaseFilter?: TokenPurchaseFilter,
-      entryMcapMinRaw?: string,
-      entryMcapMaxRaw?: string,
-      tableCustomFrom?: string,
-      tableCustomTo?: string,
-      pickDay?: string,
-      migrationOnly = false
-    ) => {
-      setIsLoadingTokens(true);
-      try {
-        const searchParams = new URLSearchParams({
-          page: String(nextPage),
-          pageSize: String(listPageSize),
-        });
-        if (status && status !== 'all') searchParams.set('status', status);
-        appendTokenDateQueryParams(searchParams, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo, pickDay);
-        const entryMcapMin = parsePositiveNumericFilterValue(entryMcapMinRaw ?? '');
-        if (entryMcapMin !== null) searchParams.set('entryMcapMin', String(entryMcapMin));
-        const entryMcapMax = parsePositiveNumericFilterValue(entryMcapMaxRaw ?? '');
-        if (entryMcapMax !== null) searchParams.set('entryMcapMax', String(entryMcapMax));
-        if (migrationOnly) searchParams.set('migration', 'true');
-        const response = await fetch(`/api/ruggers/${ruggerId}/tokens?${searchParams.toString()}`);
-        if (!response.ok) return;
-        const data = (await response.json()) as TokensResponse;
-        setTokensPage(data);
-      } finally { setIsLoadingTokens(false); }
-    },
-    []
-  );
-
-  const loadAllTokensForStats = useCallback(
-    async (
-      ruggerId: string,
-      status?: StatusId | 'all',
-      purchaseFilter?: TokenPurchaseFilter,
-      entryMcapMinRaw?: string,
-      entryMcapMaxRaw?: string,
-      tableCustomFrom?: string,
-      tableCustomTo?: string,
-      pickDay?: string
-    ) => {
-      try {
-        const params = new URLSearchParams({ all: 'true' });
-        if (status && status !== 'all') params.set('status', status);
-        appendTokenDateQueryParams(params, purchaseFilter ?? 'all', tableCustomFrom, tableCustomTo, pickDay);
-        const entryMcapMin = parsePositiveNumericFilterValue(entryMcapMinRaw ?? '');
-        if (entryMcapMin !== null) params.set('entryMcapMin', String(entryMcapMin));
-        const entryMcapMax = parsePositiveNumericFilterValue(entryMcapMaxRaw ?? '');
-        if (entryMcapMax !== null) params.set('entryMcapMax', String(entryMcapMax));
-        const response = await fetch(`/api/ruggers/${ruggerId}/tokens?${params.toString()}`);
-        if (!response.ok) return;
-        const data = (await response.json()) as TokensResponse;
-        setAllTokensForStats(data.tokens);
-      } catch { setAllTokensForStats([]); }
-    },
-    []
-  );
-
-  const loadAllRuggerTokensUnfiltered = useCallback(async (ruggerId: string): Promise<Token[]> => {
-    try {
-      const response = await fetch(`/api/ruggers/${ruggerId}/tokens?all=true`);
-      if (!response.ok) return [];
-      const data = (await response.json()) as TokensResponse;
-      return data.tokens;
-    } catch { return []; }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadAllRuggerTokensUnfiltered(id).then((list) => {
-      if (!cancelled) setUnfilteredRuggerTokens(list);
-    });
-    return () => { cancelled = true; };
-  }, [id, rugger.tokenCount, allTokensForStats.length, loadAllRuggerTokensUnfiltered]);
-
-  useEffect(() => {
-    const ruggerChanged = prevRuggerIdForFetchRef.current !== id;
-    if (ruggerChanged) {
-      prevRuggerIdForFetchRef.current = id;
-      setMigrationView('all');
-      setPage(1);
-    }
-    const fetchPage = ruggerChanged ? 1 : page;
-    const migrationOnly = ruggerChanged ? false : migrationView === 'migrations';
-    void loadTokens(id, fetchPage, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationOnly);
-    void loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, page, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, tokenTablePageSize, loadTokens, loadAllTokensForStats]);
-
-  useEffect(() => {
-    if (tokensPage?.allSameTargetPercent != null) {
-      setGlobalTargetPercent(String(tokensPage.allSameTargetPercent));
-    }
-  }, [tokensPage?.allSameTargetPercent]);
-
-  const reloadTokens = useCallback(async () => {
-    await loadTokens(id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
-    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, page, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
-
-  const reloadTokensFromPage1 = useCallback(async () => {
-    setPage(1);
-    await loadTokens(id, 1, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView === 'migrations');
-    await loadAllTokensForStats(id, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay);
-  }, [id, tokenTablePageSize, tokenStatusFilter, tokenPurchaseFilter, tokenEntryMcapMin, tokenEntryMcapMax, tokenTableCustomFrom, tokenTableCustomTo, tokenTablePickDay, migrationView, loadTokens, loadAllTokensForStats]);
-
+  // --- Mutations (handlers fins) ---
   const handleImportTokens = useCallback(
     async (importedTokens: Token[]) => {
-      const response = await fetch(`/api/ruggers/${id}/tokens`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokens: importedTokens }),
-      });
-      if (!response.ok) return;
-      await reloadTokensFromPage1();
-      onRuggerChange();
+      try {
+        await insertTokens.mutateAsync({ tokens: importedTokens });
+        setPage(1);
+        onRuggerChange();
+      } catch {
+        /* erreur ignorée */
+      }
     },
-    [id, reloadTokensFromPage1, onRuggerChange]
+    [insertTokens, onRuggerChange]
   );
 
   const handleAddToken = useCallback(
     async (token: Token) => {
-      const response = await fetch(`/api/ruggers/${id}/tokens`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokens: [token], replace: false }),
-      });
-      if (!response.ok) return;
-      await reloadTokensFromPage1();
+      await insertTokens.mutateAsync({ tokens: [token], replace: false }).then(() => setPage(1)).catch(() => {});
     },
-    [id, reloadTokensFromPage1]
+    [insertTokens]
   );
 
-  const handleChangeTarget = useCallback(
-    async (tokenId: string, nextPercent: number) => {
-      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetExitPercent: nextPercent }),
-      });
-      if (!response.ok) return;
-      await reloadTokens();
-    },
-    [id, reloadTokens]
-  );
-
-  const handleChangeEntryPrice = useCallback(
-    async (tokenId: string, nextPrice: number) => {
-      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entryPrice: nextPrice }),
-      });
-      if (!response.ok) return;
-      await reloadTokens();
-    },
-    [id, reloadTokens]
-  );
-
-  const handleChangeHigh = useCallback(
-    async (tokenId: string, nextHigh: number) => {
-      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ high: nextHigh }),
-      });
-      if (!response.ok) return;
-      await reloadTokens();
-    },
-    [id, reloadTokens]
+  const patchToken = useCallback(
+    (tokenId: string, patch: Record<string, unknown>) => updateToken.mutateAsync({ tokenId, patch }).catch(() => undefined),
+    [updateToken]
   );
 
   const handleDeleteToken = useCallback(
     async (tokenId: string) => {
       if (!window.confirm('Supprimer ce token ?')) return;
-      const response = await fetch(`/api/ruggers/${id}/tokens/${tokenId}`, { method: 'DELETE' });
-      if (!response.ok) return;
-      await reloadTokens();
+      await deleteToken.mutateAsync(tokenId).catch(() => {});
     },
-    [id, reloadTokens]
+    [deleteToken]
   );
 
   const handleRefreshTokenFromGmgn = useCallback(
@@ -480,101 +259,65 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
       setGmgnRefreshError(null);
       setGmgnRefreshInfo(null);
       setRefreshingTokenIds((prev) => new Set(prev).add(token.id));
-      const fromMs = localGmgnAllTimeRange().fromMs;
-      const toMs = Date.now();
       try {
-        const res = await fetch('/api/gmgn/token-tracking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tokenAddress: mint, fromMs, toMs, athHigh: true }),
+        const { fromMs } = localGmgnAllTimeRange();
+        const data = await apiPost<{ purchases?: GmgnPurchasePreview[] }>('/api/gmgn/token-tracking', {
+          tokenAddress: mint,
+          fromMs,
+          toMs: Date.now(),
+          athHigh: true,
         });
-        const data = (await res.json()) as { purchases?: GmgnPurchasePreview[]; error?: string };
-        if (!res.ok || !data.purchases || data.purchases.length === 0) {
-          setGmgnRefreshError(data.error ?? 'Aucune donnée GMGN trouvée pour ce token.');
+        const p = data.purchases?.[0];
+        if (!p) {
+          setGmgnRefreshError('Aucune donnée GMGN trouvée pour ce token.');
           return;
         }
-        const p = data.purchases[0];
-        const patchPayload: Record<string, unknown> = {
-          high: p.high,
-          low: p.low,
-          tokenName: p.name,
-          purchasedAt: p.purchasedAt,
-        };
+        const patch: Record<string, unknown> = { high: p.high, low: p.low, tokenName: p.name, purchasedAt: p.purchasedAt };
         if (typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)) {
-          patchPayload.entryToLowMinutes = p.entryToLowMinutes;
+          patch.entryToLowMinutes = p.entryToLowMinutes;
         }
-        const patchRes = await fetch(`/api/ruggers/${id}/tokens/${token.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patchPayload),
-        });
-        if (!patchRes.ok) return;
-        const patchJson = (await patchRes.json()) as { ok?: boolean; warning?: string };
-        if (typeof patchJson.warning === 'string' && patchJson.warning.trim() !== '') {
-          setGmgnRefreshInfo(patchJson.warning.trim());
-        }
-        type RefreshMerge = Pick<Token, 'high' | 'low' | 'tokenName' | 'purchasedAt'> & {
-          entryToLowMinutes?: number;
-        };
-        const merged: RefreshMerge = {
-          high: p.high,
-          low: p.low,
-          tokenName: p.name,
-          purchasedAt: p.purchasedAt,
-        };
-        if (typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)) {
-          merged.entryToLowMinutes = p.entryToLowMinutes;
-        }
-        setTokensPage((prev) =>
-          prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === token.id ? { ...t, ...merged } : t)) } : prev
-        );
-        setAllTokensForStats((prev) =>
-          prev.map((t) => (t.id === token.id ? { ...t, ...merged } : t))
-        );
-        void loadAllRuggerTokensUnfiltered(id).then(setUnfilteredRuggerTokens);
+        const res = await updateToken.mutateAsync({ tokenId: token.id, patch });
+        if (typeof res?.warning === 'string' && res.warning.trim() !== '') setGmgnRefreshInfo(res.warning.trim());
+      } catch (e) {
+        setGmgnRefreshError(e instanceof Error ? e.message : 'Aucune donnée GMGN trouvée pour ce token.');
       } finally {
-        setRefreshingTokenIds((prev) => { const next = new Set(prev); next.delete(token.id); return next; });
+        setRefreshingTokenIds((prev) => {
+          const next = new Set(prev);
+          next.delete(token.id);
+          return next;
+        });
       }
     },
-    [id, loadAllRuggerTokensUnfiltered]
+    [updateToken]
   );
 
   const handleApplyGlobalTarget = useCallback(async () => {
-    setIsApplyingGlobalTarget(true);
-    try {
-      let body: Record<string, number>;
-      if (globalExitMode === 'mcap') {
-        const mcap = Number(globalTargetMcap.replace(',', '.'));
-        if (!Number.isFinite(mcap) || mcap <= 0) return;
-        body = { targetExitMcap: mcap };
-      } else {
-        const value = Number(globalTargetPercent.replace(',', '.'));
-        if (!Number.isFinite(value)) return;
-        body = { targetExitPercent: value };
-      }
-      const response = await fetch(`/api/ruggers/${id}/tokens`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) return;
-      await reloadTokens();
-    } finally { setIsApplyingGlobalTarget(false); }
-  }, [id, globalExitMode, globalTargetPercent, globalTargetMcap, reloadTokens]);
+    if (globalExitMode === 'mcap') {
+      const mcap = Number(globalTargetMcap.replace(',', '.'));
+      if (!Number.isFinite(mcap) || mcap <= 0) return;
+      await applyGlobalTarget.mutateAsync({ targetExitMcap: mcap }).catch(() => {});
+    } else {
+      const value = Number(globalTargetPercent.replace(',', '.'));
+      if (!Number.isFinite(value)) return;
+      await applyGlobalTarget.mutateAsync({ targetExitPercent: value }).catch(() => {});
+    }
+  }, [globalExitMode, globalTargetPercent, globalTargetMcap, applyGlobalTarget]);
 
   const handleResetTokens = useCallback(async () => {
     if (!window.confirm('Supprimer tous les tokens de ce rugger ?')) return;
-    const response = await fetch(`/api/ruggers/${id}/tokens`, { method: 'DELETE' });
-    if (!response.ok) return;
-    await reloadTokensFromPage1();
-    onRuggerChange();
-  }, [id, reloadTokensFromPage1, onRuggerChange]);
+    try {
+      await resetTokens.mutateAsync();
+      setPage(1);
+      onRuggerChange();
+    } catch {
+      /* ignore */
+    }
+  }, [resetTokens, onRuggerChange]);
 
   const handleAddGmgnPurchases = useCallback(
     async (items: GmgnPreviewRow[]) => {
       if (items.length === 0) return false;
-      const existingTokens = await loadAllRuggerTokensUnfiltered(id);
-      const knownMints = buildRuggerMintSet(existingTokens);
+      const knownMints = buildRuggerMintSet(await fetchRuggerTokensUnfiltered(id));
       const newItems = items.filter((p) => !knownMints.has(p.tokenAddress.trim()));
       if (newItems.length === 0) return false;
       const tokens: Token[] = newItems.map((p) => {
@@ -592,179 +335,86 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
           purchasedAt: p.purchasedAt,
           tokenAddress: p.tokenAddress,
           entryToLowMinutes:
-            typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes)
-              ? p.entryToLowMinutes
-              : null,
+            typeof p.entryToLowMinutes === 'number' && Number.isFinite(p.entryToLowMinutes) ? p.entryToLowMinutes : null,
         };
       });
-      const response = await fetch(`/api/ruggers/${id}/tokens`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tokens, replace: false }),
-      });
-      if (!response.ok) return false;
-      await reloadTokensFromPage1();
-      return true;
+      try {
+        await insertTokens.mutateAsync({ tokens, replace: false });
+        setPage(1);
+        return true;
+      } catch {
+        return false;
+      }
     },
-    [id, reloadTokensFromPage1, loadAllRuggerTokensUnfiltered]
+    [id, insertTokens]
   );
 
-  const totalPages = useMemo(() => {
-    if (!tokensPage) return 1;
-    return Math.max(1, Math.ceil(tokensPage.total / tokensPage.pageSize));
-  }, [tokensPage]);
-
-  const hasAnyRuggerTokens =
-    (tokensPage?.total ?? 0) > 0 || allTokensForStats.length > 0 || (rugger.tokenCount ?? 0) > 0;
-
-  const activeTokens: Token[] = pagedTokensMerged;
+  const totalPages = useMemo(() => (tokensData ? Math.max(1, Math.ceil(tokensData.total / tokensData.pageSize)) : 1), [tokensData]);
+  const hasAnyRuggerTokens = (tokensData?.total ?? 0) > 0 || allTokensForStats.length > 0 || (rugger.tokenCount ?? 0) > 0;
+  const activeTokens = pagedTokensMerged;
   const tokensWithMetrics = activeTokens.map(getTokenWithMetrics);
-
-  const firstBuyStats = useMemo(() => {
-    if (rugger.walletType !== 'buyer') return null;
-    const values: number[] = [];
-    for (const t of tokensForStats) {
-      const mint = getTokenMintAddress(t).trim();
-      if (mint === '') continue;
-      const e = firstBuyByMint[mint];
-      if (!e) continue;
-      const v = firstBuyUnit === 'usd' ? e.usd : e.sol;
-      if (v === null || !Number.isFinite(v)) continue;
-      values.push(v);
-    }
-    if (values.length === 0) return null;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const avg = values.reduce((s, x) => s + x, 0) / values.length;
-    return { min, max, avg, count: values.length };
-  }, [rugger.walletType, tokensForStats, firstBuyByMint, firstBuyUnit]);
+  const isFetchingTokens = tokensPageQuery.isFetching;
 
   const firstBuyColumn =
     rugger.walletType === 'buyer'
-      ? {
-          unit: firstBuyUnit,
-          onUnitChange: handleFirstBuyUnitChange,
-          byMint: firstBuyByMint,
-          isLoading: firstBuyLoading,
-        }
+      ? { unit: firstBuyUnit, onUnitChange: handleFirstBuyUnitChange, byMint: firstBuyByMint, isLoading: firstBuyLoading }
       : undefined;
 
   return (
     <div className="space-y-8">
-      <StatsSummary
-        tokens={tokensForStats}
-        activityInferenceTokens={tokensForActivityInference}
-      />
+      <StatsSummary tokens={tokensForStats} activityInferenceTokens={tokensForActivityInference} />
       <GmgnTokenAddSection
         knownTokens={unfilteredRuggerTokens}
-        loadKnownTokens={() => loadAllRuggerTokensUnfiltered(id)}
+        loadKnownTokens={() => fetchRuggerTokensUnfiltered(id)}
         onAddPurchases={handleAddGmgnPurchases}
         onManualAdd={handleAddToken}
         walletAddressPrefill={rugger.walletAddress}
         addAllButtonLabel="Tout ajouter au rugger"
         headerActions={
-          <TokenImportExport
-            variant="menu"
-            tokens={mergeHidden(allTokensForStats)}
-            onImport={handleImportTokens}
-          />
+          <TokenImportExport variant="menu" tokens={mergeHidden(allTokensForStats)} onImport={handleImportTokens} />
         }
       />
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-lg font-semibold">Tokens</h2>
-            <div className="flex gap-1">
-              {(['all', ...STATUS_ORDER] as const).map((s) => {
-                const styles = STATUS_FILTER_BUTTON_STYLES[s];
-                return (
-                  <button key={s} type="button" onClick={() => { setTokenStatusFilter(s); setPage(1); }}
-                    className={cn('rounded-full px-3 py-1 text-xs font-medium transition-colors', tokenStatusFilter === s ? styles.selected : styles.unselected)}>
-                    {s === 'all' ? 'Tous' : STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
-            {hasAnyRuggerTokens && (
-              <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={handleResetTokens}>
-                <Trash2 className="size-4 mr-1" />Reset les tokens
-              </Button>
-            )}
-          </div>
-          {tokensPage && (
-            <p className="text-xs text-muted-foreground">Page {tokensPage.page} sur {totalPages} – {tokensPage.total} token{tokensPage.total !== 1 ? 's' : ''}</p>
+          <h2 className="text-lg font-semibold">Tokens</h2>
+          {tokensData && (
+            <p className="text-xs text-muted-foreground">
+              Page {tokensData.page} sur {totalPages} – {tokensData.total} token{tokensData.total !== 1 ? 's' : ''}
+            </p>
           )}
         </div>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">Date d&apos;achat :</span>
-            {(['all', 'today', 'yesterday', 'day', 'custom'] satisfies TokenPurchaseFilter[]).map((period) => (
-              <button key={period} type="button" onClick={() => { setTokenPurchaseFilter(period); setPage(1); if (period === 'day') setTokenTablePickDay((prev) => prev || formatDateToYyyyMmDd(new Date())); }}
-                className={cn('rounded-full px-3 py-1 text-xs font-medium transition-colors', tokenPurchaseFilter === period ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
-                {getPurchaseFilterLabel(period)}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-2">
-              <Label>MCAP d&apos;entrée min</Label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                className="w-[200px]"
-                value={tokenEntryMcapMin}
-                onChange={(e) => {
-                  setTokenEntryMcapMin(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="100000"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>MCAP d&apos;entrée max</Label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                className="w-[200px]"
-                value={tokenEntryMcapMax}
-                onChange={(e) => {
-                  setTokenEntryMcapMax(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="500000"
-              />
-            </div>
-          </div>
-          {tokenPurchaseFilter === 'day' && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-2">
-                <Label>Jour</Label>
-                <DatePicker value={parseYyyyMmDdToDate(tokenTablePickDay)} onChange={(date) => { setTokenTablePickDay(formatDateToYyyyMmDd(date)); setPage(1); }} placeholder="Choisir un jour" className="w-[200px]" />
-              </div>
-            </div>
-          )}
-          {tokenPurchaseFilter === 'custom' && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-2"><Label>Du</Label><DatePicker value={parseYyyyMmDdToDate(tokenTableCustomFrom)} onChange={(date) => { setTokenTableCustomFrom(formatDateToYyyyMmDd(date)); setPage(1); }} placeholder="Date de début" className="w-[200px]" /></div>
-              <div className="space-y-2"><Label>Au</Label><DatePicker value={parseYyyyMmDdToDate(tokenTableCustomTo)} onChange={(date) => { setTokenTableCustomTo(formatDateToYyyyMmDd(date)); setPage(1); }} placeholder="Date de fin" className="w-[200px]" /></div>
-            </div>
-          )}
-        </div>
-        {gmgnRefreshError && (
-          <p className="text-sm text-destructive" role="alert">
-            {gmgnRefreshError}
-          </p>
-        )}
+
+        <TokenFilterBar
+          status={tokenStatusFilter}
+          onStatusChange={(s) => { setTokenStatusFilter(s); setPage(1); }}
+          purchaseFilter={tokenPurchaseFilter}
+          onPurchaseFilterChange={(p) => { setTokenPurchaseFilter(p); setPage(1); }}
+          entryMcapMin={tokenEntryMcapMin}
+          onEntryMcapMinChange={(v) => { setTokenEntryMcapMin(v); setPage(1); }}
+          entryMcapMax={tokenEntryMcapMax}
+          onEntryMcapMaxChange={(v) => { setTokenEntryMcapMax(v); setPage(1); }}
+          customFrom={tokenTableCustomFrom}
+          onCustomFromChange={(v) => { setTokenTableCustomFrom(v); setPage(1); }}
+          customTo={tokenTableCustomTo}
+          onCustomToChange={(v) => { setTokenTableCustomTo(v); setPage(1); }}
+          pickDay={tokenTablePickDay}
+          onPickDayChange={(v) => { setTokenTablePickDay(v); setPage(1); }}
+          showReset={hasAnyRuggerTokens}
+          onReset={handleResetTokens}
+        />
+
+        {gmgnRefreshError && <p className="text-sm text-destructive" role="alert">{gmgnRefreshError}</p>}
         {gmgnRefreshInfo && !gmgnRefreshError && (
-          <p className="text-sm text-amber-800 dark:text-amber-200" role="status">
-            {gmgnRefreshInfo}
-          </p>
+          <p className="text-sm text-amber-800 dark:text-amber-200" role="status">{gmgnRefreshInfo}</p>
         )}
         {rugger.walletType === 'buyer' && !rugger.walletAddress?.trim() && activeTokens.length > 0 && (
           <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
             Renseigne l&apos;adresse Solana du wallet acheteur sur le rugger pour afficher le montant du 1er achat GMGN par token.
           </p>
         )}
-        {isLoadingTokens && tokensPage === null ? (
+
+        {tokensPageQuery.isLoading && !tokensData ? (
           <p className="text-sm text-muted-foreground">Chargement des tokens…</p>
         ) : activeTokens.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
@@ -772,71 +422,26 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
           </p>
         ) : (
           <>
-            {isLoadingTokens && <p className="text-xs text-muted-foreground" aria-live="polite">Actualisation des données…</p>}
-            <div className={cn('space-y-4 transition-opacity', isLoadingTokens && 'pointer-events-none opacity-60')}>
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-                <Label className="text-sm font-medium">Objectif commun</Label>
-                <div className="flex rounded-md border text-xs">
-                  <button type="button" onClick={() => setGlobalExitMode('percent')} className={cn('px-2 py-0.5 rounded-l-md transition-colors font-medium', globalExitMode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>%</button>
-                  <button type="button" onClick={() => setGlobalExitMode('mcap')} className={cn('px-2 py-0.5 rounded-r-md transition-colors font-medium', globalExitMode === 'mcap' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>MCap</button>
-                </div>
-                {globalExitMode === 'percent'
-                  ? <Input type="text" inputMode="decimal" className="w-24" value={globalTargetPercent} onChange={(e) => setGlobalTargetPercent(e.target.value)} placeholder="100" />
-                  : <Input type="text" inputMode="decimal" className="w-32" value={globalTargetMcap} onChange={(e) => setGlobalTargetMcap(e.target.value)} placeholder="500000" />}
-                <Button type="button" size="sm" disabled={isApplyingGlobalTarget || (globalExitMode === 'percent' ? !Number.isFinite(Number(globalTargetPercent.replace(',', '.'))) : !Number.isFinite(Number(globalTargetMcap.replace(',', '.'))) || Number(globalTargetMcap.replace(',', '.')) <= 0)} onClick={handleApplyGlobalTarget}>
-                  {isApplyingGlobalTarget ? 'Application…' : 'Appliquer à tous'}
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {globalExitMode === 'percent' ? 'Applique le même % de sortie à tous les tokens.' : "Calcule le % de sortie pour chaque token en fonction de son point d'entrée."}
-                </span>
-              </div>
+            {isFetchingTokens && <p className="text-xs text-muted-foreground" aria-live="polite">Actualisation des données…</p>}
+            <div className={cn('space-y-4 transition-opacity', isFetchingTokens && 'pointer-events-none opacity-60')}>
+              <GlobalTargetControl
+                exitMode={globalExitMode}
+                onExitModeChange={setGlobalExitMode}
+                percent={globalTargetPercent}
+                onPercentChange={setGlobalTargetPercent}
+                mcap={globalTargetMcap}
+                onMcapChange={setGlobalTargetMcap}
+                isApplying={applyGlobalTarget.isPending}
+                onApply={handleApplyGlobalTarget}
+              />
               {rugger.walletType === 'buyer' && rugger.walletAddress?.trim() !== '' && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-teal-500/25 bg-teal-500/10 px-4 py-2 text-xs dark:bg-teal-950/30">
-                  <span className="font-semibold text-foreground">1er achat</span>
-                  <span className="text-muted-foreground">(stats, hors masqués)</span>
-                  <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground">
-                    {firstBuyUnit === 'usd' ? 'USD' : 'SOL'}
-                  </span>
-                  {firstBuyLoading ? (
-                    <span className="text-muted-foreground">Chargement…</span>
-                  ) : firstBuyStats ? (
-                    <>
-                      <span className="tabular-nums text-muted-foreground">
-                        Min :{' '}
-                        <span className="font-medium text-foreground">
-                          {formatFirstBuyStatValue(firstBuyStats.min, firstBuyUnit)}
-                        </span>
-                      </span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="tabular-nums text-muted-foreground">
-                        Max :{' '}
-                        <span className="font-medium text-foreground">
-                          {formatFirstBuyStatValue(firstBuyStats.max, firstBuyUnit)}
-                        </span>
-                      </span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="tabular-nums text-muted-foreground">
-                        Moyenne :{' '}
-                        <span className="font-medium text-foreground">
-                          {formatFirstBuyStatValue(firstBuyStats.avg, firstBuyUnit)}
-                        </span>
-                      </span>
-                      <span className="text-muted-foreground">
-                        ({firstBuyStats.count} token{firstBuyStats.count > 1 ? 's' : ''})
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Aucun montant exploitable (mints ou données GMGN).
-                    </span>
-                  )}
-                </div>
+                <FirstBuyStatsStrip stats={firstBuyStats} unit={firstBuyUnit} isLoading={firstBuyLoading} />
               )}
               <TokenTable
                 tokens={tokensWithMetrics}
-                onChangeTarget={handleChangeTarget}
-                onChangeEntryPrice={handleChangeEntryPrice}
-                onChangeHigh={handleChangeHigh}
+                onChangeTarget={(tokenId, v) => void patchToken(tokenId, { targetExitPercent: v })}
+                onChangeEntryPrice={(tokenId, v) => void patchToken(tokenId, { entryPrice: v })}
+                onChangeHigh={(tokenId, v) => void patchToken(tokenId, { high: v })}
                 onRefreshToken={handleRefreshTokenFromGmgn}
                 refreshingTokenIds={refreshingTokenIds}
                 onDeleteToken={handleDeleteToken}
@@ -850,8 +455,18 @@ export default function RuggerTokensTab({ ruggerId, rugger, onRuggerChange }: Ru
                 <span className="text-xs font-medium text-muted-foreground">Par page</span>
                 <div className="flex rounded-md border text-xs">
                   {TOKEN_TABLE_PAGE_SIZES.map((n, i) => (
-                    <button key={n} type="button" onClick={() => { setTokenTablePageSize(n); setPage(1); }}
-                      className={cn('px-2.5 py-1 font-medium transition-colors', i === 0 && 'rounded-l-md', i === TOKEN_TABLE_PAGE_SIZES.length - 1 && 'rounded-r-md', i > 0 && 'border-l border-border', tokenTablePageSize === n ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => { setTokenTablePageSize(n); setPage(1); }}
+                      className={cn(
+                        'px-2.5 py-1 font-medium transition-colors',
+                        i === 0 && 'rounded-l-md',
+                        i === TOKEN_TABLE_PAGE_SIZES.length - 1 && 'rounded-r-md',
+                        i > 0 && 'border-l border-border',
+                        tokenTablePageSize === n ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                      )}
+                    >
                       {n}
                     </button>
                   ))}

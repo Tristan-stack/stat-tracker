@@ -1,30 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-session';
-import { deletePnlWallet, updatePnlWallet } from '@/lib/repositories/pnl-wallets';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { parseBody } from '@/lib/api/validate';
+import { updatePnlWallet, deletePnlWallet } from '@/features/pnl/repository';
 
-export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
+type Ctx = { params: Promise<{ id: string }> };
 
-  const { id } = await context.params;
-  const body = (await req.json()) as { label?: string };
-  const label = body.label?.trim() || null;
+const updateSchema = z.object({ label: z.string().optional() });
 
-  const wallet = await updatePnlWallet({ id, userId: auth.userId, label });
-  if (!wallet) {
-    return NextResponse.json({ error: 'Wallet introuvable' }, { status: 404 });
-  }
-  return NextResponse.json({ wallet });
-}
+export const PATCH = withAuth<Ctx>(async (req, ctx, { userId }) => {
+  const { id } = await ctx.params;
+  const body = await parseBody(req, updateSchema);
+  const wallet = await updatePnlWallet({ id, userId, label: body.label?.trim() || null });
+  if (!wallet) throw notFoundError('Wallet introuvable');
+  return ok({ wallet });
+});
 
-export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-
-  const { id } = await context.params;
-  const deleted = await deletePnlWallet({ id, userId: auth.userId });
-  if (!deleted) {
-    return NextResponse.json({ error: 'Wallet introuvable' }, { status: 404 });
-  }
-  return NextResponse.json({ deleted: true });
-}
+export const DELETE = withAuth<Ctx>(async (_req, ctx, { userId }) => {
+  const { id } = await ctx.params;
+  const deleted = await deletePnlWallet({ id, userId });
+  if (!deleted) throw notFoundError('Wallet introuvable');
+  return ok({ deleted: true });
+});

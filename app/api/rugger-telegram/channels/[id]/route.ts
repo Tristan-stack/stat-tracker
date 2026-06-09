@@ -1,19 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { requireUser } from '@/lib/auth-session';
+import { withAuth } from '@/lib/api/with-auth';
+import { ok } from '@/lib/api/responses';
+import { notFoundError } from '@/lib/api/errors';
+import { deleteChannel } from '@/features/telegram/repository';
 
-export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser(req);
-  if ('response' in auth) return auth.response;
-  const { userId } = auth;
+type Ctx = { params: Promise<{ id: string }> };
 
+export const DELETE = withAuth<Ctx>(async (_req, ctx, { userId }) => {
   const { id } = await ctx.params;
-  if (!id) return NextResponse.json({ error: 'Bad request' }, { status: 400 });
-
-  const rows = await query<{ id: string }>(
-    `delete from telegram_channels where id = $1 and user_id = $2 returning id`,
-    [id, userId]
-  );
-  if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ ok: true });
-}
+  const deleted = await deleteChannel(id, userId);
+  if (!deleted) throw notFoundError('Not found');
+  return ok({ ok: true });
+});
