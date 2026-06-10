@@ -30,13 +30,13 @@ export default function SignUpPage() {
         name: name.trim(),
         email: email.trim(),
         password,
-        callbackURL: '/',
+        callbackURL: '/dashboard',
       });
       if (err) {
         setError(err.message ?? 'Erreur lors de l\'inscription');
         return;
       }
-      router.push('/');
+      router.push('/dashboard');
       router.refresh();
     } catch {
       setError('Erreur lors de l\'inscription');

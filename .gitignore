@@ -44,3 +44,5 @@ next-env.d.ts
 /lib/generated/prisma
 
 CLAUDE.md
+# graphify (graphe de connaissance genere localement)
+/graphify-out/

@@ -32,7 +32,7 @@ import { BarChart3, Eye, Footprints, Layers, LogOut, TrendingUp, User, Wallet } 
 import { useSession, signOut } from '@/lib/auth-client';
 
 const links = [
-  { href: '/', label: 'Stat tracking', icon: BarChart3 },
+  { href: '/dashboard', label: 'Stat tracking', icon: BarChart3 },
   { href: '/rugger', label: 'Ruggers', icon: Wallet },
   { href: '/watchlist', label: 'Watchlist', icon: Eye },
   { href: '/wallet-comparison', label: 'Comparaison wallets', icon: Layers },
@@ -77,7 +77,7 @@ function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg" tooltip="StatTracker">
-              <Link href="/">
+              <Link href="/dashboard">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-semibold">
                   S
                 </span>

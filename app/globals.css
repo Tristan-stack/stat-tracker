@@ -1,118 +1,168 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* ──────────────────────────────────────────────────────────────────────────
+   StatTracker — direction « monopo saigon »
+   Système éditorial monochrome : paper-white / ink-black + escalier de gris.
+   Achromatique strict. La seule couleur autorisée est le gradient mercury-flow,
+   réservé à l'atmosphère du hero (renders/film stills), jamais en chrome UI.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Palette monopo */
+  --color-paper-white: #ffffff;
+  --color-ink-black: #000000;
+  --color-carbon: #181818;
+  --color-ash: #6d6d6d;
+  --color-smoke: #9a9a9a;
+  --color-pewter: #808080;
+  --color-graphite: #636363;
+  --color-mercury-flow: #a0e0ab;
+
+  /* Typographie — Inter (substitut Roobert), system mono pour les chiffres */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+
+  /* Échelle typographique monumentale (cf. theme.css monopo) */
+  --text-body: 16px;
+  --text-body--line-height: 1.39;
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 1.36;
+  --text-subheading: 30px;
+  --text-subheading--line-height: 1.25;
+  --text-heading-sm: 45px;
+  --text-heading-sm--line-height: 1.22;
+  --text-heading: 54px;
+  --text-heading--line-height: 1.21;
+  --text-heading-lg: 78px;
+  --text-heading-lg--line-height: 1.15;
+  --text-display: 94px;
+  --text-display--line-height: 1.1;
+  --text-hero: 225px;
+  --text-hero--line-height: 0.76;
+
+  /* Poids signature : 300 display, 400 corps/nav, 600 emphase seule */
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+
+  /* Espacement (densité spacieuse) */
+  --spacing-section: 100px;
+  --spacing-card: 36px;
+
+  /* Rayons nommés : sharp (cards/inputs) ou full pill (buttons/badges) */
+  --radius-pill: 75px;
+
+  /* Largeur de page éditoriale */
+  --page-max-width: 1440px;
+}
+
 @custom-variant dark (&:is(.dark *));
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tokens sémantiques shadcn remappés sur la palette monopo.
+   Les primitives (button, card, input…) héritent automatiquement du look.
+   Cards/inputs = radius 0 ; seuls les boutons/badges utilisent le pill.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --radius: 0px;
+
+  --background: var(--color-paper-white);
+  --foreground: var(--color-carbon);
+
+  --card: var(--color-paper-white);
+  --card-foreground: var(--color-carbon);
+
+  --popover: var(--color-paper-white);
+  --popover-foreground: var(--color-carbon);
+
+  /* Actions primaires = ink black, texte inversé */
+  --primary: var(--color-ink-black);
+  --primary-foreground: var(--color-paper-white);
+
+  --secondary: var(--color-paper-white);
+  --secondary-foreground: var(--color-ink-black);
+
+  /* Surfaces dé-emphasées / texte muet */
+  --muted: var(--color-paper-white);
+  --muted-foreground: var(--color-ash);
+
+  --accent: var(--color-paper-white);
+  --accent-foreground: var(--color-ink-black);
+
+  /* Pas d'accent chromatique : "destructive" reste neutre ink */
+  --destructive: var(--color-carbon);
+
+  /* Hairlines : liserés très discrets dérivés de l'ink (pas du gris plein ash,
+     trop prononcé sur les grilles denses du dashboard). Input un poil plus marqué. */
+  --border: color-mix(in srgb, var(--color-ink-black) 9%, transparent);
+  --input: color-mix(in srgb, var(--color-ink-black) 16%, transparent);
+  --ring: var(--color-carbon);
+
+  /* Charts : niveaux de gris (achromatique) */
+  --chart-1: var(--color-ink-black);
+  --chart-2: var(--color-carbon);
+  --chart-3: var(--color-graphite);
+  --chart-4: var(--color-pewter);
+  --chart-5: var(--color-smoke);
+
+  /* Sidebar : paper-white, hairline ash */
+  --sidebar: var(--color-paper-white);
+  --sidebar-foreground: var(--color-carbon);
+  --sidebar-primary: var(--color-ink-black);
+  --sidebar-primary-foreground: var(--color-paper-white);
+  --sidebar-accent: var(--color-paper-white);
+  --sidebar-accent-foreground: var(--color-ink-black);
+  --sidebar-border: color-mix(in srgb, var(--color-ink-black) 9%, transparent);
+  --sidebar-ring: var(--color-carbon);
+
+  /* Atmosphère hero — unique couleur du système */
+  --gradient-mercury-flow: linear-gradient(
+    90deg,
+    rgb(160, 224, 171),
+    rgb(255, 172, 46) 50%,
+    rgb(165, 45, 37)
+  );
+}
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
-}
-
-:root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --radius-xl: var(--radius);
 }
 
 @layer base {
@@ -121,6 +171,21 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-weight: var(--font-weight-regular);
+  }
+
+  /* Neutralise l'autofill navigateur (bleu/jaune) → reste achromatique paper/ink */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--color-carbon);
+    -webkit-box-shadow: 0 0 0 1000px var(--color-paper-white) inset;
+    box-shadow: 0 0 0 1000px var(--color-paper-white) inset;
+    caret-color: var(--color-carbon);
+    border-radius: 0;
+    transition: background-color 600000s 0s;
   }
 }
 
@@ -144,6 +209,48 @@
       animation: none;
       transform: translateX(0);
       opacity: 0.85;
+    }
+  }
+
+  /* Atmosphère hero — seule couleur autorisée (renders/film stills) */
+  .bg-mercury-flow {
+    background-image: var(--gradient-mercury-flow);
+  }
+
+  /* Rayon pill réservé boutons/badges */
+  .rounded-pill {
+    border-radius: var(--radius-pill);
+  }
+
+  /* Grain film 16mm — bruit animé sur les frames noirs immersifs, posé en
+     ::after au-dessus de tout (y compris le texte), comme une pellicule.
+     Blend `screen` (additif) : visible sur fond noir, neutre sur blanc —
+     surtout pas `overlay`, qui s'annule sur le noir pur. Bruit désaturé
+     (feColorMatrix) pour rester achromatique. */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 240px 240px;
+    opacity: 0.13;
+    mix-blend-mode: screen;
+    animation: grain-flicker 0.9s steps(6) infinite;
+  }
+
+  @keyframes grain-flicker {
+    0% { background-position: 0 0; }
+    20% { background-position: 18% -12%; }
+    40% { background-position: -14% 9%; }
+    60% { background-position: 9% 16%; }
+    80% { background-position: -17% -7%; }
+    100% { background-position: 12% 5%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .grain::after {
+      animation: none;
     }
   }
 }

@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Inter, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import ConditionalLayout from '@/components/ConditionalLayout';
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
+const inter = Inter({
+  variable: '--font-inter',
   subsets: ['latin'],
+  weight: ['300', '400', '600'],
 });
 
 const geistMono = Geist_Mono({
@@ -14,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'StatTracker – Suivi rentabilité tokens',
+  title: 'StatTracker – Intelligence on-chain Solana',
   description:
-    'Suivi de la rentabilité par token : entrée, plus haut, plus bas, objectif de sortie.',
+    'Traque les ruggers, cartographie les réseaux de wallets, mesure ton PnL. Le terminal d’analyse on-chain pour traders Solana.',
 };
 
 export default function RootLayout({
@@ -27,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} ${geistMono.variable} antialiased`}
       >
         <ConditionalLayout>{children}</ConditionalLayout>
       </body>

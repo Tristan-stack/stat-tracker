@@ -11,6 +11,13 @@ const PUBLIC_PAGE_PATHS = [
   '/405',
 ] as const;
 
+/**
+ * Routes publiques à correspondance EXACTE uniquement (pas de préfixe).
+ * La landing « / » en fait partie : un match par préfixe rendrait tout le site public.
+ */
+const PUBLIC_EXACT_PATHS = ['/'] as const;
+
 export function isPublicPagePath(pathname: string): boolean {
+  if (PUBLIC_EXACT_PATHS.some((p) => pathname === p)) return true;
   return PUBLIC_PAGE_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
