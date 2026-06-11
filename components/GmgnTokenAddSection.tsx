@@ -35,7 +35,10 @@ export interface GmgnTokenAddSectionProps {
   walletAddressPrefill?: string | null;
 }
 
-const GMGN_KLINE_BATCH_SIZE = 100;
+// Vercel Hobby plafonne la fonction à 60s. Chaque requête = collect (jusqu'à
+// GMGN_COLLECT_BUDGET_MS) + batch klines (650 ms/appel, throttle GMGN). 25 klines
+// ≈ 16s : combiné au collect, ça tient sous 60s avec marge pour les pénalités 429.
+const GMGN_KLINE_BATCH_SIZE = 25;
 
 function gmgnErrorMessage(e: unknown): string {
   return e instanceof ApiError ? e.message : 'Erreur réseau';

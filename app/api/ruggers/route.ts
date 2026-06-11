@@ -39,9 +39,9 @@ export const GET = withAuth(async (req, _ctx, { userId }) => {
 });
 
 const createSchema = z.object({
-  name: z.string().optional(),
-  description: z.string().optional(),
-  walletAddress: z.string().optional(),
+  name: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  walletAddress: z.string().nullable().optional(),
   walletType: z.enum(['exchange', 'mother', 'simple', 'buyer']).optional(),
   volumeMin: z.union([z.number(), z.string(), z.null()]).optional(),
   volumeMax: z.union([z.number(), z.string(), z.null()]).optional(),

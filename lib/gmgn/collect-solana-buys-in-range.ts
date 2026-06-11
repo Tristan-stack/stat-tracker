@@ -16,7 +16,7 @@ function envInt(name: string, def: number): number {
 const MAX_ACTIVITY_PAGES = envInt('GMGN_MAX_ACTIVITY_PAGES', 50);
 const MAX_ACTIVITY_PAGES_SHORT_RANGE = envInt('GMGN_MAX_ACTIVITY_PAGES_SHORT', 60);
 /** Budget temps d'un collect (ms) : on coupe avant le timeout de fonction. */
-const COLLECT_BUDGET_MS = envInt('GMGN_COLLECT_BUDGET_MS', 45000);
+const COLLECT_BUDGET_MS = envInt('GMGN_COLLECT_BUDGET_MS', 25000);
 
 /**
  * Retourne un timestamp Unix en **secondes**.
