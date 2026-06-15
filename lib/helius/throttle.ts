@@ -1,8 +1,10 @@
 import { createThrottle } from '@/lib/http/throttle';
 
-// Défaut prudent pour éviter les 429 fréquents : le tier Helius gratuit plafonne
-// autour de 1 req/s. Surchargeable par env pour un retour sur un plan payant.
-const HELIUS_RPS = Number(process.env.HELIUS_RPS ?? '1');
+// Throttle Helius GLOBAL partagé (analyse, address-tracer, etc.). Défaut 10 req/s =
+// limite du plan Helius gratuit. L'analyse ne crashe plus sur 429 (contre-pression
+// `penalizeHelius` + isolation par token), donc on cale sur la limite réelle plutôt que sur
+// une valeur ultra-prudente. Baisser via env si 429 persistants ; monter sur un plan payant.
+const HELIUS_RPS = Number(process.env.HELIUS_RPS ?? '10');
 const helius = createThrottle(Math.ceil(1000 / HELIUS_RPS));
 
 export async function throttleHelius(): Promise<void> {
