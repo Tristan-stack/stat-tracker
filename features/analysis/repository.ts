@@ -610,68 +610,103 @@ export interface BuyerWalletPersistInput {
   decisionReasons: string[];
 }
 
-export async function upsertAnalysisBuyerWallet(input: BuyerWalletPersistInput): Promise<void> {
-  await query(
-    `INSERT INTO analysis_buyer_wallets
-     (id, analysis_id, wallet_address, source, mother_address_id,
-      tokens_bought, total_tokens, coverage_percent,
-      first_buy_at, last_buy_at, active_days, span_days_in_scope, consistency, weight,
-      avg_hold_duration_hours, funding_depth, funding_chain, mother_child_count, has_high_fanout_mother,
-      matching_confidence, inclusion_decision, risk_flag, risk_level, decision_reasons)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-     ON CONFLICT (analysis_id, wallet_address) DO UPDATE SET
-       source = $3, mother_address_id = $4,
-       tokens_bought = $5, total_tokens = $6, coverage_percent = $7,
-       first_buy_at = $8, last_buy_at = $9, active_days = $10, span_days_in_scope = $11,
-       consistency = $12, weight = $13,
-       avg_hold_duration_hours = $14, funding_depth = $15, funding_chain = $16,
-       mother_child_count = $17, has_high_fanout_mother = $18,
-       matching_confidence = $19, inclusion_decision = $20, risk_flag = $21, risk_level = $22, decision_reasons = $23`,
-    [
-      input.analysisId,
-      input.walletAddress,
-      input.source,
-      input.motherAddressId,
-      input.tokensBought,
-      input.totalTokens,
-      input.coveragePercent,
-      input.firstBuyAt,
-      input.lastBuyAt,
-      input.activeDays,
-      input.spanDaysInScope,
-      input.consistency,
-      input.weight,
-      input.avgHoldDurationHours,
-      input.fundingDepth,
-      input.fundingChain ? JSON.stringify(input.fundingChain) : null,
-      input.motherChildCount,
-      input.hasHighFanoutMother,
-      input.matchingConfidence,
-      input.inclusionDecision,
-      input.riskFlag,
-      input.riskLevel,
-      JSON.stringify(input.decisionReasons),
-    ]
-  );
+/** Colonnes (hors `id`) de `analysis_buyer_wallets`, dans l'ordre des params. */
+const BUYER_WALLET_COLUMNS = [
+  'analysis_id', 'wallet_address', 'source', 'mother_address_id',
+  'tokens_bought', 'total_tokens', 'coverage_percent',
+  'first_buy_at', 'last_buy_at', 'active_days', 'span_days_in_scope', 'consistency', 'weight',
+  'avg_hold_duration_hours', 'funding_depth', 'funding_chain', 'mother_child_count', 'has_high_fanout_mother',
+  'matching_confidence', 'inclusion_decision', 'risk_flag', 'risk_level', 'decision_reasons',
+] as const;
+
+function buyerWalletValues(input: BuyerWalletPersistInput): unknown[] {
+  return [
+    input.analysisId, input.walletAddress, input.source, input.motherAddressId,
+    input.tokensBought, input.totalTokens, input.coveragePercent,
+    input.firstBuyAt, input.lastBuyAt, input.activeDays, input.spanDaysInScope, input.consistency, input.weight,
+    input.avgHoldDurationHours, input.fundingDepth, input.fundingChain ? JSON.stringify(input.fundingChain) : null,
+    input.motherChildCount, input.hasHighFanoutMother,
+    input.matchingConfidence, input.inclusionDecision, input.riskFlag, input.riskLevel,
+    JSON.stringify(input.decisionReasons),
+  ];
 }
 
-export async function insertAnalysisBuyerPurchase(args: {
-  analysisId: string;
+/**
+ * Upsert en lot des buyer wallets : une seule requête multi-rows (chunkée) au lieu d'un
+ * round-trip Neon par wallet. Indispensable pour rester sous le budget 60 s avec des
+ * centaines de wallets — cf. `persistResults`.
+ */
+export async function upsertAnalysisBuyerWalletsBatch(inputs: BuyerWalletPersistInput[]): Promise<void> {
+  if (inputs.length === 0) return;
+  const cols = BUYER_WALLET_COLUMNS;
+  const updateSet = cols
+    .filter((c) => c !== 'analysis_id' && c !== 'wallet_address')
+    .map((c) => `${c} = EXCLUDED.${c}`)
+    .join(', ');
+
+  const CHUNK = 150;
+  for (let start = 0; start < inputs.length; start += CHUNK) {
+    const chunk = inputs.slice(start, start + CHUNK);
+    const params: unknown[] = [];
+    const tuples = chunk.map((input, r) => {
+      const placeholders = cols.map((_, c) => `$${r * cols.length + c + 1}`);
+      params.push(...buyerWalletValues(input));
+      return `(gen_random_uuid(), ${placeholders.join(', ')})`;
+    });
+    await query(
+      `INSERT INTO analysis_buyer_wallets (id, ${cols.join(', ')})
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT (analysis_id, wallet_address) DO UPDATE SET ${updateSet}`,
+      params
+    );
+  }
+}
+
+export interface BuyerPurchasePersistInput {
   walletAddress: string;
   tokenAddress: string;
   tokenName: string | null;
   purchasedAt: string | null;
   amountSol: number | null;
-}): Promise<void> {
-  await query(
-    `INSERT INTO analysis_buyer_purchases
-     (id, buyer_wallet_id, token_address, token_name, purchased_at, amount_sol)
-     SELECT gen_random_uuid(), bw.id, $2, $3, $4, $5
-     FROM analysis_buyer_wallets bw
-     WHERE bw.analysis_id = $1 AND bw.wallet_address = $6
-     ON CONFLICT (buyer_wallet_id, token_address) DO NOTHING`,
-    [args.analysisId, args.tokenAddress, args.tokenName, args.purchasedAt, args.amountSol, args.walletAddress]
+}
+
+/**
+ * Insert en lot des achats : résout les `buyer_wallet_id` en une seule requête, puis
+ * une (ou quelques) requêtes multi-rows — au lieu d'un INSERT…SELECT par achat.
+ */
+export async function insertAnalysisBuyerPurchasesBatch(
+  analysisId: string,
+  purchases: BuyerPurchasePersistInput[]
+): Promise<void> {
+  if (purchases.length === 0) return;
+
+  const idRows = await query<{ id: string; wallet_address: string }>(
+    `SELECT id, wallet_address FROM analysis_buyer_wallets WHERE analysis_id = $1`,
+    [analysisId]
   );
+  const idByWallet = new Map(idRows.map((row) => [row.wallet_address, row.id]));
+
+  const rows = purchases
+    .map((p) => ({ buyerWalletId: idByWallet.get(p.walletAddress), p }))
+    .filter((row): row is { buyerWalletId: string; p: BuyerPurchasePersistInput } => row.buyerWalletId !== undefined);
+  if (rows.length === 0) return;
+
+  const CHUNK = 400;
+  for (let start = 0; start < rows.length; start += CHUNK) {
+    const chunk = rows.slice(start, start + CHUNK);
+    const params: unknown[] = [];
+    const tuples = chunk.map(({ buyerWalletId, p }, r) => {
+      const base = r * 5;
+      params.push(buyerWalletId, p.tokenAddress, p.tokenName, p.purchasedAt, p.amountSol);
+      return `(gen_random_uuid(), $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+    });
+    await query(
+      `INSERT INTO analysis_buyer_purchases (id, buyer_wallet_id, token_address, token_name, purchased_at, amount_sol)
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT (buyer_wallet_id, token_address) DO NOTHING`,
+      params
+    );
+  }
 }
 
 export async function loadWalletCentricCandidates(analysisId: string): Promise<string[]> {

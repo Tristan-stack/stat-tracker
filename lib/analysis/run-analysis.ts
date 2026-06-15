@@ -18,10 +18,11 @@ import {
   updateAnalysisStatus,
   finalizeAnalysis,
   upsertAnalysisMotherAddress,
-  upsertAnalysisBuyerWallet,
-  insertAnalysisBuyerPurchase,
+  upsertAnalysisBuyerWalletsBatch,
+  insertAnalysisBuyerPurchasesBatch,
   loadWalletCentricCandidates,
   loadHistoricalMaxCoverageByRugger as loadHistoricalMaxCoverageByRuggerForAnalysis,
+  type BuyerWalletPersistInput,
 } from '@/features/analysis/repository';
 
 const ANALYSIS_CONCURRENCY = Number(process.env.ANALYSIS_CONCURRENCY ?? '3');
@@ -1034,12 +1035,11 @@ async function persistResults(
     if (id) motherIdMap.set(address, id);
   }
 
-  for (const w of mergedWallets) {
+  const walletInputs: BuyerWalletPersistInput[] = mergedWallets.map((w) => {
     const score = scoreMap.get(w.walletAddress);
     const decision = decisions.get(w.walletAddress);
     const motherId = w.motherAddress ? motherIdMap.get(w.motherAddress) ?? null : null;
-
-    await upsertAnalysisBuyerWallet({
+    return {
       analysisId,
       walletAddress: w.walletAddress,
       source: w.source,
@@ -1063,19 +1063,22 @@ async function persistResults(
       riskFlag: decision?.riskFlag ?? null,
       riskLevel: decision?.riskLevel ?? null,
       decisionReasons: decision?.decisionReasons ?? ['high_coverage'],
-    });
+    };
+  });
+  // Persistance en lot : ~2 requêtes au lieu d'un round-trip Neon par wallet + par achat
+  // (sinon des centaines d'appels séquentiels → dépassement du budget 60 s, blocage à 95 %).
+  await upsertAnalysisBuyerWalletsBatch(walletInputs);
 
-    for (const p of w.purchases) {
-      await insertAnalysisBuyerPurchase({
-        analysisId,
-        walletAddress: w.walletAddress,
-        tokenAddress: p.tokenAddress,
-        tokenName: p.tokenName,
-        purchasedAt: p.purchasedAt,
-        amountSol: p.amountSol,
-      });
-    }
-  }
+  const purchaseInputs = mergedWallets.flatMap((w) =>
+    w.purchases.map((p) => ({
+      walletAddress: w.walletAddress,
+      tokenAddress: p.tokenAddress,
+      tokenName: p.tokenName,
+      purchasedAt: p.purchasedAt,
+      amountSol: p.amountSol,
+    }))
+  );
+  await insertAnalysisBuyerPurchasesBatch(analysisId, purchaseInputs);
 
   return motherAddresses.size;
 }

@@ -415,5 +415,29 @@ describe('runAnalysisPipeline', () => {
         expect.arrayContaining([expect.stringContaining('wallet_centric_recovered')])
       );
     });
+
+    it('persiste tous les buyer wallets en une seule requête batchée (pas un round-trip par wallet)', async () => {
+      mockValidateTokens.mockResolvedValue({
+        validatedTokens: [...TOKENS],
+        buyers: ['W1', 'W2', 'W3'].map((w) => ({
+          walletAddress: w,
+          tokensBought: 1,
+          totalTokens: 2,
+          coveragePercent: 50,
+          purchases: [
+            { walletAddress: w, tokenAddress: 'TokenA', tokenName: 'Token A', purchasedAt: '2025-01-01T00:00:00Z', amountSol: 1 },
+          ],
+        })),
+        stats: { candidateCount: 2, validatedCount: 2, discardedCount: 0, multiTokenWalletCount: 0, failedTokenCount: 0 },
+      });
+
+      const { emit } = makeEmitSpy();
+      await runAnalysisPipeline(ANALYSIS_ID, TOKENS, RUGGER_WALLET, USER_ID, { mode: 'token' }, emit);
+
+      const walletInsertCalls = mockQuery.mock.calls.filter(
+        ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO analysis_buyer_wallets')
+      );
+      expect(walletInsertCalls).toHaveLength(1);
+    });
   });
 });
