@@ -179,6 +179,14 @@ export default function AnalysisProgress({
             ` (${data.discardedCount ?? 0} rejetés, ${data.multiTokenWalletCount ?? 0} wallets multi-token)`;
           setPhase(msg);
           appendLog(msg);
+          const failed = Number(data.failedTokenCount ?? 0);
+          if (failed > 0) {
+            const warn =
+              `⚠ ${failed}/${data.candidateCount ?? 0} token(s) ignoré(s) (rate limit Helius) —` +
+              ' résultat partiel, relancez pour compléter';
+            setPhase(warn);
+            appendLog(warn);
+          }
           break;
         }
         case 'siblings_found': {
@@ -386,7 +394,7 @@ export default function AnalysisProgress({
         <div
           className={cn(
             'h-full rounded-full transition-all duration-500 ease-out',
-            connectionState === 'error' ? 'bg-destructive' : connectionState === 'complete' ? 'bg-green-500' : 'bg-primary'
+            connectionState === 'error' ? 'bg-destructive' : connectionState === 'complete' ? 'bg-foreground' : 'bg-primary'
           )}
           style={{ width: `${Math.min(100, percent)}%` }}
         />

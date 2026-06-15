@@ -772,6 +772,8 @@ async function discoverAndValidateTokenUniverse(
     validatedCount: validated.stats.validatedCount,
     discardedCount: validated.stats.discardedCount,
     multiTokenWalletCount: validated.stats.multiTokenWalletCount,
+    failedTokenCount: validated.stats.failedTokenCount,
+    candidateCount: validated.stats.candidateCount,
   });
   const buyersFoundByToken = new Map<string, number>();
   for (const buyer of validated.buyers) {

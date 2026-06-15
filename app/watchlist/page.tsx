@@ -246,7 +246,7 @@ export default function WatchlistPage() {
                             title={copiedWalletId === w.id ? 'Copié' : 'Copier le wallet'}
                           >
                             {copiedWalletId === w.id ? (
-                              <Check className="size-3.5 text-green-600" />
+                              <Check className="size-3.5 text-foreground" />
                             ) : (
                               <Copy className="size-3.5 text-muted-foreground" />
                             )}

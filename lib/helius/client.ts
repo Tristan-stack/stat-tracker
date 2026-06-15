@@ -1,5 +1,5 @@
 import { countTokenCreationsFromEnhancedTxs } from '@/lib/helius/token-creator-detect';
-import { throttleHelius } from '@/lib/helius/throttle';
+import { throttleHelius, penalizeHelius } from '@/lib/helius/throttle';
 import { sleep, parseRetryAfterHeader, isRetryableFailure } from '@/lib/http/retry';
 
 const HELIUS_BASE = 'https://api.helius.xyz';
@@ -99,27 +99,29 @@ function getBackoffMs(attempt: number, status: number, retryAfterMs?: number | n
 }
 
 /**
- * POST JSON vers Helius avec throttle + retry/backoff (429/5xx/réseau).
- * Boucle unique mutualisée entre les helpers RPC et REST.
+ * Boucle fetch mutualisée : throttle + retry/backoff (429/5xx/réseau) + **contre-pression
+ * globale sur 429** (`penalizeHelius` repousse le créneau partagé pour que les workers
+ * concurrents ralentissent aussi). Partagée par les helpers POST (RPC/REST) et GET
+ * (Enhanced Transactions par adresse).
  */
-async function heliusPost<T>(url: string, body: unknown, label: string): Promise<T> {
+async function heliusFetch<T>(url: string, init: RequestInit, label: string): Promise<T> {
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= HELIUS_MAX_RETRIES; attempt += 1) {
     try {
       await throttleHelius();
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch(url, init);
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         const message = `${label}: HTTP ${res.status} — ${text.slice(0, 300)}`;
         if (attempt < HELIUS_MAX_RETRIES && isRetryableFailure(res.status, message)) {
           const retryAfterMs = parseRetryAfterHeader(res.headers.get('retry-after'));
-          await sleep(getBackoffMs(attempt, res.status, retryAfterMs));
+          const backoffMs = getBackoffMs(attempt, res.status, retryAfterMs);
+          // Repousse le créneau partagé avant d'attendre : le backoff d'un 429 devient
+          // global (sinon les autres workers continuent de taper et reprennent des 429).
+          penalizeHelius(backoffMs);
+          await sleep(backoffMs);
           continue;
         }
         throw new Error(message);
@@ -130,7 +132,7 @@ async function heliusPost<T>(url: string, body: unknown, label: string): Promise
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
       if (attempt < HELIUS_MAX_RETRIES && isRetryableFailure(0, message)) {
-        await sleep(HELIUS_RETRY_BASE_MS * Math.pow(2, attempt));
+        await sleep(getBackoffMs(attempt, 0, null));
         continue;
       }
       throw error;
@@ -138,6 +140,24 @@ async function heliusPost<T>(url: string, body: unknown, label: string): Promise
   }
 
   throw lastError;
+}
+
+/** POST JSON vers Helius (RPC + REST), via la boucle résiliente mutualisée. */
+async function heliusPost<T>(url: string, body: unknown, label: string): Promise<T> {
+  return heliusFetch<T>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    label
+  );
+}
+
+/** GET JSON depuis Helius (Enhanced Transactions par adresse), même politique résiliente. */
+async function heliusGet<T>(url: string, label: string): Promise<T> {
+  return heliusFetch<T>(url, { headers: { Accept: 'application/json' } }, label);
 }
 
 /** `params` JSON-RPC : tableau (RPC classique) ou objet (ex. DAS `getAsset`). */
@@ -205,19 +225,11 @@ export async function getEnhancedTransactionsByAddress(
   address: string,
   opts?: { before?: string; type?: string }
 ): Promise<HeliusEnhancedTransaction[]> {
-  await throttleHelius();
   const params = new URLSearchParams({ 'api-key': getApiKey() });
   if (opts?.before) params.set('before', opts.before);
   if (opts?.type) params.set('type', opts.type);
   const url = `${HELIUS_BASE}/v0/addresses/${address}/transactions?${params.toString()}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Helius addresses/${address}/transactions: HTTP ${res.status} — ${text.slice(0, 300)}`);
-  }
-
-  return (await res.json()) as HeliusEnhancedTransaction[];
+  return heliusGet<HeliusEnhancedTransaction[]>(url, `Helius addresses/${address}/transactions`);
 }
 
 export const DUST_SOL_THRESHOLD = 0.01;

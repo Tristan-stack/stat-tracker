@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Rugger, WalletType, StatusId } from '@/types/rugger';
 import { STATUS_LABELS, STATUS_ORDER, STATUS_FILTER_BUTTON_STYLES } from '@/types/rugger';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { Archive, ArchiveRestore, Pencil, Trash2 } from 'lucide-react';
+import { PnlValue } from '@/lib/format/pnl';
+import { Archive, ArchiveRestore, Pencil, Trash2, X } from 'lucide-react';
 import { StatusBadge } from '@/features/ruggers/components/StatusBadge';
 import { RuggerForm } from '@/features/ruggers/components/RuggerForm';
 import {
@@ -28,11 +29,80 @@ export default function RuggerPage() {
   const [ruggerStatusFilter, setRuggerStatusFilter] = useState<StatusId | 'all'>('all');
   const [showArchived, setShowArchived] = useState(false);
   const [editingRugger, setEditingRugger] = useState<Rugger | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isBulkBusy, setIsBulkBusy] = useState(false);
 
   const { data: ruggers = [] } = useRuggers({ status: ruggerStatusFilter, archived: showArchived });
   const createRugger = useCreateRugger();
   const updateRugger = useUpdateRugger();
   const deleteRugger = useDeleteRugger();
+
+  // Élague la sélection aux ruggers encore visibles (changement de filtre,
+  // suppression, archivage) pour ne jamais agir sur un id hors liste.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(ruggers.map((r) => r.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [ruggers]);
+
+  const selectedCount = selectedIds.size;
+  const allVisibleSelected = ruggers.length > 0 && ruggers.every((r) => selectedIds.has(r.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(ruggers.map((r) => r.id)));
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkArchive = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setIsBulkBusy(true);
+    try {
+      await Promise.all(
+        ids.map((id) => updateRugger.mutateAsync({ id, archived: !showArchived }).catch(() => {}))
+      );
+      clearSelection();
+    } finally {
+      setIsBulkBusy(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (
+      !window.confirm(
+        `Supprimer ${ids.length} rugger${ids.length > 1 ? 's' : ''} ? Les tokens associés seront aussi supprimés.`
+      )
+    ) {
+      return;
+    }
+    setIsBulkBusy(true);
+    try {
+      await Promise.all(ids.map((id) => deleteRugger.mutateAsync(id).catch(() => {})));
+      clearSelection();
+    } finally {
+      setIsBulkBusy(false);
+    }
+  };
 
   const handleToggleArchive = async (rugger: Rugger, e: React.MouseEvent) => {
     e.preventDefault();
@@ -106,7 +176,7 @@ export default function RuggerPage() {
               className={cn(
                 'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
                 showArchived
-                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                  ? 'bg-foreground text-background'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               )}
             >
@@ -115,6 +185,62 @@ export default function RuggerPage() {
             </button>
           </div>
         </div>
+        {ruggers.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border py-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-foreground"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                aria-label="Tout sélectionner"
+              />
+              Tout sélectionner
+            </label>
+            {selectedCount > 0 && (
+              <>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {selectedCount} sélectionné{selectedCount > 1 ? 's' : ''}
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={isBulkBusy}
+                    onClick={() => void handleBulkArchive()}
+                  >
+                    {showArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
+                    {showArchived ? 'Désarchiver' : 'Archiver'} la sélection
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-destructive hover:text-destructive"
+                    disabled={isBulkBusy}
+                    onClick={() => void handleBulkDelete()}
+                  >
+                    <Trash2 className="size-4" />
+                    Supprimer la sélection
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={isBulkBusy}
+                    onClick={clearSelection}
+                  >
+                    <X className="size-4" />
+                    Annuler
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {ruggers.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-6 py-12 text-center text-muted-foreground">
             {ruggerStatusFilter === 'all'
@@ -125,7 +251,12 @@ export default function RuggerPage() {
           <ul className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {ruggers.map((rugger) => (
               <li key={rugger.id} className="min-w-0 w-full">
-                <Card className="h-full w-full min-w-0 overflow-hidden transition-colors hover:border-primary hover:bg-muted/50">
+                <Card
+                  className={cn(
+                    'h-full w-full min-w-0 overflow-hidden transition-colors hover:border-primary hover:bg-muted/50',
+                    selectedIds.has(rugger.id) && 'border-foreground bg-muted/40'
+                  )}
+                >
                   <Link
                     href={`/rugger/${rugger.id}`}
                     className="block min-w-0 w-full overflow-hidden no-underline [&_.rugger-desc]:no-underline [&_.rugger-desc]:text-muted-foreground [&_.rugger-desc]:cursor-default"
@@ -137,16 +268,7 @@ export default function RuggerPage() {
                         </span>
                         <div className="flex shrink-0 gap-1.5">
                           <StatusBadge statusId={rugger.statusId} />
-                          <span
-                            className={cn(
-                              'rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide',
-                              rugger.walletType === 'exchange' && 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                              rugger.walletType === 'mother' && 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                              rugger.walletType === 'simple' && 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
-                              rugger.walletType === 'buyer' &&
-                                'bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-200'
-                            )}
-                          >
+                          <span className="rounded border border-border bg-muted px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-foreground">
                             {walletTypeLabel[rugger.walletType]}
                           </span>
                         </div>
@@ -174,21 +296,27 @@ export default function RuggerPage() {
                       <span className="text-muted-foreground">
                         {rugger.tokenCount} token{rugger.tokenCount !== 1 ? 's' : ''}
                       </span>
-                      <span
-                        className={cn(
-                          'font-medium',
-                          rugger.avgMaxGainPercent >= 0
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-red-600 dark:text-red-400'
-                        )}
-                      >
-                        {rugger.tokenCount === 0
-                          ? '–'
-                          : `${rugger.avgMaxGainPercent >= 0 ? '+' : ''}${rugger.avgMaxGainPercent.toFixed(1)} % max`}
-                      </span>
+                      {rugger.tokenCount === 0 ? (
+                        <span className="font-medium">–</span>
+                      ) : (
+                        <PnlValue value={rugger.avgMaxGainPercent}>
+                          {`${rugger.avgMaxGainPercent >= 0 ? '+' : ''}${rugger.avgMaxGainPercent.toFixed(1)} % max`}
+                        </PnlValue>
+                      )}
                     </CardContent>
                   </Link>
-                  <div className="flex justify-end gap-1 border-t px-4 py-2">
+                  <div className="flex items-center justify-between gap-1 border-t px-4 py-2">
+                    <label className="flex cursor-pointer items-center gap-2 pl-1 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-foreground"
+                        checked={selectedIds.has(rugger.id)}
+                        onChange={() => toggleSelect(rugger.id)}
+                        aria-label={`Sélectionner le rugger ${rugger.name ?? rugger.walletAddress ?? rugger.id}`}
+                      />
+                      Sélectionner
+                    </label>
+                    <div className="flex gap-1">
                     <Button
                       type="button"
                       variant="ghost"
@@ -210,8 +338,8 @@ export default function RuggerPage() {
                       className={cn(
                         'size-8',
                         rugger.archived
-                          ? 'text-amber-600 hover:text-amber-700'
-                          : 'text-muted-foreground hover:text-amber-600'
+                          ? 'text-foreground hover:text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
                       )}
                       onClick={(e) => handleToggleArchive(rugger, e)}
                       aria-label={rugger.archived ? 'Désarchiver' : 'Archiver'}
@@ -229,6 +357,7 @@ export default function RuggerPage() {
                     >
                       <Trash2 className="size-4" />
                     </Button>
+                    </div>
                   </div>
                 </Card>
               </li>

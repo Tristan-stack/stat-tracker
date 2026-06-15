@@ -105,10 +105,11 @@ const MAX_SORT_CRITERIA = 3;
 const DEFAULT_SORTS: SortCriterion[] = [{ field: 'coverage', direction: 'desc' }];
 
 function sourceBadge(source: WalletSource) {
+  // Achromatique : signal lu au label + intensité du fill (both = signal le plus fort).
   const styles: Record<WalletSource, string> = {
-    token: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-    funding: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-    both: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    token: 'border border-border text-muted-foreground',
+    funding: 'bg-muted text-foreground',
+    both: 'bg-foreground text-background',
   };
   return (
     <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', styles[source])}>
@@ -132,9 +133,10 @@ function formatDuration(days: number) {
 }
 
 function getRiskBadgeClass(level: 'low' | 'medium' | 'high' | null): string {
-  if (level === 'high') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
-  if (level === 'medium') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
-  if (level === 'low') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+  // Achromatique : niveau de risque lu via l'intensité du fill (high = ink plein).
+  if (level === 'high') return 'bg-foreground text-background';
+  if (level === 'medium') return 'bg-muted text-foreground';
+  if (level === 'low') return 'border border-border text-muted-foreground';
   return 'bg-muted text-muted-foreground';
 }
 
@@ -347,7 +349,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
               const crossMatch = crossMatches.get(w.walletAddress);
               return (
                 <Fragment key={w.id}>
-                  <tr className={cn('group border-b hover:bg-muted/30 cursor-pointer', crossMatch && 'bg-amber-50/50 dark:bg-amber-950/10')}
+                  <tr className={cn('group border-b hover:bg-muted/30 cursor-pointer', crossMatch && 'bg-muted/40')}
                     onClick={() => onWalletClick?.(w.walletAddress)}>
                     <td className="px-3 py-2 tabular-nums text-muted-foreground">{rank}</td>
                     <td className="px-3 py-2">
@@ -360,10 +362,10 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                           title="Copier l'adresse"
                         >
                           {copiedAddress === w.walletAddress
-                            ? <Check className="size-3 text-green-500" />
+                            ? <Check className="size-3 text-foreground" />
                             : <Copy className="size-3 text-muted-foreground" />}
                         </button>
-                        {crossMatch && <span className="size-1.5 rounded-full bg-amber-500 shrink-0" title="Multi-rugger" />}
+                        {crossMatch && <span className="size-1.5 rounded-full bg-foreground shrink-0" title="Multi-rugger" />}
                       </div>
                     </td>
                     <td className="px-3 py-2">{sourceBadge(w.source)}</td>
@@ -399,7 +401,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                     </td>
                   </tr>
                   {isExpanded && (
-                    <tr className={cn('border-b bg-muted/20', crossMatch && 'bg-amber-50/30 dark:bg-amber-950/10')}>
+                    <tr className={cn('border-b bg-muted/20', crossMatch && 'bg-muted/40')}>
                       <td colSpan={14} className="p-0">
                         <div
                           className="border-t border-border/60 px-3 py-3 sm:px-4"
@@ -418,7 +420,7 @@ export default function LeaderboardTable({ ruggerId, analysisId, onWalletClick }
                                   title="Copier l'adresse"
                                 >
                                   {copiedAddress === w.walletAddress
-                                    ? <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                                    ? <Check className="size-3.5 text-foreground" />
                                     : <Copy className="size-3.5 text-muted-foreground" />}
                                 </button>
                                 <button

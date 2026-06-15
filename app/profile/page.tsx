@@ -165,7 +165,7 @@ export default function ProfilePage() {
             </Button>
           </form>
           {nameError && <p className="mt-2 text-sm text-destructive">{nameError}</p>}
-          {nameSuccess && <p className="mt-2 text-sm text-green-600 dark:text-green-400">{nameSuccess}</p>}
+          {nameSuccess && <p className="mt-2 text-sm font-medium text-foreground">{nameSuccess}</p>}
         </CardContent>
       </Card>
 
@@ -200,7 +200,7 @@ export default function ProfilePage() {
             </Button>
           </form>
           {imageError && <p className="mt-2 text-sm text-destructive">{imageError}</p>}
-          {imageSuccess && <p className="mt-2 text-sm text-green-600 dark:text-green-400">{imageSuccess}</p>}
+          {imageSuccess && <p className="mt-2 text-sm font-medium text-foreground">{imageSuccess}</p>}
         </CardContent>
       </Card>
     </div>

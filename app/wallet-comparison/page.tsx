@@ -444,7 +444,7 @@ export default function WalletComparisonPage() {
                       onClick={() => void copyWalletAddress(h.address)}
                     >
                       {copiedWalletHint === h.address ? (
-                        <Check className="size-4 text-green-500" />
+                        <Check className="size-4 text-foreground" />
                       ) : (
                         <Copy className="size-4" />
                       )}
@@ -562,7 +562,7 @@ export default function WalletComparisonPage() {
                         <div className="flex gap-1">
                           <Button type="button" size="sm" variant="outline" onClick={() => void copyWalletAddress(w)}>
                             {copiedWalletHint === w ? (
-                              <Check className="size-3.5 text-green-500" />
+                              <Check className="size-3.5 text-foreground" />
                             ) : (
                               <Copy className="size-3.5" />
                             )}
@@ -622,7 +622,7 @@ export default function WalletComparisonPage() {
                                 onClick={() => void copyWalletAddress(row.walletAddress)}
                               >
                                 {copiedWalletHint === row.walletAddress ? (
-                                  <Check className="size-3 text-green-500" />
+                                  <Check className="size-3 text-foreground" />
                                 ) : (
                                   <Copy className="size-3" />
                                 )}
@@ -676,7 +676,7 @@ export default function WalletComparisonPage() {
                     onClick={() => void copyWalletAddress(w)}
                   >
                     {copiedWalletHint === w ? (
-                      <Check className="size-3.5 text-green-500" />
+                      <Check className="size-3.5 text-foreground" />
                     ) : (
                       <Copy className="size-3.5" />
                     )}
@@ -955,8 +955,8 @@ export default function WalletComparisonPage() {
       {result && (
         <div className="space-y-4">
           {result.skippedWallets.length > 0 && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-              <p className="font-medium text-amber-800 dark:text-amber-200">
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <p className="font-medium text-foreground">
                 {result.skippedWallets.length} wallet(s) ignoré(s) (erreur GMGN)
               </p>
               <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
@@ -1020,7 +1020,7 @@ export default function WalletComparisonPage() {
                             <div className="flex shrink-0 flex-wrap gap-1">
                               <Button type="button" size="sm" variant="outline" onClick={() => void copyWalletAddress(w)}>
                                 {copiedWalletHint === w ? (
-                                  <Check className="size-4 text-green-500" />
+                                  <Check className="size-4 text-foreground" />
                                 ) : (
                                   <Copy className="size-4" />
                                 )}
@@ -1090,7 +1090,7 @@ export default function WalletComparisonPage() {
                                   onClick={() => void copyWalletAddress(row.walletAddress)}
                                 >
                                   {copiedWalletHint === row.walletAddress ? (
-                                    <Check className="size-3.5 text-green-500" />
+                                    <Check className="size-3.5 text-foreground" />
                                   ) : (
                                     <Copy className="size-3.5" />
                                   )}
@@ -1151,7 +1151,7 @@ export default function WalletComparisonPage() {
                                     onClick={() => void copyWalletAddress(m.winnerWallet)}
                                   >
                                     {copiedWalletHint === m.winnerWallet ? (
-                                      <Check className="size-3 text-green-500" />
+                                      <Check className="size-3 text-foreground" />
                                     ) : (
                                       <Copy className="size-3" />
                                     )}
@@ -1172,7 +1172,7 @@ export default function WalletComparisonPage() {
                                         onClick={() => void copyWalletAddress(e.walletAddress)}
                                       >
                                         {copiedWalletHint === e.walletAddress ? (
-                                          <Check className="size-3 text-green-500" />
+                                          <Check className="size-3 text-foreground" />
                                         ) : (
                                           <Copy className="size-3" />
                                         )}

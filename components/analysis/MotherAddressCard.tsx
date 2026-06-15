@@ -30,7 +30,7 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
         {mothers.map((m) => (
           <div key={m.id} className={cn(
             'rounded-lg border p-3 space-y-2',
-            m.validated ? 'border-green-500/40 bg-green-500/5' : 'border-border'
+            m.validated ? 'border-foreground bg-muted/30' : 'border-border'
           )}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -46,7 +46,7 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
                 </button>
               </div>
               {m.validated && (
-                <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                <span className="shrink-0 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-medium text-background">
                   Validée
                 </span>
               )}
@@ -56,7 +56,7 @@ export default function MotherAddressCard({ ruggerId, analysisId }: MotherAddres
             </p>
             <div className="flex gap-1.5">
               {!m.validated && (
-                <Button type="button" variant="outline" size="sm" className="gap-1 text-green-600 hover:text-green-600" onClick={() => void handleValidate(m.id, true)}>
+                <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => void handleValidate(m.id, true)}>
                   <Check className="size-3.5" />Valider
                 </Button>
               )}

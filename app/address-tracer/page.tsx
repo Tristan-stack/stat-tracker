@@ -114,7 +114,7 @@ function CreatorStar({ count, className = '' }: { count: number; className?: str
       title={`Créateur on-chain de ${count} token(s) (Helius DAS — Metaplex creators + update authority)`}
       aria-label={`Créateur on-chain de ${count} tokens`}
     >
-      <Star className="size-3.5 fill-green-500 text-green-500" />
+      <Star className="size-3.5 fill-foreground text-foreground" />
     </span>
   );
 }
@@ -504,8 +504,8 @@ export default function AddressTracerPage() {
       )}
 
       {startCreatorCount > 0 && hops.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-green-500/40 bg-green-500/5 px-3 py-2 text-xs">
-          <Star className="size-3.5 fill-green-500 text-green-500" />
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-foreground bg-muted/30 px-3 py-2 text-xs">
+          <Star className="size-3.5 fill-foreground text-foreground" />
           <span>
             Adresse de départ{' '}
             <a
@@ -518,7 +518,7 @@ export default function AddressTracerPage() {
               {truncateAddress(startAddress.trim())}
             </a>{' '}
             : créateur on-chain de{' '}
-            <span className="font-semibold text-green-700 dark:text-green-400">{startCreatorCount}</span>{' '}
+            <span className="font-semibold text-foreground">{startCreatorCount}</span>{' '}
             token(s).
           </span>
         </div>
@@ -570,7 +570,7 @@ export default function AddressTracerPage() {
                     <CreatorStar count={creatorCountFor(hop.to)} />
                     {hop.deobfuscated && (
                       <span
-                        className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+                        className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground"
                         title={`Destinataire apparent : ${hop.apparentTo}`}
                       >
                         <ShieldAlert className="size-3" />
@@ -596,7 +596,7 @@ export default function AddressTracerPage() {
                       title="Copier le destinataire"
                     >
                       {copied === hop.to ? (
-                        <Check className="size-3.5 text-green-500" />
+                        <Check className="size-3.5 text-foreground" />
                       ) : (
                         <Copy className="size-3.5" />
                       )}
@@ -638,7 +638,7 @@ export default function AddressTracerPage() {
                 title="Copier l'adresse finale"
               >
                 {copied === finalAddress ? (
-                  <Check className="size-4 text-green-500" />
+                  <Check className="size-4 text-foreground" />
                 ) : (
                   <Copy className="size-4" />
                 )}

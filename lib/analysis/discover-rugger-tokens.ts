@@ -1,3 +1,4 @@
+import type { TokenBuyer } from '@/types/analysis';
 import { runWithConcurrency } from '@/lib/analysis/async-pool';
 import { type DiscoveredBuyer } from '@/lib/analysis/discover-buyers';
 import { isKnownExchange } from '@/lib/helius/exchange-addresses';
@@ -35,6 +36,8 @@ export interface TokenValidationStats {
   validatedCount: number;
   discardedCount: number;
   multiTokenWalletCount: number;
+  /** Tokens dont la récupération des buyers a échoué (429/réseau) → résultat partiel. */
+  failedTokenCount: number;
 }
 
 export interface TokenValidationResult {
@@ -146,15 +149,25 @@ export async function validateTokensByCrossReference(
   const excludeSet = new Set((opts?.excludeWallets ?? []).map((wallet) => wallet.toLowerCase()));
 
   let completed = 0;
+  let failedTokenCount = 0;
   const total = allCandidates.length;
   const tokenBuyerRows = await runWithConcurrency(allCandidates, concurrency, async (token) => {
     // Budget temps dépassé : on saute (résultat partiel, évite le timeout 60 s Hobby).
-    if (opts?.deadline !== undefined && Date.now() > opts.deadline) {
-      completed += 1;
-      opts?.onProgress?.(completed, total);
-      return { token, buyers: [] };
+    const overBudget = opts?.deadline !== undefined && Date.now() > opts.deadline;
+    let buyers: TokenBuyer[] = [];
+    if (!overBudget) {
+      try {
+        buyers = await getTokenBuyers(token.address, { buyerLimit });
+      } catch (error) {
+        // Échec d'un token (ex. 429 résiduel) : dégrader en résultat partiel plutôt que
+        // faire échouer toute l'analyse — runWithConcurrency rejette via Promise.all au 1er throw.
+        failedTokenCount += 1;
+        console.warn(
+          `[cross-validation] token ${token.address.slice(0, 8)}… ignoré:`,
+          error instanceof Error ? error.message : error
+        );
+      }
     }
-    const buyers = await getTokenBuyers(token.address, { buyerLimit });
     completed += 1;
     opts?.onProgress?.(completed, total);
     return { token, buyers };
@@ -217,6 +230,7 @@ export async function validateTokensByCrossReference(
       validatedCount: validatedTokens.length,
       discardedCount: Math.max(0, allCandidates.length - validatedTokens.length),
       multiTokenWalletCount: multiTokenWallets.size,
+      failedTokenCount,
     },
   };
 }

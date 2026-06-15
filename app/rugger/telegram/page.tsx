@@ -1077,11 +1077,11 @@ export default function RuggerTelegramPage() {
                     <li key={fav.mint} className="flex flex-wrap items-start gap-2 p-2.5">
                       <button
                         type="button"
-                        className="-m-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-amber-500 hover:bg-muted hover:text-amber-600"
+                        className="-m-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-muted hover:text-foreground"
                         aria-label="Retirer des favoris"
                         onClick={() => removeFavoriteMint(fav.mint)}
                       >
-                        <Star className="size-4 fill-amber-500 text-amber-500" />
+                        <Star className="size-4 fill-foreground text-foreground" />
                       </button>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-medium">{fav.token_name?.trim() || '—'}</p>

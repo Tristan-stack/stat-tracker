@@ -7,6 +7,7 @@ import { getMaxGainPercent, getMaxLossPercent } from '@/lib/token-calculations';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import type { Token } from '@/types/token';
 import { StatsSummary } from '@/components/StatsSummary';
+import { PnlValue } from '@/lib/format/pnl';
 import WalletActions from '@/components/analysis/WalletActions';
 import { Check, Copy, ExternalLink, LineChart, Loader2, X } from 'lucide-react';
 import {
@@ -148,7 +149,7 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
             >
               <span className="truncate">{walletAddress}</span>
               {copiedWallet ? (
-                <Check className="size-3.5 shrink-0 text-green-500" />
+                <Check className="size-3.5 shrink-0 text-foreground" />
               ) : (
                 <Copy className="size-3.5 shrink-0 text-muted-foreground" />
               )}
@@ -276,7 +277,7 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                                 </div>
                               </div>
                               {copiedTokenMint === t.tokenAddress ? (
-                                <Check className="size-3.5 shrink-0 text-green-600 dark:text-green-400" />
+                                <Check className="size-3.5 shrink-0 text-foreground" />
                               ) : (
                                 <Copy className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
                               )}
@@ -294,21 +295,11 @@ export default function WalletGmgnTokenPanel({ walletAddress, fromMs, toMs, onCl
                           <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
                             {formatGmgnDecimalString(t.low)}
                           </td>
-                          <td
-                            className={cn(
-                              'px-3 py-2 text-right tabular-nums',
-                              gain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                            )}
-                          >
-                            {formatGainLoss(gain)}
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            <PnlValue value={gain}>{formatGainLoss(gain)}</PnlValue>
                           </td>
-                          <td
-                            className={cn(
-                              'px-3 py-2 text-right tabular-nums',
-                              loss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                            )}
-                          >
-                            {formatGainLoss(loss)}
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            <PnlValue value={loss}>{formatGainLoss(loss)}</PnlValue>
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-1">

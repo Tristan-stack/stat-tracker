@@ -258,7 +258,7 @@ export function CreateRuggerFromTokens({ tokens }: CreateRuggerFromTokensProps) 
                     disabled={isSubmitting}
                   />
                   {walletType === 'buyer' && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                    <p className="text-xs text-muted-foreground">
                       Adresse Solana du wallet acheteur pour le montant du 1er achat par token.
                     </p>
                   )}

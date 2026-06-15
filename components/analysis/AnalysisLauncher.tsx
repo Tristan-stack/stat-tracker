@@ -217,7 +217,7 @@ export default function AnalysisLauncher({ tokenCount, onLaunch, isDisabled }: A
             </div>
           </div>
           {showMcapMigrationWarning && (
-            <p className="text-xs text-amber-600">
+            <p className="text-xs font-medium text-foreground">
               Attention: tu as saisi une grande valeur. En mode xK, 15000 signifie 15 000 000.
             </p>
           )}

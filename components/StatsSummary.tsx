@@ -36,6 +36,7 @@ import {
 import type { Token, ExitMode } from '@/types/token';
 import { Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { PnlValue } from '@/lib/format/pnl';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -408,14 +409,14 @@ export function StatsSummary({
         <div className="grid gap-6 sm:gap-8 sm:grid-cols-2 lg:grid-cols-6">
           <div className="min-w-0 sm:col-span-2 lg:col-span-1">
             <p className="truncate text-sm font-medium text-muted-foreground">Ma rentabilité réaliste</p>
-            <p
-              className={`mt-2 text-3xl font-bold tabular-nums sm:text-4xl ${
-                averageRealisticPercent >= 0
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
-              }`}
-            >
-              {metrics.tokenCount === 0 ? '—' : formatPercent(averageRealisticPercent)}
+            <p className="mt-2 text-3xl tabular-nums sm:text-4xl">
+              {metrics.tokenCount === 0 ? (
+                '—'
+              ) : (
+                <PnlValue value={averageRealisticPercent} className="text-3xl font-bold sm:text-4xl">
+                  {formatPercent(averageRealisticPercent)}
+                </PnlValue>
+              )}
             </p>
             {metrics.tokenCount > 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
@@ -435,14 +436,26 @@ export function StatsSummary({
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">Perte max moyenne</p>
-            <p className="mt-2 text-2xl font-semibold text-red-600 dark:text-red-400">
-              {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent)}
+            <p className="mt-2 text-2xl tabular-nums">
+              {metrics.tokenCount === 0 ? (
+                '—'
+              ) : (
+                <PnlValue value={metrics.averageMaxLossPercent} className="text-2xl">
+                  {formatPercent(metrics.averageMaxLossPercent)}
+                </PnlValue>
+              )}
             </p>
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">Stop loss conseillé</p>
-            <p className="mt-2 text-2xl font-semibold text-orange-600 dark:text-orange-400">
-              {metrics.tokenCount === 0 ? '—' : formatPercent(metrics.averageMaxLossPercent * 0.65)}
+            <p className="mt-2 text-2xl tabular-nums">
+              {metrics.tokenCount === 0 ? (
+                '—'
+              ) : (
+                <PnlValue value={metrics.averageMaxLossPercent * 0.65} className="text-2xl">
+                  {formatPercent(metrics.averageMaxLossPercent * 0.65)}
+                </PnlValue>
+              )}
             </p>
             {metrics.tokenCount > 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
@@ -452,14 +465,14 @@ export function StatsSummary({
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">Objectif sortie moyen (ce que tu vises)</p>
-            <p
-              className={`mt-2 text-2xl font-semibold ${
-                metrics.averageOptimalTargetPercent >= 0
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
-              }`}
-            >
-              {metrics.tokenCount === 0 ? '-' : `${formatPercent(metrics.averageOptimalTargetPercent)}`}
+            <p className="mt-2 text-2xl tabular-nums">
+              {metrics.tokenCount === 0 ? (
+                '-'
+              ) : (
+                <PnlValue value={metrics.averageOptimalTargetPercent} className="text-2xl">
+                  {formatPercent(metrics.averageOptimalTargetPercent)}
+                </PnlValue>
+              )}
             </p>
           </div>
           <div className="min-w-0">
@@ -475,7 +488,7 @@ export function StatsSummary({
           {optimalPercent && (
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">Sortie % équilibrée</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+              <p className="mt-2 text-2xl font-semibold tabular-nums">
                 {formatPercent(optimalPercent.value)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -489,7 +502,7 @@ export function StatsSummary({
           {optimalMcap && (
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">Sortie MCap équilibrée</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+              <p className="mt-2 text-2xl font-semibold tabular-nums">
                 {formatNum(optimalMcap.value, 0)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -503,7 +516,7 @@ export function StatsSummary({
           {recommendedEntryMcapMin && (
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée min conseillée</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+              <p className="mt-2 text-2xl font-semibold tabular-nums">
                 {formatNum(recommendedEntryMcapMin.value, 1)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -517,7 +530,7 @@ export function StatsSummary({
           {recommendedEntryMcapMax && (
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">MCAP entrée max conseillée</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+              <p className="mt-2 text-2xl font-semibold tabular-nums">
                 {formatNum(recommendedEntryMcapMax.value, 1)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -540,7 +553,7 @@ export function StatsSummary({
                 </p>
               </div>
               <p className="text-sm">
-                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                <span className="font-semibold text-foreground">
                   {snipeSuggestion.mode === 'percent' && 'Privilégier viser en %'}
                   {snipeSuggestion.mode === 'mcap' && 'Privilégier viser en MCap (niveau de prix)'}
                   {snipeSuggestion.mode === 'tie' && 'Les deux modes sont proches'}
@@ -590,31 +603,21 @@ export function StatsSummary({
 
         {metrics.tokenCount > 0 && (
           <div
-            className={`flex flex-wrap items-center gap-4 rounded-lg border px-4 py-3 ${
-              acceptance.meetsAllCriteria
-                ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30'
-                : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30'
-            }`}
+            className={cn(
+              'flex flex-wrap items-center gap-4 border px-4 py-3',
+              acceptance.meetsAllCriteria ? 'border-foreground' : 'border-border'
+            )}
           >
-            <p className="text-sm font-medium">
+            <p className="text-sm font-semibold">
+              <span aria-hidden className="mr-1.5">{acceptance.meetsAllCriteria ? '✓' : '✕'}</span>
               {acceptance.meetsAllCriteria ? 'Critères d\'acceptation remplis' : 'Critères d\'acceptation non remplis'}
             </p>
-            <span
-              className={`text-sm ${
-                acceptance.meetsWinRateCriteria
-                  ? 'text-green-700 dark:text-green-400'
-                  : 'text-red-700 dark:text-red-400'
-              }`}
-            >
+            <span className="text-sm">
+              <span aria-hidden className="mr-1">{acceptance.meetsWinRateCriteria ? '✓' : '✕'}</span>
               Win rate : {formatNum(acceptance.winRate, 1)} % {acceptance.meetsWinRateCriteria ? '≥' : '<'} 45 %
             </span>
-            <span
-              className={`text-sm ${
-                acceptance.meetsLossStreakCriteria
-                  ? 'text-green-700 dark:text-green-400'
-                  : 'text-red-700 dark:text-red-400'
-              }`}
-            >
+            <span className="text-sm">
+              <span aria-hidden className="mr-1">{acceptance.meetsLossStreakCriteria ? '✓' : '✕'}</span>
               Pertes consécutives max : {acceptance.maxConsecutiveLosses}{' '}
               {acceptance.meetsLossStreakCriteria ? '≤' : '>'} 6
               {acceptance.maxConsecutiveLosses > 0 && (
@@ -662,7 +665,7 @@ export function StatsSummary({
                       </p>
                     )}
                     {solUsdFetchState === 'error' && (
-                      <p className="text-xs text-amber-700 dark:text-amber-400">Cours SOL indisponible</p>
+                      <p className="text-xs text-muted-foreground">Cours SOL indisponible</p>
                     )}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -728,9 +731,9 @@ export function StatsSummary({
                   </p>
                   <p className="text-sm">
                     % combiné :{' '}
-                    <span className={`font-semibold ${realisticPercentSum >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <PnlValue value={realisticPercentSum}>
                       {formatPercent(realisticPercentSum)}
-                    </span>
+                    </PnlValue>
                   </p>
                   <p className="text-sm">
                     Investi total:{' '}
@@ -740,9 +743,9 @@ export function StatsSummary({
                     <>
                       <p className="text-sm">
                         Bénéfice avant frais:{' '}
-                        <span className={`font-semibold ${simpleRealistic.gainBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        <PnlValue value={simpleRealistic.gainBeforeFees}>
                           {simpleRealistic.gainBeforeFees >= 0 ? '+' : ''}{formatNum(simpleRealistic.gainBeforeFees, 2)}
-                        </span>
+                        </PnlValue>
                       </p>
                       <p className="text-sm">
                         Frais totaux ({FEE_EUR_PER_PAIR} € × {tokensWithMetrics.length} tokens × {simpleRealistic.walletCount} wallet{simpleRealistic.walletCount !== 1 ? 's' : ''}):{' '}
@@ -752,15 +755,15 @@ export function StatsSummary({
                   )}
                   <p className="text-sm">
                     Montant final:{' '}
-                    <span className={`font-semibold ${simpleRealistic.finalAmount >= simpleRealistic.investedTotal ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <PnlValue value={simpleRealistic.finalAmount - simpleRealistic.investedTotal}>
                       {formatNum(simpleRealistic.finalAmount, 2)}
-                    </span>
+                    </PnlValue>
                   </p>
                   <p className="text-sm">
                     Bénéfice / Perte:{' '}
-                    <span className={`font-semibold ${simpleRealistic.netGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <PnlValue value={simpleRealistic.netGain}>
                       {simpleRealistic.netGain >= 0 ? '+' : ''}{formatNum(simpleRealistic.netGain, 2)}
-                    </span>
+                    </PnlValue>
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {reachedCount} token{reachedCount !== 1 ? 's' : ''} à l&apos;objectif ({formatPercent(tokensWithMetrics.filter((t) => t.targetReached).reduce((s, t) => s + t.targetExitPercent, 0))}),{' '}
@@ -775,36 +778,24 @@ export function StatsSummary({
                     </p>
                     <p className="text-sm">
                       Meilleur jour:{' '}
-                      <span className="font-semibold text-green-600 dark:text-green-400">
+                      <PnlValue value={primaryDaySummary.bestDay.pnl}>
                         {primaryDaySummary.bestDay.dayLabel} · {primaryDaySummary.bestDay.pnl >= 0 ? '+' : ''}
                         {formatNum(primaryDaySummary.bestDay.pnl, 2)} EUR
-                      </span>
+                      </PnlValue>
                     </p>
                     <p className="text-sm">
                       Pire jour:{' '}
-                      <span
-                        className={`font-semibold ${
-                          primaryDaySummary.worstDay.pnl >= 0
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}
-                      >
+                      <PnlValue value={primaryDaySummary.worstDay.pnl}>
                         {primaryDaySummary.worstDay.dayLabel} · {primaryDaySummary.worstDay.pnl >= 0 ? '+' : ''}
                         {formatNum(primaryDaySummary.worstDay.pnl, 2)} EUR
-                      </span>
+                      </PnlValue>
                     </p>
                     <p className="text-sm">
                       Journée moyenne:{' '}
-                      <span
-                        className={`font-semibold ${
-                          primaryDaySummary.averageDayPnl >= 0
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}
-                      >
+                      <PnlValue value={primaryDaySummary.averageDayPnl}>
                         {primaryDaySummary.averageDayPnl >= 0 ? '+' : ''}
                         {formatNum(primaryDaySummary.averageDayPnl, 2)} EUR
-                      </span>
+                      </PnlValue>
                     </p>
                   </div>
                 )}
@@ -983,9 +974,9 @@ export function StatsSummary({
                           <>
                             <p className="text-sm">
                               Benefice avant frais:{' '}
-                              <span className={`font-semibold ${strategy.result.profitBeforeFees >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              <PnlValue value={strategy.result.profitBeforeFees}>
                                 {strategy.result.profitBeforeFees >= 0 ? '+' : ''}{formatNum(strategy.result.profitBeforeFees, 2)}
-                              </span>
+                              </PnlValue>
                             </p>
                             <p className="text-sm">
                               Frais totaux ({FEE_EUR_PER_PAIR} EUR x {tokensWithMetrics.length} x {optimizedRevenue ? effectiveWalletAmounts.length : 1} wallet{optimizedRevenue && effectiveWalletAmounts.length !== 1 ? 's' : ''}):{' '}
@@ -995,41 +986,35 @@ export function StatsSummary({
                         )}
                         <p className="text-sm">
                           Montant final:{' '}
-                          <span className={`font-semibold ${strategy.result.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          <PnlValue value={strategy.result.profit}>
                             {formatNum(strategy.result.totalReceived - strategy.result.totalFees, 2)}
-                          </span>
+                          </PnlValue>
                         </p>
                         <p className="text-sm">
                           Benefice / Perte:{' '}
-                          <span className={`font-semibold ${strategy.result.profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                          <PnlValue value={strategy.result.profit}>
                             {strategy.result.profit >= 0 ? '+' : ''}{formatNum(strategy.result.profit, 2)} ({strategy.result.profitPercent >= 0 ? '+' : ''}{formatNum(strategy.result.profitPercent, 2)} %)
-                          </span>
+                          </PnlValue>
                         </p>
                         {daySummary && (
                           <>
                             <p className="text-sm">
                               Meilleur jour:{' '}
-                              <span className="font-semibold text-green-600 dark:text-green-400">
+                              <PnlValue value={daySummary.bestDay.pnl}>
                                 {daySummary.bestDay.dayLabel} ·
                                 {' '}
                                 {daySummary.bestDay.pnl >= 0 ? '+' : ''}
                                 {formatNum(daySummary.bestDay.pnl, 2)} EUR
-                              </span>
+                              </PnlValue>
                             </p>
                             <p className="text-sm">
                               Pire jour:{' '}
-                              <span
-                                className={`font-semibold ${
-                                  daySummary.worstDay.pnl >= 0
-                                    ? 'text-green-600 dark:text-green-400'
-                                    : 'text-red-600 dark:text-red-400'
-                                }`}
-                              >
+                              <PnlValue value={daySummary.worstDay.pnl}>
                                 {daySummary.worstDay.dayLabel} ·
                                 {' '}
                                 {daySummary.worstDay.pnl >= 0 ? '+' : ''}
                                 {formatNum(daySummary.worstDay.pnl, 2)} EUR
-                              </span>
+                              </PnlValue>
                             </p>
                           </>
                         )}

@@ -9,12 +9,21 @@ vi.mock('@/lib/gmgn/pumpfun-mint', () => ({
   isPumpfunMint: vi.fn(),
 }));
 
+vi.mock('@/lib/helius/token-buyers', () => ({
+  getTokenBuyers: vi.fn(),
+}));
+
 import { getEnhancedTransactionsByAddress } from '@/lib/helius/client';
 import { isPumpfunMint } from '@/lib/gmgn/pumpfun-mint';
-import { discoverRuggerTokens } from '@/lib/analysis/discover-rugger-tokens';
+import { getTokenBuyers } from '@/lib/helius/token-buyers';
+import {
+  discoverRuggerTokens,
+  validateTokensByCrossReference,
+} from '@/lib/analysis/discover-rugger-tokens';
 
 const mockGetTxs = vi.mocked(getEnhancedTransactionsByAddress);
 const mockIsPumpfunMint = vi.mocked(isPumpfunMint);
+const mockGetTokenBuyers = vi.mocked(getTokenBuyers);
 
 const RUGGER = 'RuggerWallet111111111111111111111111111';
 const PUMP_MINT = 'PumpMint11111111111111111111111111111';
@@ -96,5 +105,37 @@ describe('discoverRuggerTokens', () => {
 
     expect(tokens).toHaveLength(0);
     expect(mockIsPumpfunMint).toHaveBeenCalledWith(RAY_MINT);
+  });
+});
+
+describe('validateTokensByCrossReference — résilience par token', () => {
+  const TOKEN_A = 'TokenA1111111111111111111111111111111';
+  const TOKEN_B = 'TokenB2222222222222222222222222222222';
+
+  it('un token en échec (429) dégrade en partiel sans faire planter la validation', async () => {
+    mockGetTokenBuyers.mockImplementation(async (mint: string) => {
+      if (mint === TOKEN_B) throw new Error('Helius REST /v0/transactions: HTTP 429');
+      return [
+        {
+          walletAddress: 'WalletX',
+          tokenAddress: mint,
+          tokenName: null,
+          purchasedAt: '2025-01-01T00:00:00Z',
+          amountSol: 1,
+        },
+      ];
+    });
+
+    const result = await validateTokensByCrossReference(
+      [
+        { address: TOKEN_A, name: null },
+        { address: TOKEN_B, name: null },
+      ],
+      new Set<string>(),
+      { buyerLimit: 50, concurrency: 2 }
+    );
+
+    expect(result.stats.candidateCount).toBe(2);
+    expect(result.stats.failedTokenCount).toBe(1);
   });
 });

@@ -6,6 +6,7 @@ import { appendTokenDateQueryParams, type TokenPurchaseFilter } from '@/lib/toke
 import type { Token } from '@/types/token';
 import type { StatusId } from '@/types/rugger';
 import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
+import type { DexPaidEntry } from '@/types/dex-paid';
 
 export interface TokensResponse {
   tokens: Token[];
@@ -97,6 +98,23 @@ export function useFirstBuyPreview(ruggerId: string, mints: string[], enabled: b
         { tokenAddresses: mints }
       ).then((d) => d.byMint ?? {}),
     enabled,
+  });
+}
+
+/**
+ * Statut « DEX payé » par mint (Dexscreener Enhanced Token Info).
+ * Indépendant du rugger : clé seulement par mints. TTL serveur (cache mémoire)
+ * gère la fraîcheur ; côté client on garde la donnée stable un moment.
+ */
+export function useDexPaidPreview(mints: string[], enabled: boolean) {
+  return useQuery({
+    queryKey: ['dex-paid', mints],
+    queryFn: () =>
+      apiPost<{ byMint?: Record<string, DexPaidEntry> }>('/api/dexscreener/paid', {
+        tokenAddresses: mints,
+      }).then((d) => d.byMint ?? {}),
+    enabled: enabled && mints.length > 0,
+    staleTime: 5 * 60_000,
   });
 }
 

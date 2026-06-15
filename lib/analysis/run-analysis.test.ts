@@ -87,6 +87,7 @@ function setupDefaultMocks() {
       validatedCount: 2,
       discardedCount: 0,
       multiTokenWalletCount: 1,
+      failedTokenCount: 0,
     },
   });
 
@@ -259,6 +260,7 @@ describe('runAnalysisPipeline', () => {
           validatedCount: 2,
           discardedCount: 0,
           multiTokenWalletCount: 1,
+          failedTokenCount: 0,
         },
       });
 
@@ -360,6 +362,7 @@ describe('runAnalysisPipeline', () => {
           validatedCount: 2,
           discardedCount: 0,
           multiTokenWalletCount: 1,
+          failedTokenCount: 0,
         },
       });
       mockScoreWallets.mockReturnValue([

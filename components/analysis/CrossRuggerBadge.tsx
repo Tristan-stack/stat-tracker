@@ -13,12 +13,12 @@ export default function CrossRuggerBadge({ ruggerNames, ruggerIds, className }: 
   if (ruggerNames.length === 0) return null;
 
   return (
-    <span className={cn('inline-flex flex-wrap items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300', className)}>
+    <span className={cn('inline-flex flex-wrap items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground', className)}>
       <span>Aussi dans :</span>
       {ruggerNames.map((name, i) => (
         <span key={ruggerIds[i]}>
           {i > 0 && <span>, </span>}
-          <Link href={`/rugger/${ruggerIds[i]}`} className="underline hover:text-amber-900 dark:hover:text-amber-200">
+          <Link href={`/rugger/${ruggerIds[i]}`} className="underline underline-offset-2 hover:text-foreground">
             {name}
           </Link>
         </span>

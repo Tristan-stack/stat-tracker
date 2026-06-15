@@ -22,7 +22,7 @@ interface FirstBuyStatsStripProps {
 
 export function FirstBuyStatsStrip({ stats, unit, isLoading }: FirstBuyStatsStripProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-teal-500/25 bg-teal-500/10 px-4 py-2 text-xs dark:bg-teal-950/30">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/40 px-4 py-2 text-xs">
       <span className="font-semibold text-foreground">1er achat</span>
       <span className="text-muted-foreground">(stats, hors masqués)</span>
       <span className="rounded bg-background/80 px-1.5 py-0.5 font-medium text-muted-foreground">

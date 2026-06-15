@@ -7,11 +7,19 @@ vi.mock('@/lib/helius/client', () => ({
   LAMPORTS_PER_SOL: 1_000_000_000,
 }));
 
+vi.mock('@/lib/helius/token-buyers-cache', () => ({
+  loadCachedTokenBuyers: vi.fn().mockResolvedValue(null),
+  storeCachedTokenBuyers: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { getSignaturesForAddress, parseTransactions } from '@/lib/helius/client';
+import { loadCachedTokenBuyers, storeCachedTokenBuyers } from '@/lib/helius/token-buyers-cache';
 import { getTokenBuyers } from './token-buyers';
 
 const mockGetSigs = vi.mocked(getSignaturesForAddress);
 const mockParseTxs = vi.mocked(parseTransactions);
+const mockLoadCache = vi.mocked(loadCachedTokenBuyers);
+const mockStoreCache = vi.mocked(storeCachedTokenBuyers);
 
 const TOKEN_MINT = 'TokenMint111111111111111111111111111111111';
 
@@ -110,6 +118,8 @@ function makeTransferTx(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockLoadCache.mockResolvedValue(null);
+  mockStoreCache.mockResolvedValue(undefined);
 });
 
 describe('getTokenBuyers', () => {
@@ -235,5 +245,46 @@ describe('getTokenBuyers', () => {
     const buyers = await getTokenBuyers(TOKEN_MINT, { buyerLimit: 10 });
     expect(buyers.length).toBeGreaterThanOrEqual(5);
     expect(mockGetSigs).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('getTokenBuyers — cache token→buyers', () => {
+  it('court-circuite Helius sur cache hit (aucun appel signatures)', async () => {
+    mockLoadCache.mockResolvedValueOnce([
+      {
+        walletAddress: 'CachedBuyer',
+        tokenAddress: TOKEN_MINT,
+        tokenName: null,
+        purchasedAt: '2025-01-01T00:00:00Z',
+        amountSol: 1,
+      },
+    ]);
+
+    const buyers = await getTokenBuyers(TOKEN_MINT, { buyerLimit: 50 });
+
+    expect(buyers).toHaveLength(1);
+    expect(buyers[0].walletAddress).toBe('CachedBuyer');
+    expect(mockGetSigs).not.toHaveBeenCalled();
+    expect(mockStoreCache).not.toHaveBeenCalled();
+  });
+
+  it('met en cache après un scan complet (mint + limit)', async () => {
+    mockGetSigs.mockResolvedValueOnce([makeSig('sig1')]);
+    mockParseTxs.mockResolvedValueOnce([makePumpfunSwapTx('BuyerA', TOKEN_MINT, 1700000000)]);
+
+    await getTokenBuyers(TOKEN_MINT, { buyerLimit: 50 });
+
+    expect(mockStoreCache).toHaveBeenCalledTimes(1);
+    expect(mockStoreCache.mock.calls[0][0]).toBe(TOKEN_MINT);
+    expect(mockStoreCache.mock.calls[0][1]).toBe(50);
+  });
+
+  it('ne consulte ni n’écrit le cache en pagination ad hoc (beforeSignature)', async () => {
+    mockGetSigs.mockResolvedValueOnce([]);
+
+    await getTokenBuyers(TOKEN_MINT, { beforeSignature: 'cursor', buyerLimit: 50 });
+
+    expect(mockLoadCache).not.toHaveBeenCalled();
+    expect(mockStoreCache).not.toHaveBeenCalled();
   });
 });

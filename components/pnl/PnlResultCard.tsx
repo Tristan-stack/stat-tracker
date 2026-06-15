@@ -40,7 +40,7 @@ export default function PnlResultCard({
       />
       <div className="flex items-center justify-between gap-2">
         {data.warnings.length > 0 ? (
-          <p className="text-xs text-amber-600 dark:text-amber-500">{data.warnings[0]}</p>
+          <p className="text-xs font-medium text-foreground">{data.warnings[0]}</p>
         ) : (
           <span className="text-xs text-muted-foreground">
             {data.pnl.source === 'gmgn_stats'

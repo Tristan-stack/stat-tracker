@@ -117,7 +117,7 @@ export function RuggerForm({ initial, idPrefix, submitLabel, pending, onSubmit, 
           <Label htmlFor={id('wallet')}>Adresse du wallet (optionnel)</Label>
           <Input id={id('wallet')} value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} placeholder="0x..." />
           {walletType === 'buyer' && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
+            <p className="text-xs text-muted-foreground">
               Adresse Solana du wallet acheteur pour afficher le montant du 1er achat par token.
             </p>
           )}

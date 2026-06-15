@@ -9,7 +9,10 @@ import { Eye, EyeOff, RefreshCcw, Trash2 } from 'lucide-react';
 import { isMigrationPeakMcap, MIGRATION_MCAP_THRESHOLD, type MigrationView } from '@/lib/migration';
 import { cn } from '@/lib/utils';
 import { formatMintShort, getTokenMintAddress, getTokenTableNameCell } from '@/lib/token-display';
+import { PnlValue } from '@/lib/format/pnl';
+import { DexscreenerLogo } from '@/components/icons/DexscreenerLogo';
 import type { FirstBuyPreviewEntry } from '@/types/first-buy-preview';
+import type { DexPaidEntry } from '@/types/dex-paid';
 
 function formatNum(value: number, decimals = 2): string {
   return value.toLocaleString('fr-FR', {
@@ -178,6 +181,30 @@ function formatFirstBuyCell(
   );
 }
 
+/** Cellule « DEX payé » : logo Dexscreener si payé, tiret sinon (ou « … » en chargement). */
+function formatDexPaidCell(entry: DexPaidEntry | undefined, isLoading: boolean, hasMint: boolean): ReactNode {
+  if (!hasMint) return <span className="text-muted-foreground">—</span>;
+  if (entry === undefined) {
+    return <span className="text-muted-foreground">{isLoading ? '…' : '—'}</span>;
+  }
+  if (entry.paid) {
+    const title = entry.approvedTypes?.length
+      ? `DEX payé (Dexscreener) — ${entry.approvedTypes.join(', ')}`
+      : 'DEX payé (Dexscreener)';
+    return (
+      <span className="inline-flex" title={title}>
+        <DexscreenerLogo />
+      </span>
+    );
+  }
+  const title = entry.error ? `Statut indisponible : ${entry.error}` : 'Pas de paiement Dexscreener';
+  return (
+    <span className="text-muted-foreground" title={title}>
+      —
+    </span>
+  );
+}
+
 export interface TokenTableProps {
   tokens: TokenWithMetrics[];
   onChangeTarget: (id: string, nextPercent: number) => void;
@@ -200,6 +227,10 @@ export interface TokenTableProps {
     byMint: Record<string, FirstBuyPreviewEntry>;
     isLoading: boolean;
   };
+  /** Statut « DEX payé » (Dexscreener) par mint. Si absent, la colonne DEX n’est pas affichée. */
+  dexPaidByMint?: Record<string, DexPaidEntry>;
+  /** Chargement du statut DEX payé (affiche « … » tant que la donnée n’est pas arrivée). */
+  dexPaidLoading?: boolean;
 }
 
 export function TokenTable({
@@ -215,7 +246,10 @@ export function TokenTable({
   onMigrationViewChange,
   migrationKnownCount,
   firstBuyColumn,
+  dexPaidByMint,
+  dexPaidLoading = false,
 }: TokenTableProps) {
+  const showDexPaid = dexPaidByMint !== undefined;
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exitMode, setExitMode] = useState<ExitMode>('percent');
   const [localMigrationView, setLocalMigrationView] = useState<MigrationView>('all');
@@ -348,6 +382,9 @@ export function TokenTable({
               )}
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Nom</th>
               <th className="px-3 py-3 text-left font-medium sm:px-5 sm:py-4">Adresse</th>
+              {showDexPaid && (
+                <th className="whitespace-nowrap px-2 py-3 text-center font-medium sm:px-3 sm:py-4" title="Dexscreener payé (Enhanced Token Info)">DEX</th>
+              )}
               <th className="whitespace-nowrap px-2 py-3 text-left font-medium sm:px-3 sm:py-4">Achat</th>
               {firstBuyColumn && (
                 <th className="whitespace-nowrap px-2 py-3 text-right font-medium sm:px-3 sm:py-4">1er achat</th>
@@ -374,7 +411,7 @@ export function TokenTable({
                   'border-b last:border-0 hover:bg-muted/30',
                   t.hidden && 'opacity-60 text-muted-foreground',
                   tokenRowHasMissingImportData(t) &&
-                    'border-l-4 border-l-red-500 bg-red-500/[0.06] dark:bg-red-500/10'
+                    'border-l-4 border-l-foreground bg-foreground/[0.04]'
                 )}
                 title={
                   tokenRowHasMissingImportData(t)
@@ -434,6 +471,15 @@ export function TokenTable({
                     {copiedId === t.id ? '✓ Copié' : formatMintShort(getTokenMintAddress(t))}
                   </button>
                 </td>
+                {showDexPaid && (
+                  <td className="px-2 py-3 text-center align-middle sm:px-3 sm:py-4">
+                    {formatDexPaidCell(
+                      dexPaidByMint?.[getTokenMintAddress(t).trim()],
+                      dexPaidLoading,
+                      getTokenMintAddress(t).trim() !== ''
+                    )}
+                  </td>
+                )}
                 <td className="whitespace-nowrap px-2 py-3 text-left text-muted-foreground tabular-nums sm:px-3 sm:py-4">
                   {formatPurchaseDate(t.purchasedAt)}
                 </td>
@@ -468,8 +514,8 @@ export function TokenTable({
                     className={cn(
                       'inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold leading-none',
                       isMigrationPeakMcap(t.high)
-                        ? 'bg-blue-600 text-white shadow-sm dark:bg-blue-500'
-                        : 'bg-muted text-muted-foreground'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground border border-border'
                     )}
                     title={
                       isMigrationPeakMcap(t.high)
@@ -496,20 +542,14 @@ export function TokenTable({
                     />
                   )}
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-green-600 dark:text-green-400 sm:px-5 sm:py-4">{formatPercent(t.targetExitPercent)}</td>
-                <td
-                  className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
-                    t.maxGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : ''
-                  }`}
-                >
-                  {formatPercent(t.maxGainPercent)}
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                  <PnlValue value={t.targetExitPercent}>{formatPercent(t.targetExitPercent)}</PnlValue>
                 </td>
-                <td
-                  className={`whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4 ${
-                    t.maxLossPercent <= 0 ? 'text-red-600 dark:text-red-400' : ''
-                  }`}
-                >
-                  {formatPercent(t.maxLossPercent)}
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                  <PnlValue value={t.maxGainPercent}>{formatPercent(t.maxGainPercent)}</PnlValue>
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums sm:px-5 sm:py-4">
+                  <PnlValue value={t.maxLossPercent}>{formatPercent(t.maxLossPercent)}</PnlValue>
                 </td>
                 <td className="px-3 py-3 text-center sm:px-5 sm:py-4">{t.targetReached ? 'Oui' : 'Non'}</td>
                 {(onDeleteToken || onRefreshToken) && (

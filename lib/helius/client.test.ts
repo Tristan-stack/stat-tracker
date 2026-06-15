@@ -294,4 +294,51 @@ describe('helius client', () => {
       expect(thirdBody.transactions).toHaveLength(50);
     });
   });
+
+  describe('contre-pression 429 + chemin GET unifié', () => {
+    afterEach(() => {
+      vi.doUnmock('@/lib/helius/throttle');
+    });
+
+    it('appelle penalizeHelius sur un 429 puis réussit au retry', async () => {
+      vi.stubEnv('HELIUS_MAX_RETRIES', '1');
+      const penalizeHelius = vi.fn();
+      vi.doMock('@/lib/helius/throttle', () => ({
+        throttleHelius: vi.fn().mockResolvedValue(undefined),
+        penalizeHelius,
+      }));
+      const { heliusRest } = await import('./client');
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('Rate limited', { status: 429 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ type: 'SWAP', signature: 'ok' }]), { status: 200 })
+        );
+
+      await heliusRest('/v0/transactions', { transactions: ['tx1'] });
+
+      // Le 429 doit pousser le créneau partagé (contre-pression globale), pas seulement
+      // faire dormir cette requête.
+      expect(penalizeHelius).toHaveBeenCalledTimes(1);
+      expect(penalizeHelius.mock.calls[0][0] as number).toBeGreaterThan(0);
+    });
+
+    it('getEnhancedTransactionsByAddress retente un 429 (plus de fetch brut sans retry)', async () => {
+      vi.stubEnv('HELIUS_MAX_RETRIES', '1');
+      vi.doMock('@/lib/helius/throttle', () => ({
+        throttleHelius: vi.fn().mockResolvedValue(undefined),
+        penalizeHelius: vi.fn(),
+      }));
+      const { getEnhancedTransactionsByAddress } = await import('./client');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('Rate limited', { status: 429 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify([{ type: 'SWAP', signature: 'ok' }]), { status: 200 })
+        );
+
+      const txs = await getEnhancedTransactionsByAddress('SomeAddr');
+
+      expect(Array.isArray(txs)).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+  });
 });

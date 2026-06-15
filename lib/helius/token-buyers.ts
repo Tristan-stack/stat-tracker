@@ -6,6 +6,7 @@ import {
   type HeliusEnhancedTransaction,
   type SignatureInfo,
 } from '@/lib/helius/client';
+import { loadCachedTokenBuyers, storeCachedTokenBuyers } from '@/lib/helius/token-buyers-cache';
 
 const DEFAULT_BUYER_LIMIT = 200;
 const MAX_PAGES = Number(process.env.HELIUS_TOKEN_BUYER_MAX_PAGES ?? '12');
@@ -32,6 +33,15 @@ export async function getTokenBuyers(
 ): Promise<TokenBuyer[]> {
   const limit = opts?.buyerLimit ?? DEFAULT_BUYER_LIMIT;
   const maxPages = Math.max(1, opts?.maxPages ?? MAX_PAGES);
+
+  // Cache utilisé uniquement pour un scan complet (la pagination ad hoc via
+  // `beforeSignature` dépend du curseur et n'est donc pas cacheable par (mint, limit)).
+  const cacheable = opts?.beforeSignature === undefined;
+  if (cacheable) {
+    const cached = await loadCachedTokenBuyers(tokenMint, limit);
+    if (cached) return cached;
+  }
+
   const seenWallets = new Map<string, TokenBuyer>();
   let beforeSig = opts?.beforeSignature;
   let page = 0;
@@ -61,7 +71,11 @@ export async function getTokenBuyers(
     if (sigs.length < 1000) break;
   }
 
-  return Array.from(seenWallets.values()).slice(0, limit);
+  const buyers = Array.from(seenWallets.values()).slice(0, limit);
+  // Scan complet réussi : on met en cache pour que les relances (résultat partiel sur
+  // budget/free tier) sautent ce token sans retaper Helius.
+  if (cacheable) await storeCachedTokenBuyers(tokenMint, limit, buyers);
+  return buyers;
 }
 
 function extractBuyers(

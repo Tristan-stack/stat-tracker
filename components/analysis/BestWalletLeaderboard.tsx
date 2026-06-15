@@ -308,10 +308,10 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId, onWalletCl
           <p className="text-xs text-muted-foreground">
             Baseline dataset: {data.meta.benchmark.walletCount} wallets / {data.meta.benchmark.tokenCount} tokens · retries {data.meta.retries}.
           </p>
-          {partialFailuresText && <p className="text-xs text-amber-500">{partialFailuresText}</p>}
+          {partialFailuresText && <p className="text-xs font-medium text-foreground">{partialFailuresText}</p>}
           {partialFailureDetails.length > 0 && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
-              <p className="text-xs font-medium text-amber-600">Exemples d’erreurs GMGN</p>
+            <div className="rounded-md border border-border bg-muted/30 p-2">
+              <p className="text-xs font-medium text-foreground">Exemples d’erreurs GMGN</p>
               <div className="mt-1 space-y-1 text-xs text-muted-foreground">
                 {partialFailureDetails.map((line, index) => (
                   <p key={`${line}-${index}`}>- {line}</p>
@@ -364,7 +364,7 @@ export default function BestWalletLeaderboard({ ruggerId, analysisId, onWalletCl
                             title="Copier l'adresse"
                           >
                             {copiedWallet === wallet.walletAddress ? (
-                              <Check className="size-3 text-green-500" />
+                              <Check className="size-3 text-foreground" />
                             ) : (
                               <Copy className="size-3 text-muted-foreground" />
                             )}

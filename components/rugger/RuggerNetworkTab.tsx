@@ -34,11 +34,13 @@ const MODE_LABELS: Record<AnalysisMode, string> = {
   combined: 'Combiné',
 };
 
+// Achromatique : statut lu au label + intensité du fill (completed = ink plein,
+// failed = destructive carbon), jamais à la teinte.
 const STATUS_STYLES: Record<string, string> = {
-  completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  running: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  pending: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  completed: 'bg-foreground text-background',
+  running: 'bg-muted text-foreground',
+  pending: 'border border-border text-muted-foreground',
+  failed: 'bg-destructive text-background',
 };
 
 export default function RuggerNetworkTab({ ruggerId, tokenCount }: RuggerNetworkTabProps) {

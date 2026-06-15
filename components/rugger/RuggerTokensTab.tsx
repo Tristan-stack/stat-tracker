@@ -14,6 +14,7 @@ import { localGmgnAllTimeRange, type TokenPurchaseFilter } from '@/lib/token-dat
 import { cn } from '@/lib/utils';
 import { parseGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import { getTokenMintAddress } from '@/lib/token-display';
+import { canOpenSolanaAddressOrMint } from '@/lib/open-trusted-solana-external';
 import { apiPost } from '@/lib/api-client';
 import { TokenFilterBar } from '@/features/ruggers/components/TokenFilterBar';
 import { GlobalTargetControl } from '@/features/ruggers/components/GlobalTargetControl';
@@ -23,6 +24,7 @@ import {
   useRuggerTokensAll,
   useRuggerTokensUnfiltered,
   useFirstBuyPreview,
+  useDexPaidPreview,
   useInsertTokens,
   useUpdateToken,
   useDeleteToken,
@@ -360,6 +362,22 @@ export default function RuggerTokensTab({ ruggerId: id, rugger, onRuggerChange }
       ? { unit: firstBuyUnit, onUnitChange: handleFirstBuyUnitChange, byMint: firstBuyByMint, isLoading: firstBuyLoading }
       : undefined;
 
+  // Statut « DEX payé » (Dexscreener) pour les mints de la page courante.
+  const dexPaidMints = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of activeTokens) {
+      const m = getTokenMintAddress(t).trim();
+      if (m === '' || seen.has(m) || !canOpenSolanaAddressOrMint(m)) continue;
+      seen.add(m);
+      out.push(m);
+    }
+    return out;
+  }, [activeTokens]);
+  const dexPaidQuery = useDexPaidPreview(dexPaidMints, dexPaidMints.length > 0);
+  const dexPaidByMint = useMemo(() => dexPaidQuery.data ?? {}, [dexPaidQuery.data]);
+  const dexPaidLoading = dexPaidQuery.isFetching;
+
   return (
     <div className="space-y-8">
       <StatsSummary tokens={tokensForStats} activityInferenceTokens={tokensForActivityInference} />
@@ -406,10 +424,10 @@ export default function RuggerTokensTab({ ruggerId: id, rugger, onRuggerChange }
 
         {gmgnRefreshError && <p className="text-sm text-destructive" role="alert">{gmgnRefreshError}</p>}
         {gmgnRefreshInfo && !gmgnRefreshError && (
-          <p className="text-sm text-amber-800 dark:text-amber-200" role="status">{gmgnRefreshInfo}</p>
+          <p className="text-sm font-medium text-foreground" role="status">{gmgnRefreshInfo}</p>
         )}
         {rugger.walletType === 'buyer' && !rugger.walletAddress?.trim() && activeTokens.length > 0 && (
-          <p className="text-xs text-amber-700 dark:text-amber-400" role="status">
+          <p className="text-xs text-muted-foreground" role="status">
             Renseigne l&apos;adresse Solana du wallet acheteur sur le rugger pour afficher le montant du 1er achat GMGN par token.
           </p>
         )}
@@ -450,6 +468,8 @@ export default function RuggerTokensTab({ ruggerId: id, rugger, onRuggerChange }
                 onMigrationViewChange={handleMigrationViewChange}
                 migrationKnownCount={migrationKnownTotal}
                 firstBuyColumn={firstBuyColumn}
+                dexPaidByMint={dexPaidByMint}
+                dexPaidLoading={dexPaidLoading}
               />
               <div className="flex flex-wrap items-center justify-start gap-3">
                 <span className="text-xs font-medium text-muted-foreground">Par page</span>

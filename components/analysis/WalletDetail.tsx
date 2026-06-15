@@ -12,6 +12,7 @@ import { getMaxGainPercent, getMaxLossPercent } from '@/lib/token-calculations';
 import { formatGmgnDecimalString } from '@/lib/gmgn/price-rounding';
 import type { Token } from '@/types/token';
 import { StatsSummary } from '@/components/StatsSummary';
+import { PnlValue } from '@/lib/format/pnl';
 import {
   canOpenSolanaAddressOrMint,
   openGmgnSolAddressInNewTab,
@@ -170,10 +171,11 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
   if (isLoading) return <p className="text-sm text-muted-foreground">Chargement…</p>;
   if (!wallet) return <p className="text-sm text-muted-foreground">Wallet introuvable.</p>;
 
+  // Achromatique : signal lu au label + intensité du fill (both = signal le plus fort).
   const sourceBadgeStyle: Record<WalletSource, string> = {
-    token: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-    funding: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-    both: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    token: 'border border-border text-muted-foreground',
+    funding: 'bg-muted text-foreground',
+    both: 'bg-foreground text-background',
   };
 
   const avgGain = tokenAnalysis && tokenAnalysis.length > 0
@@ -201,7 +203,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
           >
             <span className="font-mono text-sm">{wallet.walletAddress}</span>
             {copied
-              ? <Check className="size-3.5 text-green-500" />
+              ? <Check className="size-3.5 text-foreground" />
               : <Copy className="size-3.5 text-muted-foreground" />}
           </button>
           <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', sourceBadgeStyle[wallet.source])}>{wallet.source}</span>
@@ -422,7 +424,7 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                             </div>
                             <span className="shrink-0 self-center">
                               {copiedTokenMint === t.tokenAddress
-                                ? <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                                ? <Check className="size-3.5 text-foreground" />
                                 : <Copy className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />}
                             </span>
                           </button>
@@ -439,11 +441,11 @@ export default function WalletDetail({ ruggerId, analysisId, walletAddress, onBa
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
                           {formatGmgnDecimalString(t.low)}
                         </td>
-                        <td className={cn('px-3 py-2 text-right tabular-nums', gain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                          {formatGainLoss(gain)}
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <PnlValue value={gain}>{formatGainLoss(gain)}</PnlValue>
                         </td>
-                        <td className={cn('px-3 py-2 text-right tabular-nums', loss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                          {formatGainLoss(loss)}
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <PnlValue value={loss}>{formatGainLoss(loss)}</PnlValue>
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1">

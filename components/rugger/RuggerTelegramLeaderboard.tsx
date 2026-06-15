@@ -124,7 +124,7 @@ export default function RuggerTelegramLeaderboard({
                     onClick={() => onToggleFavorite?.(row)}
                     className={cn(
                       'inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                      favoriteMintSet.has(row.token_mint) && 'text-amber-500 hover:text-amber-600'
+                      favoriteMintSet.has(row.token_mint) && 'text-foreground hover:text-foreground'
                     )}
                     aria-label={favoriteMintSet.has(row.token_mint) ? 'Retirer des favoris' : 'Ajouter aux favoris'}
                     aria-pressed={favoriteMintSet.has(row.token_mint)}
@@ -132,7 +132,7 @@ export default function RuggerTelegramLeaderboard({
                     <Star
                       className={cn(
                         'size-4 shrink-0',
-                        favoriteMintSet.has(row.token_mint) ? 'fill-amber-500 text-amber-500' : 'fill-transparent'
+                        favoriteMintSet.has(row.token_mint) ? 'fill-foreground text-foreground' : 'fill-transparent'
                       )}
                     />
                   </button>
