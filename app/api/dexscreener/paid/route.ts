@@ -6,6 +6,14 @@ import { parseBody } from '@/lib/api/validate';
 import { resolveDexPaidByMint } from '@/lib/dexscreener/paid';
 import type { DexPaidEntry } from '@/types/dex-paid';
 
+/**
+ * Endpoint orders Dexscreener = 1 requête/mint, throttlé à ~1,1 s/mint et
+ * séquentiel : une page complète (jusqu'à MAX_MINTS) peut dépasser le timeout
+ * serverless par défaut. On relève maxDuration pour éviter que la fonction soit
+ * coupée mi-parcours (mints non résolus → cellule « — » faussement « non payé »).
+ */
+export const maxDuration = 60;
+
 /** Endpoint orders Dexscreener = 1 requête/mint (throttlé) : on borne la liste. */
 const MAX_MINTS = 60;
 
