@@ -11,6 +11,7 @@ import {
   storeCachedTrace,
 } from '@/lib/address-tracer/trace-cache';
 import { getCreatedAssetsCount } from '@/lib/helius/client';
+import { enterTracerThrottle } from '@/lib/helius/throttle';
 import type { AddressTraceHop, AddressTraceStoppedBy, TracerType } from '@/types/address-trace';
 
 export const maxDuration = 60;
@@ -113,6 +114,9 @@ export async function POST(req: NextRequest) {
 
   const streamBody = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // Le tracer enchaîne des appels Helius séquentiels : on bascule tout ce trace sur son
+      // propre throttle (HELIUS_TRACER_RPS) pour ne pas être bridé par le débit de l'analyse.
+      enterTracerThrottle();
       const push = (obj: unknown) => {
         controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
       };
