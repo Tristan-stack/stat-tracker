@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef } from 'react';
+import PnlCardAxiom from '@/components/pnl/PnlCardAxiom';
 import PnlCardHorizontal from '@/components/pnl/PnlCardHorizontal';
 import PnlCardVertical from '@/components/pnl/PnlCardVertical';
 import type { DominantColor } from '@/lib/pnl/extract-dominant-color';
@@ -16,6 +17,9 @@ export interface PnlCardViewProps {
 }
 
 const PnlCard = forwardRef<HTMLDivElement, PnlCardViewProps>(function PnlCard(props, ref) {
+  if (props.settings.cardStyle === 'axiom') {
+    return <PnlCardAxiom ref={ref} {...props} />;
+  }
   if (props.settings.orientation === 'vertical') {
     return <PnlCardVertical ref={ref} {...props} />;
   }

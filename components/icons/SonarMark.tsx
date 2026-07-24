@@ -1,0 +1,13 @@
+import type { SVGProps } from 'react';
+
+/** Marque Sonar : squircle ajouré. La couleur est pilotée par `color` (défaut : currentColor). */
+export default function SonarMark({ color = 'currentColor', ...props }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" {...props}>
+      <path
+        d="M 256 156 C 256 211.228 211.228 256 156 256 L 0 256 L 0 100 C 0 44.772 44.772 0 100 0 L 256 0 Z M 106 16 C 56.294 16 16 56.294 16 106 L 16 150 C 16 199.706 56.294 240 106 240 L 150 240 C 199.706 240 240 199.706 240 150 L 240 106 C 240 56.294 199.706 16 150 16 Z"
+        fill={color}
+      />
+    </svg>
+  );
+}

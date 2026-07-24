@@ -10,6 +10,7 @@ import {
   PNL_ELEMENT_KEYS,
   PNL_ELEMENT_LABELS,
   PNL_FONT_OPTIONS,
+  PNL_FONT_WEIGHT_OPTIONS,
 } from '@/lib/pnl/card-settings-storage';
 import type { PnlCardSettings } from '@/types/pnl';
 import {
@@ -93,31 +94,61 @@ export default function PnlCardCustomizer({
     }
   };
 
+  const isAxiom = settings.cardStyle === 'axiom';
   const isVertical = settings.orientation === 'vertical';
 
   return (
     <div className="space-y-5">
       <div className="space-y-1.5">
-        <Label>Orientation</Label>
+        <Label>Style</Label>
         <div className="flex gap-2">
           <Button
             type="button"
             size="sm"
-            variant={!isVertical ? 'default' : 'outline'}
-            onClick={() => update({ orientation: 'horizontal' })}
+            variant={!isAxiom ? 'default' : 'outline'}
+            onClick={() => update({ cardStyle: 'classic' })}
           >
-            Horizontale
+            Classique
           </Button>
           <Button
             type="button"
             size="sm"
-            variant={isVertical ? 'default' : 'outline'}
-            onClick={() => update({ orientation: 'vertical' })}
+            variant={isAxiom ? 'default' : 'outline'}
+            onClick={() => update({ cardStyle: 'axiom' })}
           >
-            Verticale
+            Axiom
           </Button>
         </div>
+        {isAxiom && (
+          <p className="text-[11px] text-muted-foreground">
+            Gabarit fixe façon Axiom : nom, PNL, Invested, Position. Utilise une image de fond.
+          </p>
+        )}
       </div>
+
+      {!isAxiom && (
+        <div className="space-y-1.5">
+          <Label>Orientation</Label>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={!isVertical ? 'default' : 'outline'}
+              onClick={() => update({ orientation: 'horizontal' })}
+            >
+              Horizontale
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={isVertical ? 'default' : 'outline'}
+              onClick={() => update({ orientation: 'vertical' })}
+            >
+              Verticale
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
@@ -127,10 +158,10 @@ export default function PnlCardCustomizer({
             type="color"
             value={settings.textColor}
             onChange={(e) => update({ textColor: e.target.value })}
-            disabled={isVertical}
+            disabled={isVertical && !isAxiom}
             className="h-9 w-full cursor-pointer p-1 disabled:opacity-50"
           />
-          {isVertical && (
+          {isVertical && !isAxiom && (
             <p className="text-[11px] text-muted-foreground">
               Auto (noir/blanc) selon le fond en mode vertical.
             </p>
@@ -151,7 +182,75 @@ export default function PnlCardCustomizer({
             ))}
           </select>
         </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="pnl-font-weight">Épaisseur du texte</Label>
+          <select
+            id="pnl-font-weight"
+            value={settings.fontWeight}
+            onChange={(e) => update({ fontWeight: Number(e.target.value) })}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm"
+          >
+            {PNL_FONT_WEIGHT_OPTIONS.map((w) => (
+              <option key={w.value} value={w.value}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {isAxiom && (
+          <div className="space-y-1.5">
+            <Label htmlFor="pnl-accent-color">Couleur du bloc PNL</Label>
+            <Input
+              id="pnl-accent-color"
+              type="color"
+              value={settings.accentColor}
+              onChange={(e) => update({ accentColor: e.target.value })}
+              className="h-9 w-full cursor-pointer p-1"
+            />
+          </div>
+        )}
       </div>
+
+      {isAxiom && (
+        <div className="space-y-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={settings.showLogo}
+              onChange={(e) => update({ showLogo: e.target.checked })}
+            />
+            Afficher le logo
+          </label>
+          <div className="grid grid-cols-2 gap-4">
+            {settings.showLogo && (
+              <div className="space-y-1.5">
+                <Label htmlFor="pnl-logo-color">Couleur du logo</Label>
+                <Input
+                  id="pnl-logo-color"
+                  type="color"
+                  value={settings.logoColor}
+                  onChange={(e) => update({ logoColor: e.target.value })}
+                  className="h-9 w-full cursor-pointer p-1"
+                />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="pnl-brand-color">Couleur de la marque</Label>
+              <Input
+                id="pnl-brand-color"
+                type="color"
+                value={settings.brandColor}
+                onChange={(e) => update({ brandColor: e.target.value })}
+                className="h-9 w-full cursor-pointer p-1"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Marque = nom de l’app, date et footer. Passe en foncé pour un fond clair.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label>Éléments affichés</Label>

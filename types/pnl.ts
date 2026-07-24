@@ -91,9 +91,23 @@ export type PnlElementKey =
 
 export type PnlCardOrientation = 'horizontal' | 'vertical';
 
+/** Gabarit visuel de la card : « classic » (StatTracker) ou « axiom » (clone referral card). */
+export type PnlCardStyle = 'classic' | 'axiom';
+
 export interface PnlCardSettings {
   orientation: PnlCardOrientation;
+  cardStyle: PnlCardStyle;
   textColor: string;
+  /** Couleur de fond du bloc PNL (style Axiom). */
+  accentColor: string;
+  /** Épaisseur (font-weight CSS) du texte de la card. */
+  fontWeight: number;
+  /** Affiche le logo Sonar sur la card (style Axiom). */
+  showLogo: boolean;
+  /** Couleur du logo (indépendante). */
+  logoColor: string;
+  /** Couleur de la marque : nom de l'app, date, footer (indépendante du texte des données). */
+  brandColor: string;
   fontFamily: string;
   visibleElements: Record<PnlElementKey, boolean>;
   selectedBackgroundId: string | null;

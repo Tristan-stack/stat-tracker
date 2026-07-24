@@ -38,9 +38,24 @@ export const PNL_FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'Impact', value: 'Impact, sans-serif' },
 ];
 
+export const PNL_FONT_WEIGHT_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Léger', value: 400 },
+  { label: 'Normal', value: 500 },
+  { label: 'Semi-gras', value: 600 },
+  { label: 'Gras', value: 700 },
+  { label: 'Extra-gras', value: 800 },
+  { label: 'Black', value: 900 },
+];
+
 export const DEFAULT_PNL_CARD_SETTINGS: PnlCardSettings = {
   orientation: 'horizontal',
+  cardStyle: 'classic',
   textColor: '#ffffff',
+  accentColor: '#000000',
+  fontWeight: 700,
+  showLogo: true,
+  logoColor: '#ffffff',
+  brandColor: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
   selectedBackgroundId: null,
   visibleElements: {
@@ -79,7 +94,28 @@ export function getPnlCardSettings(): PnlCardSettings {
     // Fusionne pour combler les clés d'éléments ajoutées après coup.
     return {
       orientation: parsed.orientation === 'vertical' ? 'vertical' : 'horizontal',
+      cardStyle: parsed.cardStyle === 'axiom' ? 'axiom' : 'classic',
       textColor: parsed.textColor,
+      accentColor:
+        typeof parsed.accentColor === 'string'
+          ? parsed.accentColor
+          : DEFAULT_PNL_CARD_SETTINGS.accentColor,
+      fontWeight:
+        typeof parsed.fontWeight === 'number'
+          ? parsed.fontWeight
+          : DEFAULT_PNL_CARD_SETTINGS.fontWeight,
+      showLogo:
+        typeof parsed.showLogo === 'boolean'
+          ? parsed.showLogo
+          : DEFAULT_PNL_CARD_SETTINGS.showLogo,
+      logoColor:
+        typeof parsed.logoColor === 'string'
+          ? parsed.logoColor
+          : DEFAULT_PNL_CARD_SETTINGS.logoColor,
+      brandColor:
+        typeof parsed.brandColor === 'string'
+          ? parsed.brandColor
+          : DEFAULT_PNL_CARD_SETTINGS.brandColor,
       fontFamily: parsed.fontFamily,
       selectedBackgroundId:
         typeof parsed.selectedBackgroundId === 'string' ? parsed.selectedBackgroundId : null,
